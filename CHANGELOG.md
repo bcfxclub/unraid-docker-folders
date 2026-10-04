@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026.10.04
+- feat(settings): make users copy the restore steps before the GraphQL install
+
 ## 2026.09.29
 - feat(schedules): write one Postgres backup per database
 
