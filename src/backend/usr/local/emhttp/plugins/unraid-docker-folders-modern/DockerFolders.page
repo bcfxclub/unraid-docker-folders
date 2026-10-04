@@ -205,6 +205,12 @@ if (file_exists($changelogPath)) {
   gap: 8px;
 }
 
+/* The backend section carries a warning, so it drops the green accent bar
+   that marks the other sections. */
+.settings-section.backend-section {
+  border-left: none;
+}
+
 .unstable-tag {
   font-size: 11px;
   font-weight: 600;
@@ -932,7 +938,7 @@ if (file_exists($changelogPath)) {
   <!-- Which backend the Vue app talks to. PHP is the default and always works;
        GraphQL needs the companion Unraid API plugin, and is marked unstable
        while it is tested. -->
-  <div class="settings-section">
+  <div class="settings-section backend-section">
     <h3>Backend <span class="unstable-tag">Unstable</span></h3>
 
     <div class="setting-row">
@@ -941,7 +947,7 @@ if (file_exists($changelogPath)) {
         <div class="description">
           Which backend the Folders page and the dashboard tile use. <strong>PHP</strong> is this plugin's own API and is always available.
           <strong>GraphQL</strong> is highly experimental. Choosing it installs a backend into the Unraid API and restarts the API. It sends live updates for container changes, stats and logs, and it also runs schedules and update checks.
-          If the GraphQL backend stops answering for about 8 minutes while the Unraid API runs, the plugin switches back to PHP, and you get a notification. Choosing PHP removes the backend from the Unraid API again.
+          If the GraphQL backend stops answering for about 8 minutes while the Unraid API runs, the plugin switches back to PHP, and you get a notification. Do not rely on that automatic restore. Choosing PHP removes the backend from the Unraid API again.
           The Folders page reads this setting when it loads, so reload it after a change.
           <strong>Default: PHP</strong>
           <?php if (!$graphqlSelectable && $graphqlUnavailableReason !== ''): ?>
@@ -1055,18 +1061,97 @@ function saveSetting(key, value) {
 // restarts the API, so settings.php starts it in the background and this polls
 // its state file. GraphQL is stored only once the backend answers.
 
+var BACKEND_ROLLBACK_COMMAND = 'bash /usr/local/emhttp/plugins/unraid-docker-folders-modern/scripts/api-plugin.sh rollback';
+
+// Plain text the user copies before the install button unlocks. Keep it in
+// step with the list in BACKEND_WARNING.
+var BACKEND_RESTORE_TEXT =
+  'Docker Folders: how to go back from the GraphQL backend to PHP, in this order.\n' +
+  '1. On Settings > Docker Folders, set the data source to PHP.\n' +
+  '2. If the webgui does not respond, run this over SSH or on the local console:\n' +
+  '   ' + BACKEND_ROLLBACK_COMMAND + '\n' +
+  '3. If that fails, remove the Docker Folders plugin on the Plugins page, or run:\n' +
+  '   plugin remove unraid-docker-folders-modern.plg\n' +
+  '   The removal also takes the backend out of the Unraid API, and your folders are kept in a database backup.\n';
+
 var BACKEND_WARNING =
   '<div style="text-align:left">' +
   '<p>The GraphQL backend is <b>highly experimental</b>.</p>' +
   '<p>It installs code into the Unraid API. A fault in that code can take the whole Unraid GraphQL service offline, and the dashboard and other parts of the webgui use that service. The Unraid API restarts now, and is offline for about 15 seconds.</p>' +
   '<p>If the backend stops answering for about 8 minutes while the Unraid API runs, the plugin switches back to PHP by itself and sends a notification.</p>' +
+  '<div style="border:1px solid #e68a00;background:color-mix(in srgb, #e68a00 12%, transparent);border-radius:4px;padding:8px 10px;margin:10px 0">' +
+  '<b>Do not rely on the automatic restore.</b> It can fail, or it can come too late. Copy the steps below and keep them outside the webgui before you install.</div>' +
   '<p>To go back by hand, in this order:</p>' +
   '<ol style="margin-left:20px">' +
   '<li>On this page, set the data source to PHP.</li>' +
   '<li>If the webgui does not respond, run this over SSH or on the local console:<br>' +
-  '<code>bash /usr/local/emhttp/plugins/unraid-docker-folders-modern/scripts/api-plugin.sh rollback</code></li>' +
+  '<code>' + BACKEND_ROLLBACK_COMMAND + '</code></li>' +
   '<li>If that fails, remove the Docker Folders plugin on the Plugins page, or run <code>plugin remove unraid-docker-folders-modern.plg</code>. The removal also takes the backend out of the Unraid API, and your folders are kept in a database backup.</li>' +
-  '</ol></div>';
+  '</ol>' +
+  '<p style="margin-top:10px"><button type="button" id="backend-copy-restore">Copy the restore steps</button> ' +
+  '<span id="backend-copy-status">Copy the steps to unlock the install button.</span></p>' +
+  '<textarea id="backend-restore-text" readonly rows="6" style="display:none;width:100%;font-family:monospace;font-size:12px"></textarea>' +
+  '</div>';
+
+// SweetAlert reuses one dialog element, so undo what the warning added to it.
+function resetBackendWarningDialog() {
+  var confirmButton = document.querySelector('.sweet-alert button.confirm');
+  if (confirmButton) confirmButton.disabled = false;
+  var note = document.getElementById('backend-no-support');
+  if (note) note.parentNode.removeChild(note);
+}
+
+// Disables the install button until the restore steps are copied, and puts
+// the no-support note under it. Returns a function that reports whether the
+// copy happened.
+function armBackendWarningDialog() {
+  var copied = false;
+  var confirmButton = document.querySelector('.sweet-alert button.confirm');
+  var buttons = document.querySelector('.sweet-alert .sa-button-container');
+  var copyButton = document.getElementById('backend-copy-restore');
+  var status = document.getElementById('backend-copy-status');
+  var area = document.getElementById('backend-restore-text');
+
+  if (confirmButton) confirmButton.disabled = true;
+  if (buttons && !document.getElementById('backend-no-support')) {
+    var note = document.createElement('p');
+    note.id = 'backend-no-support';
+    note.style.cssText = 'font-size:12px;margin:10px 0 0;opacity:0.8';
+    note.textContent = 'If you install regardless of this warning, the GraphQL backend comes with no support.';
+    buttons.parentNode.insertBefore(note, buttons.nextSibling);
+  }
+  area.value = BACKEND_RESTORE_TEXT;
+
+  function markCopied() {
+    copied = true;
+    if (confirmButton) confirmButton.disabled = false;
+    status.textContent = 'Copied. Keep the steps somewhere outside the webgui.';
+  }
+
+  // A manual copy from the fallback text box counts too.
+  area.addEventListener('copy', markCopied);
+
+  // The clipboard API needs HTTPS, and Unraid often serves plain HTTP. Fall
+  // back to execCommand, and then to a text box the user copies by hand.
+  function copyWithSelection() {
+    area.style.display = 'block';
+    area.focus();
+    area.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    if (!ok) status.textContent = 'Copy failed. Select the text below and copy it by hand.';
+  }
+
+  copyButton.addEventListener('click', function() {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(BACKEND_RESTORE_TEXT).then(markCopied, copyWithSelection);
+    } else {
+      copyWithSelection();
+    }
+  });
+
+  return function() { return copied; };
+}
 
 function changeBackendMode(select) {
   var previous = select.getAttribute('data-current') || 'php';
@@ -1081,6 +1166,7 @@ function changeBackendMode(select) {
   // Show the stored mode until the user confirms, so a dialog that closes
   // without a callback leaves the select telling the truth.
   select.value = previous;
+  var hasCopiedRestore = function() { return false; };
   swal({
     title: 'Switch to the GraphQL backend?',
     text: BACKEND_WARNING,
@@ -1090,13 +1176,17 @@ function changeBackendMode(select) {
     confirmButtonText: 'Install and switch',
     cancelButtonText: 'Cancel'
   }, function(confirmed) {
-    if (!confirmed) {
+    var restoreCopied = hasCopiedRestore();
+    resetBackendWarningDialog();
+    if (!confirmed || !restoreCopied) {
       select.value = previous;
       return;
     }
     select.value = mode;
     startBackendSwitch(select, mode, 'Installing the GraphQL backend. The Unraid API restarts for about 15 seconds.');
   });
+  // swal() builds the dialog synchronously, so its buttons exist now.
+  hasCopiedRestore = armBackendWarningDialog();
 }
 
 function startBackendSwitch(select, mode, message) {
