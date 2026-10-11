@@ -1174,6 +1174,13 @@ function armBackendWarningDialog() {
     if (!ok) status.textContent = 'Copy failed. Select the text below and copy it by hand.';
   }
 
+  // swal() sets its own handlers on every <button> in the dialog, and a click
+  // on any button but Confirm counts as Cancel and closes the dialog. Take
+  // them off the copy button. See handleButton in dynamix.js.
+  ['onclick', 'onmouseover', 'onmouseout', 'onmousedown', 'onmouseup', 'onfocus'].forEach(function(handler) {
+    copyButton[handler] = null;
+  });
+
   copyButton.addEventListener('click', function() {
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(BACKEND_RESTORE_TEXT).then(markCopied, copyWithSelection);
