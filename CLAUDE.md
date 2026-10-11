@@ -97,6 +97,17 @@ refactor. Suppress a genuine false positive inline with
 6. Pushes to GitHub
 7. Outputs package to `archive/` directory
 
+**Release notes**: `build/release-notes.sh` writes them once per release, and
+`CHANGELOG.md`, the PLG `<CHANGES>`, the tag and the GitHub release all show
+the same notes. With the `ANTHROPIC_API_KEY` repository secret, Claude sorts
+the commits into New, Improved and Fixed, and puts work a user never sees on
+one "Internal fixes and performance improvements" line. Without the key, or
+when the call fails, `feat` commits go to New, `fix` commits to Fixed, and the
+rest to that internal line. A commit message that names a GitHub issue
+(`#123`) marks a fix as user reported, so it is always listed. To preview the
+notes, run `build/release-notes.sh generate "$(build/release-notes.sh range)" > /tmp/n.json`,
+then `build/release-notes.sh render changelog /tmp/n.json`.
+
 **Output**: `archive/unraid-docker-folders-modern-<version>.txz`
 
 **Important**: After release build, manually create GitHub release and upload the `.txz` file (gh CLI not authenticated).

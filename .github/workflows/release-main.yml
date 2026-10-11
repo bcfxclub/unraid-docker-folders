@@ -78,7 +78,17 @@ jobs:
             touch "archive/unraid-docker-folders-modern-${tag#v}.txz"
           done
 
+      # The only step that holds ANTHROPIC_API_KEY. It runs no dependency code:
+      # release-notes.sh uses git, jq and curl. build.sh runs yarn and npm
+      # installs, whose lifecycle scripts would see any secret in its env.
+      # Without the key, release-notes.sh sorts commits by prefix.
+      - name: Write release notes
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: build/release-notes.sh generate "$(build/release-notes.sh range)" > "$RUNNER_TEMP/release-notes.json"
+
       - name: Build and release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES_JSON: ${{ runner.temp }}/release-notes.json
         run: ./build/build.sh --release
