@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.10.11-dev1
+### Improved
+- The settings page no longer shows a green accent bar on each settings box.
+- The GraphQL backend only runs on tested Unraid API versions, and the settings page refuses to switch to it on an untested version.
+- A server using the GraphQL backend switches back to the PHP backend on its own when an Unraid API update moves it outside the tested versions.
+- Release notes in the changelog and on the settings page are now written for users and sorted into New, Improved and Fixed.
+
+### Fixed
+- The GraphQL backend now installs on Unraid 7.3.3 and 7.4.0-rc1, and a failed install is reported instead of passing silently.
+
 ## 2026.10.04
 - feat(settings): make users copy the restore steps before the GraphQL install
 
