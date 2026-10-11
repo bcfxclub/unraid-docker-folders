@@ -2,8 +2,8 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "unraid-docker-folders-modern">
 <!ENTITY author "rizowski">
-<!ENTITY version "2026.10.11-dev1">
-<!ENTITY md5 "890af5d9cb4b71c3423cbc34330286cf">
+<!ENTITY version "2026.10.11-dev2">
+<!ENTITY md5 "07db605b3a8f4f7c292841ecc97c6d0b">
 <!ENTITY launch "Docker">
 <!ENTITY plugdir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY github "rizowski/unraid-docker-folders">
@@ -142,6 +142,9 @@
 
 
 
+
+###2026.10.11-dev2
+- New: A new setting can reinstall Docker Compose automatically after a reboot, keeping a verified copy on the flash drive so compose stacks can autostart again.
 ###2026.10.11-dev1
 - Improved: The settings page no longer shows a green accent bar on each settings box.
 - Improved: The GraphQL backend only runs on tested Unraid API versions, and the settings page refuses to switch to it on an untested version.

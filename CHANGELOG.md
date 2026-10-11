@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.10.11-dev2
+### New
+- A new setting can reinstall Docker Compose automatically after a reboot, keeping a verified copy on the flash drive so compose stacks can autostart again.
+
 ## 2026.10.11-dev1
 ### Improved
 - The settings page no longer shows a green accent bar on each settings box.
