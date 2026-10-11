@@ -2,8 +2,8 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "unraid-docker-folders-modern">
 <!ENTITY author "rizowski">
-<!ENTITY version "2026.09.20">
-<!ENTITY md5 "7ebcbd858620ecd3f8d1c0420e39cd30">
+<!ENTITY version "2026.10.11">
+<!ENTITY md5 "4b0230ac5c14ef4274d06e998e2d846f">
 <!ENTITY launch "Docker">
 <!ENTITY plugdir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY github "rizowski/unraid-docker-folders">
@@ -145,6 +145,45 @@
 
 
 
+
+###2026.10.11
+- New: A new GraphQL backend, marked unstable, can be chosen in the Backend section of the settings page as an alternative to PHP.
+- New: The GraphQL backend installs only when you choose it, shows a warning with manual restore steps you must copy first, and switches back to PHP on its own when it stops answering.
+- New: The GraphQL backend can only be installed on tested Unraid API versions, and the server returns to PHP mode when the API moves outside that range.
+- New: A new setting can reinstall Docker Compose after a reboot from a copy kept on the flash drive, so stack autostart keeps working. (#18)
+- New: Schedules have a new Update action that pulls a newer image for a container and recreates it.
+- New: Backup schedules have a Postgres backup mode that dumps the databases you pick to their own archive each, without stopping the container.
+- New: The backup form suggests folder paths as you type, can pause or stop the container during a backup, and keeps database sidecar files with the database.
+- New: The schedule list warns when the schedule runner stops, and the server repairs its cron entry on its own.
+- New: The folded Docker Folders dashboard tile shows the running count and CPU and RAM bars on one line.
+- New: The dashboard widget shows an All running total as CPU and memory arc gauges.
+- New: A new Stats refresh interval setting sets how often stats update in GraphQL mode.
+- Improved: The Folders page and dashboard widget show placeholder rows with a shimmer during the first load.
+- Improved: A collapsed folder's memory is now shown as the sum of its containers against host memory, instead of an average.
+- Improved: Plugin updates and boots no longer reinstall the GraphQL backend or restart the Unraid API when nothing changed.
+- Improved: Settings boxes no longer have a green accent bar.
+- Improved: Compose stack up, down, stop and pull now get up to 600 seconds before timing out.
+- Fixed: A collapsed folder's CPU is shown as the sum of its containers again, instead of a tiny share of the host.
+- Fixed: Live updates reach other tabs and the dashboard tile right away instead of after up to 30 seconds.
+- Fixed: Log lines show Docker's timestamps in the server's time zone, so they no longer look out of order.
+- Fixed: Volumes and ports in the container details keep the same order across refreshes.
+- Fixed: A failed image pull is reported as failed instead of marking the image up to date and recreating on the old image.
+- Fixed: Pulls work for images with a registry port or a digest, and containers without labels recreate after a pull.
+- Fixed: The update modal keeps its release-notes link after a pull, and links in release-note summaries no longer vanish.
+- Fixed: A manual update check no longer freezes the rest of the Unraid web interface.
+- Fixed: Backup retention no longer deletes another target's archives or good backups after a failed run, and backup lists show only the target's own archives.
+- Fixed: A stack backup that archived nothing, or a container that failed to restart after a backup, is now reported as a failure.
+- Fixed: Deleting a backup can only remove an archive the plugin wrote.
+- Fixed: A schedule no longer runs twice when Run now is clicked while it is already running.
+- Fixed: Scheduled runs that cannot start now send a failure notice instead of stopping silently.
+- Fixed: The container list shows Docker's error instead of an empty list when Docker fails.
+- Fixed: Port conflict detection now counts randomly assigned host ports.
+- Fixed: Adopting a container writes its image tag into the template instead of a digest.
+- Fixed: Stacks known only by their folder now list their services, and stacks with a dot in their name export again.
+- Fixed: Importing from compose.manager skips stacks the plugin cannot manage and no longer deletes files it did not create.
+- Fixed: Compose commands no longer hang without limit or spin at full CPU.
+- Fixed: Picking a folder in the path suggestions now lists that folder.
+- Internal fixes and performance improvements.
 ###2026.10.11-dev4
 - Fixed: A collapsed folder now shows its CPU as the sum of its containers, so one container using a full core no longer shows as about 1% on large hosts.
 - Fixed: Copying the restore steps in the GraphQL warning dialog in Settings no longer closes the dialog, so the install button can be reached.

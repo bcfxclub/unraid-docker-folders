@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026.10.11
+### New
+- A new GraphQL backend, marked unstable, can be chosen in the Backend section of the settings page as an alternative to PHP.
+- The GraphQL backend installs only when you choose it, shows a warning with manual restore steps you must copy first, and switches back to PHP on its own when it stops answering.
+- The GraphQL backend can only be installed on tested Unraid API versions, and the server returns to PHP mode when the API moves outside that range.
+- A new setting can reinstall Docker Compose after a reboot from a copy kept on the flash drive, so stack autostart keeps working. (#18)
+- Schedules have a new Update action that pulls a newer image for a container and recreates it.
+- Backup schedules have a Postgres backup mode that dumps the databases you pick to their own archive each, without stopping the container.
+- The backup form suggests folder paths as you type, can pause or stop the container during a backup, and keeps database sidecar files with the database.
+- The schedule list warns when the schedule runner stops, and the server repairs its cron entry on its own.
+- The folded Docker Folders dashboard tile shows the running count and CPU and RAM bars on one line.
+- The dashboard widget shows an All running total as CPU and memory arc gauges.
+- A new Stats refresh interval setting sets how often stats update in GraphQL mode.
+
+### Improved
+- The Folders page and dashboard widget show placeholder rows with a shimmer during the first load.
+- A collapsed folder's memory is now shown as the sum of its containers against host memory, instead of an average.
+- Plugin updates and boots no longer reinstall the GraphQL backend or restart the Unraid API when nothing changed.
+- Settings boxes no longer have a green accent bar.
+- Compose stack up, down, stop and pull now get up to 600 seconds before timing out.
+
+### Fixed
+- A collapsed folder's CPU is shown as the sum of its containers again, instead of a tiny share of the host.
+- Live updates reach other tabs and the dashboard tile right away instead of after up to 30 seconds.
+- Log lines show Docker's timestamps in the server's time zone, so they no longer look out of order.
+- Volumes and ports in the container details keep the same order across refreshes.
+- A failed image pull is reported as failed instead of marking the image up to date and recreating on the old image.
+- Pulls work for images with a registry port or a digest, and containers without labels recreate after a pull.
+- The update modal keeps its release-notes link after a pull, and links in release-note summaries no longer vanish.
+- A manual update check no longer freezes the rest of the Unraid web interface.
+- Backup retention no longer deletes another target's archives or good backups after a failed run, and backup lists show only the target's own archives.
+- A stack backup that archived nothing, or a container that failed to restart after a backup, is now reported as a failure.
+- Deleting a backup can only remove an archive the plugin wrote.
+- A schedule no longer runs twice when Run now is clicked while it is already running.
+- Scheduled runs that cannot start now send a failure notice instead of stopping silently.
+- The container list shows Docker's error instead of an empty list when Docker fails.
+- Port conflict detection now counts randomly assigned host ports.
+- Adopting a container writes its image tag into the template instead of a digest.
+- Stacks known only by their folder now list their services, and stacks with a dot in their name export again.
+- Importing from compose.manager skips stacks the plugin cannot manage and no longer deletes files it did not create.
+- Compose commands no longer hang without limit or spin at full CPU.
+- Picking a folder in the path suggestions now lists that folder.
+
+### Internal
+- Internal fixes and performance improvements.
+
 ## 2026.10.11-dev4
 ### Fixed
 - A collapsed folder now shows its CPU as the sum of its containers, so one container using a full core no longer shows as about 1% on large hosts.
