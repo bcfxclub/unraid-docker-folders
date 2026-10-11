@@ -38,6 +38,31 @@ jobs:
         working-directory: src/frontend
         run: yarn install --frozen-lockfile
 
+      # Tests run before build.sh, so a failing test stops the release
+      # before it tags, commits or publishes anything.
+      - name: Test frontend
+        working-directory: src/frontend
+        run: |
+          yarn lint
+          yarn type-check
+          yarn test:run
+
+      - name: Install GraphQL backend dependencies
+        working-directory: packages/unraid-api-plugin-docker-folders
+        # vendor/ is gitignored. build.sh skips both steps when they are done.
+        run: |
+          ./scripts/vendor-unraid-shared.sh release
+          npm ci --no-audit --no-fund
+
+      - name: Test GraphQL backend
+        working-directory: packages/unraid-api-plugin-docker-folders
+        run: |
+          npm run type-check
+          npm test
+
+      - name: Test PHP backend
+        run: tests/php/run.sh
+
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"

@@ -31,6 +31,24 @@ final class BackendWatchdogTest extends TestCase
     }
 
     #[Test]
+    public function rollsBackAtOnceOnAnUntestedApiVersion(): void
+    {
+        // A healthy, fresh heartbeat does not hold it back.
+        $healthy = ['heartbeatAge' => 10, 'staleFor' => 0, 'probe' => 'ready', 'apiSupported' => false];
+        $this->assertSame('rollback-and-remove', BackendWatchdog::decide($this->brokenInputs($healthy)));
+        $this->assertSame('rollback', BackendWatchdog::decide($this->brokenInputs($healthy + ['installed' => false])));
+        $this->assertSame('none', BackendWatchdog::decide($this->brokenInputs($healthy + ['mode' => 'php'])));
+    }
+
+    #[Test]
+    public function anUnreadOrSupportedVersionLeavesTheOtherRulesInCharge(): void
+    {
+        $healthy = ['heartbeatAge' => 10, 'staleFor' => 0, 'probe' => 'ready'];
+        $this->assertSame('none', BackendWatchdog::decide($this->brokenInputs($healthy + ['apiSupported' => null])));
+        $this->assertSame('none', BackendWatchdog::decide($this->brokenInputs($healthy + ['apiSupported' => true])));
+    }
+
+    #[Test]
     public function doesNothingInPhpModeOrWhenTheModeIsUnreadable(): void
     {
         $this->assertSame('none', BackendWatchdog::decide($this->brokenInputs(['mode' => 'php'])));

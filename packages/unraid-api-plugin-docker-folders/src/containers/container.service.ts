@@ -37,8 +37,10 @@ function isNotModified(error: unknown): boolean {
  * read from the `unraid/api` source at the `v4.35.1` tag, which is the
  * version on the target server:
  *
- * - There is no `restart` mutation. It arrives in 4.37.x, so on the version
- *   users have, a button the plugin needs simply is not there.
+ * - There is no `restart` mutation. `docker.restart` arrives in 4.36.0, so on
+ *   4.35.x a button the plugin needs simply is not there. Ours also publishes
+ *   to `dockerFoldersEvents` and keeps PHP's error text; upstream's waits
+ *   for RUNNING and returns its own container type.
  * - Upstream's `start` calls Docker's start, which answers 304 on a paused
  *   container and leaves it paused. PHP inspects first and resumes instead.
  * - Upstream's `removeContainer` always passes force. PHP forces only when

@@ -175,7 +175,7 @@ const FOLDER_FIELDS = `
 
 const CREATE_FOLDER = `
   mutation CreateDockerFolder($input: DockerFolderCreateInput!) {
-    createDockerFolder(input: $input) { ${FOLDER_FIELDS} }
+    createDockerFoldersFolder(input: $input) { ${FOLDER_FIELDS} }
   }
 `;
 
@@ -1177,14 +1177,14 @@ export const graphqlBackend: Backend = {
 
     create: async (body: FolderCreateData) =>
       mapResult(
-        await gql<{ createDockerFolder: GqlFolder }>(CREATE_FOLDER, {
+        await gql<{ createDockerFoldersFolder: GqlFolder }>(CREATE_FOLDER, {
           input: {
             name: body.name,
             icon: body.icon ?? null,
             color: body.color ?? null,
           },
         }),
-        (data) => ({ folder: toFolder(data.createDockerFolder) }),
+        (data) => ({ folder: toFolder(data.createDockerFoldersFolder) }),
       ),
 
     update: async (id: number, body: FolderUpdateData) =>

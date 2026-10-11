@@ -31,10 +31,13 @@ $graphqlPluginState = dfmGraphqlPluginState();
 // Choosing GraphQL installs the backend, so it only needs a running Unraid
 // API. A stored 'graphql' still shows, so a user who lost the API can see why
 // the page fell back to PHP.
-$graphqlSelectable = $graphqlPluginState !== 'no-api' || $backendMode === 'graphql';
+// It also needs an API version the backend is tested on.
+$unraidApiVersion = dfmUnraidApiVersion();
+$apiVersionReason = $graphqlPluginState === 'no-api' ? '' : dfmApiVersionReason($unraidApiVersion, dfmApiCompatRange());
+$graphqlSelectable = ($graphqlPluginState !== 'no-api' && $apiVersionReason === '') || $backendMode === 'graphql';
 $graphqlUnavailableReason = [
   'no-api' => 'The Unraid API is not running on this system. It ships with Unraid 7.2 and later.',
-][$graphqlPluginState] ?? '';
+][$graphqlPluginState] ?? $apiVersionReason;
 // Set when the backend watchdog switched this server back to PHP.
 $backendRollback = $backendMode === 'php' ? dfmReadJsonFile(DFM_BACKEND_ROLLBACK_MARKER) : null;
 $enableUpdateChecks = ($settings['enable_update_checks'] ?? '0') === '1';
@@ -941,6 +944,9 @@ if (file_exists($changelogPath)) {
           <strong>GraphQL</strong> is highly experimental. Choosing it installs a backend into the Unraid API and restarts the API. It sends live updates for container changes, stats and logs, and it also runs schedules and update checks.
           If the GraphQL backend stops answering for about 8 minutes while the Unraid API runs, the plugin switches back to PHP, and you get a notification. Do not rely on that automatic restore. Choosing PHP removes the backend from the Unraid API again.
           The Folders page reads this setting when it loads, so reload it after a change.
+          <?php if ($unraidApiVersion !== null): ?>
+          This server runs Unraid API <?= htmlspecialchars($unraidApiVersion) ?>.
+          <?php endif; ?>
           <strong>Default: PHP</strong>
           <?php if (!$graphqlSelectable && $graphqlUnavailableReason !== ''): ?>
           <br><em><?= htmlspecialchars($graphqlUnavailableReason) ?></em>
@@ -1195,7 +1201,8 @@ function startBackendSwitch(select, mode, message) {
     var result = null;
     try { result = JSON.parse(xhr.responseText); } catch (e) { result = null; }
     if (!result || !result.success) {
-      finishBackendSwitch(select, select.getAttribute('data-current') || 'php', 'The switch failed: the server did not accept it.');
+      var why = (result && result.message) ? result.message : 'the server did not accept it.';
+      finishBackendSwitch(select, select.getAttribute('data-current') || 'php', 'The switch failed: ' + why);
       return;
     }
     setTimeout(function() { pollBackendStatus(select, mode, result.run, 0); }, 2000);

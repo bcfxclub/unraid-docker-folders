@@ -25,7 +25,7 @@ Mutations:
 
 | Field | What it does |
 |---|---|
-| `createDockerFolder` | Adds a folder at the end of the list |
+| `createDockerFoldersFolder` | Adds a folder at the end of the list |
 | `updateDockerFolder` | Changes a folder. An omitted field leaves its column alone |
 | `deleteDockerFolder` | Deletes a folder. Its containers become unfoldered |
 | `addContainerToDockerFolder` | Moves a container in, out of whichever folder it was in |
@@ -262,6 +262,40 @@ A `Docker Folders loaded` line in the log is the real evidence. Querying
 
 A line reading `Plugin from ... is invalid` means the export shape was
 rejected, which `npm run validate` catches before you get here.
+
+### On the server, after every API update
+
+`scripts/verify-graphql-backend.sh` in the PHP plugin checks the rules that
+upstream does not document. Run it as root on the server:
+
+```bash
+bash /usr/local/emhttp/plugins/unraid-docker-folders-modern/scripts/verify-graphql-backend.sh \
+  --api-key <key> --restart-check
+```
+
+It checks the API version against `include/api-compat.json`, that the fields
+refuse an anonymous request, that an API key reaches them, that the
+`dockerFoldersEvents` subscription answers, that `unraid-api stop` and
+`start` load the plugin, and that the API log has no schema error.
+`--restart-check` takes the API offline for about 15 seconds.
+
+The schema rules (the `DockerFolders` name prefix, `@UsePermissions` on every
+resolver method, a class-validator decorator on every input field) are also
+checked without a server, by `src/__tests__/schema-rules.spec.ts`.
+
+### Supporting a new Unraid API version
+
+The PHP plugin installs this backend only on the API versions in
+`include/api-compat.json`, and the watchdog switches a server back to PHP
+when its API leaves that range. To support a new API, for example the one in
+Unraid 7.4:
+
+1. Install that Unraid version on a test server, and install the backend
+   there with the range widened by hand.
+2. Run `verify-graphql-backend.sh --api-key <key> --restart-check`. If the
+   API-key checks fail with "Invalid CSRF token", see unraid/api issue #2092.
+3. If every check passes, widen `min` or `maxExclusive` and update
+   `testedOn` in `api-compat.json`. If a check fails, fix the backend first.
 
 ## Auth, for callers
 

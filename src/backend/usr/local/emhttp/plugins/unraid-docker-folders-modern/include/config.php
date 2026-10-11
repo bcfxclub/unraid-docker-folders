@@ -1093,6 +1093,80 @@ function dfmGraphqlPluginInstalled()
 }
 
 /**
+ * The Unraid API versions the GraphQL backend is tested on. The API gives
+ * third-party plugins no stable contract, and Unraid Connect can upgrade the
+ * API ahead of the OS, so the OS version says nothing about it. Widen the
+ * range only after scripts/verify-graphql-backend.sh passes on the new API.
+ */
+define('DFM_API_COMPAT_FILE', __DIR__ . '/api-compat.json');
+
+/**
+ * The running Unraid API's version from its package.json, without build
+ * metadata ("4.35.1+a9625ae2" gives "4.35.1"). Null when unreadable.
+ */
+function dfmUnraidApiVersion($packageJson = null)
+{
+  $data = dfmReadJsonFile($packageJson ?? UNRAID_API_DIR . '/package.json');
+  $version = is_array($data) ? ($data['version'] ?? null) : null;
+  if (!is_string($version) || !preg_match('/^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+.*)?$/', $version, $m)) {
+    return null;
+  }
+  return $m[1];
+}
+
+/**
+ * @return array{min: string, maxExclusive: string, testedOn: string}|null
+ */
+function dfmApiCompatRange($compatFile = null)
+{
+  $range = dfmReadJsonFile($compatFile ?? DFM_API_COMPAT_FILE);
+  if (!is_array($range) || !is_string($range['min'] ?? null) || !is_string($range['maxExclusive'] ?? null)) {
+    return null;
+  }
+  return [
+    'min' => $range['min'],
+    'maxExclusive' => $range['maxExclusive'],
+    'testedOn' => (string) ($range['testedOn'] ?? ''),
+  ];
+}
+
+/**
+ * Whether the GraphQL backend may run on this API version. An unknown
+ * version, or a missing range file, is not supported. Prereleases are
+ * refused at both ends: "4.35.0-beta.1" sorts below a min of 4.35.0, and
+ * the upper bound compares the base version, because "4.36.0-beta.1" would
+ * otherwise sort below a maxExclusive of 4.36.0 and pass.
+ */
+function dfmApiVersionSupported($version, $range)
+{
+  if (!is_string($version) || !is_array($range)) {
+    return false;
+  }
+  $base = preg_replace('/-.*$/', '', $version);
+  return version_compare($version, $range['min'], '>=')
+    && version_compare($base, $range['maxExclusive'], '<');
+}
+
+/**
+ * Why the version is refused, for the settings page and the install state.
+ * Empty when it is supported.
+ */
+function dfmApiVersionReason($version, $range)
+{
+  if (dfmApiVersionSupported($version, $range)) {
+    return '';
+  }
+  if (!is_array($range)) {
+    return 'The tested Unraid API range is missing from this build, so the GraphQL backend is off.';
+  }
+  $tested = "The GraphQL backend is tested on Unraid API {$range['min']} up to, but not including, {$range['maxExclusive']}.";
+  if (!is_string($version)) {
+    return 'The Unraid API version could not be read. ' . $tested;
+  }
+  return "The Unraid API is {$version}. " . $tested;
+}
+
+/**
  * Whether this PHP runner should fire due schedules this minute.
  *
  * Exactly one backend may. Both read `schedules.next_run_at`, so two runners

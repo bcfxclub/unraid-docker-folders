@@ -50,8 +50,9 @@ log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') api-plugin: $*" >> "${LOG_FILE}"
 }
 
-# Reasons are fixed strings from this script and RUN_ID is hex, so neither
-# needs JSON escaping.
+# Reasons are fixed strings from this script, or from api-version.php, whose
+# only variable part is a version that dfmUnraidApiVersion() matched against
+# a digits-and-dots pattern. RUN_ID is hex. None of them needs JSON escaping.
 RUN_ID=""
 write_state() {
   printf '{"state":"%s","reason":"%s","at":%s,"run":"%s"}\n' "$1" "$2" "$(date +%s)" "${RUN_ID}" > "${STATE_FILE}"
@@ -136,6 +137,15 @@ do_install() {
     return 1
   fi
 
+  # The backend runs inside the API, which gives plugins no stable contract,
+  # so it installs only on API versions it is tested on (include/api-compat.json).
+  local version_check
+  if ! version_check=$(php "${PLUGIN_DIR}/scripts/api-version.php" 2>&1 </dev/null); then
+    write_state failed "${version_check}"
+    log "API version refused: ${version_check}"
+    return 1
+  fi
+
   local src
   src=$(ls "${PLUGIN_DIR}"/api-plugin/${API_PLUGIN_PKG}-*.tgz 2>/dev/null | head -1)
   if [ -z "${src}" ]; then
@@ -181,6 +191,17 @@ do_install() {
       echo "  ! GraphQL backend install failed; the PHP backend is unaffected"
       write_state failed "unraid-api plugins install failed. See ${LOG_FILE}."
       log "WARNING: unraid-api plugins install failed"
+      return 1
+    fi
+    # `plugins install` exits 0 when its npm step fails. Seen on API 4.37.5,
+    # where npm refused a peer range with ERESOLVE and the install still
+    # reported success. Read what npm actually put in node_modules.
+    read -r have_version have_hash < <(package_id "${API_DIR}/node_modules/${API_PLUGIN_PKG}/package.json")
+    if [ -z "${have_version}" ] || [ "${have_hash}" != "${want_hash}" ]; then
+      echo "  ! GraphQL backend install failed; the PHP backend is unaffected"
+      api_config_plugin remove
+      write_state failed "npm did not install the GraphQL backend into the Unraid API. See ${LOG_FILE}."
+      log "WARNING: unraid-api plugins install reported success, but node_modules has ${have_version:-nothing} (${have_hash:-no hash}), not ${want_version} (${want_hash})"
       return 1
     fi
     api_config_plugin add

@@ -50,11 +50,20 @@ class BackendWatchdog
    *   probe         dfmGraphqlPluginState() (null: not checked)
    *   installed     the backend package is in the API's node_modules
    *   marker        an earlier rollback left DFM_BACKEND_ROLLBACK_MARKER
+   *   apiSupported  the API version is in api-compat.json's range; false
+   *                 only for a version that was read and is outside it
    */
   public static function decide(array $in)
   {
     if (($in['mode'] ?? null) !== 'graphql') {
       return self::NONE;
+    }
+    // The API changed under the backend, for example through an Unraid
+    // Connect update. Untested code inside the API can take its GraphQL
+    // service down, so do not wait for the heartbeat to go stale. An
+    // unreadable version does not count: it can be a moment mid-upgrade.
+    if (($in['apiSupported'] ?? null) === false) {
+      return !empty($in['installed']) ? self::ROLLBACK_AND_REMOVE : self::ROLLBACK;
     }
     $age = $in['heartbeatAge'] ?? null;
     if ($age !== null && $age <= DFM_RUNNER_ALIVE_STALE_SECONDS) {
@@ -105,6 +114,20 @@ class BackendWatchdog
   {
     $now = time();
     $in = ['mode' => dfmReadBackendMode()];
+
+    // Two small file reads, so this runs every minute in GraphQL mode.
+    if ($in['mode'] === 'graphql') {
+      $in['apiVersion'] = dfmUnraidApiVersion();
+      if ($in['apiVersion'] !== null && !dfmApiVersionSupported($in['apiVersion'], dfmApiCompatRange())) {
+        $in['apiSupported'] = false;
+        $in['installed'] = dfmGraphqlPluginInstalled();
+        $decision = self::decide($in);
+        if (!$dryRun) {
+          self::rollBack($decision, $in);
+        }
+        return ['decision' => $decision, 'inputs' => $in];
+      }
+    }
 
     clearstatcache(true, DFM_RUNNER_ALIVE_FILE);
     $alive = @filemtime(DFM_RUNNER_ALIVE_FILE);
@@ -208,7 +231,10 @@ class BackendWatchdog
     }
     CronManager::ensureSchedulerCron($db);
 
-    $reason = [
+    $reason = ($in['apiSupported'] ?? null) === false
+      ? dfmApiVersionReason($in['apiVersion'] ?? null, dfmApiCompatRange())
+      : null;
+    $reason = $reason ?: [
       'load-failed' => 'The Unraid API did not load the GraphQL backend.',
       'not-installed' => 'The GraphQL backend is no longer installed in the Unraid API.',
       'offline' => 'The Unraid API is running, but its GraphQL service does not answer.',

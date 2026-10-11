@@ -555,7 +555,11 @@ Rules that are easy to break:
 
 - **Every plugin GraphQL type name starts with `DockerFolders`.** A name the
   Unraid API already uses fails the whole schema, and GraphQL goes offline for
-  the entire server.
+  the entire server. A new root field must carry `DockerFolders` in its name
+  too. `src/__tests__/schema-rules.spec.ts` checks this, `@UsePermissions` and
+  the class-validator decorators below. It freezes the types and root fields
+  that shipped with the singular `DockerFolder` or with no prefix. Do not add
+  to those lists.
 - **Every `@InputType` field needs a class-validator decorator.** The API's
   global `ValidationPipe` rejects any property without one.
 - **Every resolver field needs `@UsePermissions`**, or the API refuses to load
@@ -568,6 +572,20 @@ Rules that are easy to break:
   fresh (`dfmPluginRunnerOwns()` in `config.php`). Both runners also claim
   each due slot with a compare-and-set on `next_run_at` before they run it.
   Keep both halves.
+- **The backend runs only on tested API versions.** `include/api-compat.json`
+  holds the range (`min`, `maxExclusive`). The settings page, `settings.php`
+  and `api-plugin.sh install` refuse a version outside it, and the watchdog
+  rolls a GraphQL-mode server back to PHP when its API moves outside it.
+  Unraid Connect can update the API ahead of the OS, so the OS version says
+  nothing. Widen the range only after
+  `scripts/verify-graphql-backend.sh --api-key <key> --restart-check` passes on
+  the new API. The plugin README has the steps.
+- **Peer ranges must cover every API in that range.** npm installs the
+  backend into the API's own `node_modules`, so a peer range that misses the
+  API's version fails with ERESOLVE. API 4.37.5 moved `class-validator` from
+  0.14 to 0.15. `unraid-api plugins install` still exits 0 when npm fails, so
+  `api-plugin.sh` checks `node_modules` itself. Before you widen the range,
+  diff the API's `package.json` dependencies against the plugin's peers.
 - **A new PHP feature needs a plugin port**, or GraphQL mode loses it. Compare
   the two backends' output on real data before you call a port done.
 

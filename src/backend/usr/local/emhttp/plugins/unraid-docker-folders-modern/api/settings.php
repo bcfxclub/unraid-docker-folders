@@ -45,10 +45,13 @@ function handleGet()
   // Polled by the settings page while the GraphQL backend installs or is
   // removed. Read only.
   if (($_GET['action'] ?? '') === 'backend-status') {
+    $apiVersion = dfmUnraidApiVersion();
     jsonResponse([
       'mode' => dfmBackendMode(),
       'plugin' => dfmReadJsonFile(DFM_API_PLUGIN_STATE_FILE),
       'rollback' => dfmReadJsonFile(DFM_BACKEND_ROLLBACK_MARKER),
+      'apiVersion' => $apiVersion,
+      'apiSupported' => dfmApiVersionSupported($apiVersion, dfmApiCompatRange()),
     ]);
   }
 
@@ -178,6 +181,12 @@ function handlePost()
     // marker stays until the install succeeds; the script deletes it then.
     $run = bin2hex(random_bytes(8));
     if ($value === 'graphql') {
+      // The page disables the option on an untested API, but a POST can skip
+      // the page. api-plugin.sh refuses too; this answers before it starts.
+      $versionReason = dfmApiVersionReason(dfmUnraidApiVersion(), dfmApiCompatRange());
+      if ($versionReason !== '') {
+        errorResponse($versionReason, 409);
+      }
       dfmLaunchApiPlugin('install', $run);
       jsonResponse(['success' => true, 'key' => $key, 'value' => dfmBackendMode(), 'pending' => 'install', 'run' => $run]);
     }

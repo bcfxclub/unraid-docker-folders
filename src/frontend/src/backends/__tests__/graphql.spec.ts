@@ -199,7 +199,7 @@ describe('graphql backend', () => {
 
   it('answers a write in the shape the folder store already reads', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(
-      gqlResponse({ data: { createDockerFolder: gqlFolder() } }),
+      gqlResponse({ data: { createDockerFoldersFolder: gqlFolder() } }),
     );
 
     const { ok, data } = await graphqlBackend.folders.create({ name: 'Media' });

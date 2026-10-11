@@ -1,0 +1,5 @@
+{
+  "min": "4.35.0",
+  "maxExclusive": "4.38.0",
+  "testedOn": "Unraid 7.3.2 / Unraid API 4.35.1, Unraid 7.3.3 / Unraid API 4.37.5"
+}

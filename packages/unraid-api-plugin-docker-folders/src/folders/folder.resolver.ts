@@ -46,7 +46,7 @@ export class FolderResolver {
 
     @UsePermissions({ action: AuthAction.CREATE_ANY, resource: Resource.DOCKER })
     @Mutation(() => DockerFolder, { description: 'Create a folder at the end of the list.' })
-    public createDockerFolder(@Args('input') input: DockerFolderCreateInput): DockerFolder {
+    public createDockerFoldersFolder(@Args('input') input: DockerFolderCreateInput): DockerFolder {
         return this.folderService.createFolder(input);
     }
 
