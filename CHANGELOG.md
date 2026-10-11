@@ -9,198 +9,187 @@
 - The settings page no longer shows a green accent bar on each settings box.
 - The GraphQL backend only runs on tested Unraid API versions, and the settings page refuses to switch to it on an untested version.
 - A server using the GraphQL backend switches back to the PHP backend on its own when an Unraid API update moves it outside the tested versions.
-- Release notes in the changelog and on the settings page are now written for users and sorted into New, Improved and Fixed.
 
 ### Fixed
 - The GraphQL backend now installs on Unraid 7.3.3 and 7.4.0-rc1, and a failed install is reported instead of passing silently.
 
+### Internal
+- Internal fixes and performance improvements.
+
 ## 2026.10.04
-- feat(settings): make users copy the restore steps before the GraphQL install
+### New
+- Before you switch to the GraphQL backend, the settings page asks you to copy the manual restore steps. The install button stays off until you copy them.
+
+### Improved
+- The Backend section on the settings page no longer has a green accent bar.
 
 ## 2026.09.29
-- feat(schedules): write one Postgres backup per database
+### Improved
+- A Postgres backup schedule writes a separate archive for each database.
 
 ## 2026.09.28
-- feat(schedules): add a Postgres backup mode for backup schedules
-- fix(schedules): run updates in the background, and other review fixes
-- feat(schedules): add an update action that pulls and recreates a container
-- feat(backend): skip the backend reinstall when its code did not change
+### New
+- Backup schedules have a Postgres mode. It runs `pg_dump` inside the container and, by default, uses the container's own Postgres user and password.
+- Schedules have an Update action. It checks the image and recreates the container. If the registry has a newer build, it pulls that build first.
+
+### Improved
+- Scheduled and "Run now" updates run in the background, so a long pull does not hold up other schedules.
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.09.24
-- chore(backend): turn off npm's audit and funding notices for the backend install
-- fix(backend): restart the Unraid API once when the backend is removed
-- fix(backend): review fixes for the on-demand GraphQL backend
-- fix(backend): time out every API call, and expire a stuck install for the watchdog
-- feat(backend): install the GraphQL backend only on demand, and roll back when it breaks
+### New
+- If you choose the GraphQL backend on the settings page, it installs. Otherwise it does not. If it stops answering, the plugin switches back to the PHP backend and sends a notification.
+
+### Fixed
+- Removing the GraphQL backend restarts the Unraid API once, so the API does not keep the removed backend loaded.
+- A GraphQL backend install that hangs now times out instead of waiting forever.
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.09.23
-- refactor(logs): one timestamp pass, and require the log time zone
-- fix(logs): show Docker's line stamps in the server's time zone
-- feat(dashboard): put the folded tile's summary on one line
-- feat(dashboard): show running count, CPU and RAM on the folded tile
-- test(container-card): stop a stats fetch from replacing seeded stats
-- feat(widget): show the all-running total as two arc gauges
-- fix(containers): keep volumes and ports in one order across refreshes
-- feat(ui): show shimmer skeletons during the first load
-- refactor: clean up after review of the stats and database changes
-- perf(graphql): share one database handle, and speed up the page load
-- feat(stats): measure folder and total stats against the host
-- fix(plg): skip the Unraid API plugin install when it is current
-- fix(build): lock @unraid/shared to the tarball CI downloads
-- feat(settings): mark the GraphQL backend as unstable
-- feat(graphql): add a GraphQL backend beside PHP, chosen by a setting
-- fix(backups): check deleteBackup() containment with pathIsWithin() again
-- fix(schedules): report a lock file that cannot be opened as a failure
-- fix(compose): recheck every stack before an import rollback deletes files
-- fix(compose): do not roll back a file the import did not create
-- fix(compose): check project names with one shared rule
-- docs(docker): merge the two docblocks on request()
-- fix(backups): report the archive this stack backup actually wrote
-- fix(updates): decode whole lines of a pull stream and report every failure
-- fix(compose): apply the 128-character name limit in compose.php too
-- fix(compose): import only stacks the API can address, and keep a racing import's files
-- perf(compose): cache a missing docker compose too
-- fix(compose): stop execCommand spinning once its pipes close
-- fix(compose): give up, down, stop and pull 600 seconds
-- docs(docker): name the one path request() gets unencoded
-- fix(api): read "false" as false in request flags
-- refactor(updates): stop writing the unused release_notes.etag
-- fix(updates): keep autolink URLs in release-note summaries
-- refactor(compose): drop snapshotVersion's unused $sourcePath
-- fix(compose): copy imported files outside the database transaction
-- fix(compose): check the project name the same way in both endpoints
-- fix(compose): keep exporting stacks whose names contain a dot
-- fix(compose): refuse set_description while management is off
-- fix(compose): list services for a stack that has no compose_file set
-- perf(compose): check for docker compose once per request
-- fix(compose): enforce execCommand's timeout and read both pipes together
-- fix(ports): count random host ports in conflict detection
-- docs(claude): describe how PHP actually runs here
-- fix(updates): count each checked image once
-- fix(compose): update a stack row only when its paths change
-- fix(docker): stop inspecting a container whose image is gone
-- fix(websocket): return whether a publish succeeded
-- fix(websocket): send nothing while Unraid pauses publishing
-- fix(stats): accept only a full container id in getContainerLogSize
-- fix(docker): URL-encode every id in a Docker socket path
-- fix(schedules): run one schedule at most once at a time
-- fix(updates): release the session lock during a manual check
-- fix(containers): report a Docker failure instead of an empty list
-- fix(updates): split an image reference with a registry port or digest
-- fix(updates): keep the release-notes link after a pull
-- fix(adopt): write the image tag, not a digest, into the template
-- fix(websocket): publish folder refreshes as entity "folder"
-- fix(compose): refuse an unsafe project name in exportConfigs
-- fix(updates): fail a pull when Docker streams an error
-- test(backups): pin what deleteBackup may delete
-- fix(backups): list only the target's own archives
-- fix(backups): report the newest archive of a stack backup
-- fix(backups): fail a stack backup that archived nothing
-- fix(backups): report a failed restart when the archive also fails
-- fix(backups): remove the partial archive when tar fails
-- fix(backups): prune only the archives the target wrote
-- fix(backups): delete only an archive the plugin wrote
-- fix(schedules): claim each due slot, so two runners cannot both run it
-- fix(updates): recreate a container that has no labels
-- fix(websocket): publish to nchan over the Unix socket
+### New
+- You can choose an optional GraphQL backend on the settings page. It runs inside the Unraid API and is marked unstable.
+- The folded dashboard tile shows the running count, CPU and RAM on one line.
+- The dashboard tile shows the CPU and memory of all running containers as two gauges.
+- Placeholders show while the page loads for the first time.
+
+### Improved
+- Folder and total stats are measured against the whole server.
+
+### Fixed
+- Container logs show Docker's timestamps in the server's time zone.
+- Volumes and ports keep the same order across refreshes.
+- Port conflict detection counts random host ports.
+- The container list reports a Docker error instead of showing an empty list.
+- Live updates reach other open tabs again, including folder changes.
+- A schedule runs at most once at a time.
+- Image updates report every failed pull, handle image names with a registry port or a digest, and recreate containers that have no labels. The release notes link stays after a pull.
+- A manual update check no longer blocks the rest of the page while it runs.
+- Adopting a container writes the image tag, not a digest, into its template.
+- Compose stack commands get 600 seconds before they time out, and a finished command no longer keeps the server busy.
+- If a Compose import rolls back, your files stay.
+- Stacks whose names contain a dot export again.
+- A stack with no compose file set lists its services.
+- Stack backups report the archive they actually wrote.
+- If a stack backup archives nothing, it fails. If it fails, it removes its partial archive.
+- Backups list, prune and delete only the archives the plugin wrote for that container or stack.
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.09.20
-- fix(schedules): read the right crontab spool and repair the runner itself
-- feat(schedules): suggest backup paths, quiet the container, watch the runner
-- test(settings): pin the security advisor default to on
-- fix(install): use installpkg so a colliding package name cannot skip the install (#16)
-- feat(docker): open the compose file from a container's Edit menu
-- fix(security): compare a container's user against the image's own USER
-- feat(security): collapse the findings panel and name each note's cell
-- feat(security): warn on shared folders and link the image page
-- feat(security): flag risky container settings and advise on them
+### New
+- A security advisor flags risky container settings, warns about shared folders, and links to the image page. Its findings panel can collapse.
+- You can open a container's compose file from its Edit menu.
+- Backup schedules suggest paths, can pause or stop the container while they run, and show whether the schedule runner is alive.
+
+### Fixed
+- If another package has a similar name, the plugin still installs (#16).
+- The schedule runner finds its crontab entry. If the entry is missing, the runner adds it again.
+- The security advisor compares a container's user with the image's own user, which removes false warnings.
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.09.19
-- fix(widget): span the folder color across the header row
-- fix(widget): keep the WebUI icon column on every row
-- fix(assets): stamp unhashed plugin assets with their mtime
-- feat(widget): show CPU, memory, and status tags on the dashboard
-- feat(settings): replace the Docker Containers section by default
-- refactor(schedules): return the schedule details from executeSchedule
-- perf(menus): listen for scroll only while a submenu is open
-- refactor(folders): read the Compose action status in one place
-- refactor(menus): share kebab menu icon paths between containers and folders
-- feat(schedules): post an Unraid notification when an automatic run fails
-- fix(folders): keep an unticked container out of its folder
-- fix(folders): scroll the page while a container is dragged near its edge
-- fix(folders): keep a folder collapsed when a refetch lands before its save
-- fix(folders): remove a dragged container from its old folder at once
-- feat(menus): mark disabled menu items that explain why with an info icon
-- fix(containers): give autostart its own submenu
-- fix(menus): use a stopwatch icon for Autostart Delay
-- feat(containers): group the container menu into hover submenus
-- fix(folders): alphabetize the folder menu submenus
-- fix(folders): move Edit Stack into the Actions submenu
-- feat(folders): group the folder menu into hover submenus
-- fix(schedules): run "N/S" steps from N instead of at N only
-- fix(schedules): describe every field of a cron expression
-- fix(folders): stack collapsed folder CPU and MEM like a container row
+### New
+- The dashboard tile shows CPU, memory and status tags.
+- The container and folder menus group their items into submenus. A disabled item shows an info icon that says why.
+- A failed automatic schedule run sends an Unraid notification.
+
+### Improved
+- The plugin replaces the Docker Containers section by default. You can turn this off on the settings page.
+- Autostart has its own submenu, Edit Stack moved into the Actions submenu, and folder submenus are in alphabetical order.
+- A collapsed folder shows CPU and memory the same way a container row does.
+- On the dashboard tile, the folder color spans the header row and every row keeps its WebUI icon column.
+
+### Fixed
+- A container you untick stays out of the folder.
+- The page scrolls while you drag a container near its edge.
+- A collapsed folder stays collapsed after a refresh.
+- A dragged container leaves its old folder at once.
+- Schedule times with steps such as "5/15" start at the first number, and every cron field gets a description.
+- Plugin pages load the new files after an update instead of cached ones.
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.09.18
-- fix(schedules): allow Resume, keep the custom cron field, and stop clipping modals (#7)
+### Fixed
+- Schedules allow the Resume action, keep a custom cron expression, and no longer clip their dialogs (#7).
 
 ## 2026.09.13
-- refactor(dashboard): simplify the widget settings code
-- feat(dashboard): add a settings panel to the Docker Folders tile
-- fix(dashboard): run the tile page as PHP instead of showing its source
-- feat(dashboard): add a Docker Folders tile to the Unraid dashboard
-- refactor(sort): share the folder sort decision and extract sort fields once
-- feat(header): show the container and folder counts inside the search field
-- feat(settings): group the settings page by what each setting affects
-- feat(sort): add a "Sort folders too" toggle to the sort menu
-- fix(folders): apply the toolbar sort to folder contents
-- build: use content-hashed asset filenames
-- fix(folders): do not count removed containers as hidden
-- docs: add a contributing guide and require dev as the PR base
-- fix(folders): repair the #9 merge and add the sort menu
-- Add auto-sort options for folders and folder contents (#9)
-- chore: update docs
-- refactor: share the paused-start rule and tidy the issue fixes
-- feat(updates): add Force Update to the container menu (#11)
-- feat(schedules): add a Resume action and let Start resume a paused container (#7)
-- fix(docker): resume a paused container from the card and the API (#7)
-- fix(schedules): evaluate and show schedule times in the server timezone (#7)
-- fix(folders): persist the manual order of unfoldered containers (#12)
+### New
+- A Docker Folders tile on the Unraid dashboard, with its own settings panel.
+- Automatic sorting of folders and their contents, with a "Sort folders too" option (#9).
+- Force Update in the container menu (#11).
+- A Resume action for schedules. Start also resumes a paused container (#7).
+- The search field shows the container and folder counts.
+
+### Improved
+- The settings page groups settings by what they affect.
+
+### Fixed
+- You can resume a paused container from its card (#7).
+- Schedule times use the server's time zone (#7).
+- The manual order of containers outside folders is kept (#12).
+- The toolbar sort also sorts folder contents.
+- Removed containers no longer count as hidden.
+- The dashboard tile shows the page instead of its source code.
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.09.12
-- refactor: share the move-to-folder action and the select modal
-- feat(updates): name the containers in the update notification
-- feat(folders): add a folder picker to the container menu
-- fix(compose): rename the Stack Details menu item to Edit Stack
-- feat(docker): show the inline log panel in card view
+### New
+- Move a container to a folder from its menu.
+- Card view has an inline log panel.
+
+### Improved
+- The update notification names the containers.
+- "Stack Details" is now "Edit Stack".
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.08.22
-- test(docker): pin the managed-with-autostart-off branch
-- fix(docker): correct three faults the browser check found
-- feat(docker): put Adopt on the container, not only in the kebab menu
-- fix(docker): escape adopted values before they reach Unraid's shell
-- feat(docker): adopt CLI-created containers into Unraid's container manager
-- fix(ui): keep an open kebab menu inside the frame instead of scrolling
-- fix(ui): stop the unfoldered section clipping open kebab menus
+### New
+- Adopt containers created on the command line into Unraid's container manager, from the container card.
+
+### Fixed
+- An open menu stays inside the page and is no longer cut off.
+- Adopted container values are escaped before they reach Unraid's shell.
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.08.19
-- fix(folders): only add/remove containers that changed when saving a folder
+### Fixed
+- Saving a folder changes only the containers you added or removed.
 
 ## 2026.08.17
-- feat(settings): add a "Buy me a coffee" Ko-fi link
-- feat(ui): collapse the create buttons into one menu, widen the search
-- feat: rename to "Docker Folders" and shorten the page URLs
-- feat(ui): one update button, and a re-check inside the confirm modal
-- feat(ui): collapse the three create buttons to "+" plus an icon
+### New
+- A "Buy me a coffee" Ko-fi link on the settings page.
+
+### Improved
+- The plugin is now called "Docker Folders", and its page addresses are shorter.
+- The create buttons are one "+" menu, and the search field is wider.
+- One update button, and you can check for updates again inside the update dialog.
 
 ## 2026.08.16
-- fix(ui): render the update-check controls before settings land
-- docs: summarize each release in CHANGELOG, stop regenerating it
-- chore: drop the beta label from Image Updates settings
-- fix(ui): stop compose buttons blinking in while availability is checked
-- test: fix session tests broken by PHPUnit output, silence constant warnings
-- fix(security): validate every user-influenced filesystem path
-- chore: prepare repo for Community Applications submission
+### Improved
+- Image Updates settings are no longer marked beta.
+
+### Fixed
+- The update check controls show before the settings finish loading.
+- Compose buttons no longer flicker while the page checks whether Compose is available.
+- Every file path that a user can influence is checked before use.
+
+### Internal
+- Internal fixes and performance improvements.
 
 ## 2026.08.10
 The update confirm modal now shows the release notes for each image.
