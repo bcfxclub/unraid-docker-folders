@@ -87,6 +87,12 @@ describe('SettingsService', () => {
     });
 
     describe('set — path settings', () => {
+        it('accepts compose_auto_install as "0" or "1" only', () => {
+            expect(service.set('compose_auto_install', '1').value).toBe('1');
+            expect(service.set('compose_auto_install', '0').value).toBe('0');
+            expect(() => service.set('compose_auto_install', 'true')).toThrow('compose_auto_install must be');
+        });
+
         it('normalizes and accepts a compose_export_dir under /mnt', () => {
             const setting = service.set('compose_export_dir', '/mnt/user/appdata/../appdata/compose');
             expect(setting.value).toBe('/mnt/user/appdata/compose');

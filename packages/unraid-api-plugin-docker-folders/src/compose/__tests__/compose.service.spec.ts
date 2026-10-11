@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BadRequestException } from '@nestjs/common';
@@ -98,6 +99,7 @@ describe('ComposeService', () => {
             binaryPath: join(rootDir, 'cli-plugins', 'docker-compose'),
             binaryVersion: '2.32.4',
             binarySha256: 'deadbeef',
+            cachePath: join(rootDir, 'config', 'docker-compose'),
         };
 
         fake = fakeRunner();
@@ -1217,6 +1219,75 @@ describe('ComposeService', () => {
             } finally {
                 rmSync(dir, { recursive: true, force: true });
             }
+        });
+    });
+
+    describe('flash copy for compose_auto_install', () => {
+        const content = 'compose-bytes';
+        const sha = createHash('sha256').update(content).digest('hex');
+        let pinned: ComposeService;
+
+        function installBinary(bytes = content): void {
+            mkdirSync(join(rootDir, 'cli-plugins'), { recursive: true });
+            writeFileSync(paths.binaryPath, bytes);
+            mkdirSync(paths.configDir, { recursive: true });
+        }
+
+        function setAutoInstall(value: string): void {
+            db.write((d) =>
+                d.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('compose_auto_install', ?, 0)").run(value)
+            );
+        }
+
+        beforeEach(() => {
+            pinned = new ComposeService(db, folders, fake.runner, { ...paths, binarySha256: sha });
+        });
+
+        it('copies a binary that matches the pinned hash, and makes it executable', async () => {
+            installBinary();
+            await expect(pinned.cacheComposeBinary()).resolves.toEqual({ success: true, error: null });
+            expect(readFileSync(paths.cachePath, 'utf8')).toBe(content);
+            expect(statSync(paths.cachePath).mode & 0o111).not.toBe(0);
+            expect(existsSync(`${paths.cachePath}.tmp`)).toBe(false);
+        });
+
+        it('keeps no copy of a binary that is not the pinned build, and says why', async () => {
+            installBinary('another build');
+            const result = await pinned.cacheComposeBinary();
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('not the pinned 2.32.4 build');
+            expect(existsSync(paths.cachePath)).toBe(false);
+        });
+
+        it('does not hash a source the caller already verified', async () => {
+            installBinary('another build');
+            await expect(pinned.cacheComposeBinary({ sourceVerified: true })).resolves.toEqual({ success: true, error: null });
+        });
+
+        it('switching the option on copies an installed binary, and off removes it and a half-written copy', async () => {
+            installBinary();
+            setAutoInstall('1');
+            await expect(pinned.applyAutoInstallSetting('1')).resolves.toEqual({ success: true, error: null });
+            expect(existsSync(paths.cachePath)).toBe(true);
+
+            writeFileSync(`${paths.cachePath}.tmp`, 'half');
+            setAutoInstall('0');
+            await expect(pinned.applyAutoInstallSetting('0')).resolves.toEqual({ success: true, error: null });
+            expect(existsSync(paths.cachePath)).toBe(false);
+            expect(existsSync(`${paths.cachePath}.tmp`)).toBe(false);
+        });
+
+        it('switching the option on before compose is installed is not an error', async () => {
+            setAutoInstall('1');
+            await expect(pinned.applyAutoInstallSetting('1')).resolves.toEqual({ success: true, error: null });
+            expect(existsSync(paths.cachePath)).toBe(false);
+        });
+
+        it('removes the copy when the option was switched off while it copied', async () => {
+            installBinary();
+            setAutoInstall('0');
+            await pinned.applyAutoInstallSetting('1');
+            expect(existsSync(paths.cachePath)).toBe(false);
         });
     });
 });

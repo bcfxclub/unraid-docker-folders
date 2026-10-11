@@ -157,7 +157,10 @@ class ComposeManager
     $this->composeAvailable = null;
 
     if ($this->isAutoInstallEnabled()) {
-      $this->cacheComposeBinary();
+      $cached = $this->cacheComposeBinary(self::COMPOSE_BINARY_PATH, self::COMPOSE_CACHE_PATH, self::COMPOSE_SHA256, true);
+      if (!$cached['success']) {
+        error_log('Docker Folders: no flash copy of Docker Compose: ' . $cached['error']);
+      }
     }
 
     return ['success' => true, 'error' => null];
@@ -178,36 +181,45 @@ class ComposeManager
    * Copy a verified binary to flash so a reboot can restore it offline.
    * The copy is only made when it matches the pinned SHA256.
    *
-   * @return bool true when the flash copy is in place
+   * A copy of the same size already on flash is kept without reading it back:
+   * it was verified when it was written, and restoreComposeBinary() checks
+   * its hash again before it is used. Reading 65 MB from a USB stick here
+   * would only slow the settings request.
+   *
+   * @param bool $sourceVerified true when the caller just checked $source
+   *   against $sha, as installComposeBinary() does, so it is not hashed twice
+   * @return array ['success' => bool, 'error' => string|null]
    */
-  public function cacheComposeBinary($source = self::COMPOSE_BINARY_PATH, $dest = self::COMPOSE_CACHE_PATH, $sha = self::COMPOSE_SHA256)
+  public function cacheComposeBinary($source = self::COMPOSE_BINARY_PATH, $dest = self::COMPOSE_CACHE_PATH, $sha = self::COMPOSE_SHA256, $sourceVerified = false)
   {
-    if (!is_file($source) || hash_file('sha256', $source) !== $sha) {
-      return false;
+    if (!is_file($source)) {
+      return ['success' => false, 'error' => 'Docker Compose is not installed'];
     }
-    if (is_file($dest) && hash_file('sha256', $dest) === $sha) {
-      return true;
+    if (!$sourceVerified && hash_file('sha256', $source) !== $sha) {
+      return [
+        'success' => false,
+        'error' => 'the installed Docker Compose is not the pinned ' . self::COMPOSE_VERSION . ' build, so no copy was kept',
+      ];
     }
-    $tmp = $dest . '.tmp';
-    if (!@copy($source, $tmp)) {
-      @unlink($tmp);
-      return false;
+    if (is_file($dest) && filesize($dest) === filesize($source)) {
+      return ['success' => true, 'error' => null];
     }
-    @chmod($tmp, 0755);
-    if (!@rename($tmp, $dest)) {
-      @unlink($tmp);
-      return false;
+    if (!$this->copyExecutable($source, $dest)) {
+      return ['success' => false, 'error' => 'the copy could not be written to ' . dirname($dest)];
     }
-    return true;
+    return ['success' => true, 'error' => null];
   }
 
   /**
-   * Remove the flash copy (used when the option is switched off)
+   * Remove the flash copy (used when the option is switched off), and any
+   * half-written copy a concurrent request left behind
    */
   public function removeCachedComposeBinary($dest = self::COMPOSE_CACHE_PATH)
   {
-    if (is_file($dest)) {
-      @unlink($dest);
+    foreach ([$dest, $dest . '.tmp'] as $file) {
+      if (is_file($file)) {
+        @unlink($file);
+      }
     }
   }
 
@@ -225,6 +237,18 @@ class ComposeManager
     if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
       return false;
     }
+    if (!$this->copyExecutable($source, $dest)) {
+      return false;
+    }
+    $this->composeAvailable = null;
+    return true;
+  }
+
+  /**
+   * Copy through a .tmp file and rename, so a reader never sees half a binary.
+   */
+  private function copyExecutable($source, $dest)
+  {
     $tmp = $dest . '.tmp';
     if (!@copy($source, $tmp)) {
       @unlink($tmp);
@@ -235,7 +259,6 @@ class ComposeManager
       @unlink($tmp);
       return false;
     }
-    $this->composeAvailable = null;
     return true;
   }
 

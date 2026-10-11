@@ -258,7 +258,93 @@ export class ComposeService {
             return { success: false, error: 'Failed to move binary into place' };
         }
 
+        if (this.isAutoInstallEnabled()) {
+            const cached = await this.cacheComposeBinary({ sourceVerified: true });
+            if (!cached.success) {
+                this.logger.warn(`No flash copy of Docker Compose: ${cached.error}`);
+            }
+        }
+
         return { success: true, error: null };
+    }
+
+    // ─── Reinstall after reboot ─────────────────────────────────────────
+    //
+    // `compose-autostart.php` restores the binary from the flash copy at
+    // boot. That hook is PHP in both backend modes, so the plugin only keeps
+    // the copy current. The rules match `ComposeManager.php`.
+
+    /** `ComposeManager::isAutoInstallEnabled`. */
+    isAutoInstallEnabled(): boolean {
+        const row = this.db.read(
+            (db) =>
+                db.prepare("SELECT value FROM settings WHERE key = 'compose_auto_install'").get() as
+                    | { value: string }
+                    | undefined
+        );
+        return row?.value === '1';
+    }
+
+    /**
+     * `ComposeManager::cacheComposeBinary`. A copy of the same size already
+     * on flash is kept without reading it back: it was verified when it was
+     * written, and the boot restore hashes it again before it runs.
+     */
+    async cacheComposeBinary(
+        options: { sourceVerified?: boolean } = {}
+    ): Promise<{ success: boolean; error: string | null }> {
+        const source = this.paths.binaryPath;
+        const dest = this.paths.cachePath;
+        if (!isFile(source)) {
+            return { success: false, error: 'Docker Compose is not installed' };
+        }
+        if (!options.sourceVerified && (await sha256File(source)) !== this.paths.binarySha256) {
+            return {
+                success: false,
+                error: `the installed Docker Compose is not the pinned ${this.paths.binaryVersion} build, so no copy was kept`,
+            };
+        }
+        if (isFile(dest) && statSync(dest).size === statSync(source).size) {
+            return { success: true, error: null };
+        }
+        const tmp = `${dest}.tmp`;
+        try {
+            copyFileSync(source, tmp);
+            chmodSync(tmp, 0o755);
+            renameSync(tmp, dest);
+        } catch {
+            safeUnlink(tmp);
+            return { success: false, error: `the copy could not be written to ${dirname(dest)}` };
+        }
+        return { success: true, error: null };
+    }
+
+    /** `ComposeManager::removeCachedComposeBinary`, including a half-written copy. */
+    removeCachedComposeBinary(): void {
+        safeUnlink(this.paths.cachePath);
+        safeUnlink(`${this.paths.cachePath}.tmp`);
+    }
+
+    /**
+     * The side effect `settings.php` runs after it stores
+     * `compose_auto_install`: take a copy when it is switched on and compose
+     * is installed, drop it when it is switched off.
+     */
+    async applyAutoInstallSetting(value: string): Promise<{ success: boolean; error: string | null }> {
+        if (value !== '1') {
+            this.removeCachedComposeBinary();
+            return { success: true, error: null };
+        }
+        if (!isFile(this.paths.binaryPath)) {
+            return { success: true, error: null };
+        }
+        const cached = await this.cacheComposeBinary();
+        if (!this.isAutoInstallEnabled()) {
+            // Switched off while this call copied.
+            this.removeCachedComposeBinary();
+            return { success: true, error: null };
+        }
+        return cached;
     }
 
     // ─── Conflict detection ─────────────────────────────────────────────
@@ -1498,6 +1584,14 @@ export class ComposeService {
 function isDir(path: string): boolean {
     try {
         return statSync(path).isDirectory();
+    } catch {
+        return false;
+    }
+}
+
+function isFile(path: string): boolean {
+    try {
+        return statSync(path).isFile();
     } catch {
         return false;
     }

@@ -125,6 +125,13 @@ function handlePost()
     errorResponse('Invalid backend mode', 400);
   }
 
+  // A checkbox stores '0' or '1' only. A JSON 1 or true would be stored as
+  // '1' but fail the === '1' test below, which deletes the flash copy of a
+  // setting that then reads as on.
+  if ($key === 'compose_auto_install' && !in_array($value, ['0', '1'], true)) {
+    errorResponse('compose_auto_install must be "0" or "1"', 400);
+  }
+
   // Validate sort_mode against the known set of modes.
   if ($key === 'sort_mode' && !in_array($value, SORT_MODES, true)) {
     errorResponse('Invalid sort_mode', 400);
@@ -201,13 +208,21 @@ function handlePost()
 
   // Keep the flash copy of the compose binary in step with the option: take a
   // copy when it is switched on and compose is already installed, drop it
-  // when it is switched off.
+  // when it is switched off. With compose not installed yet, the install or
+  // the next boot takes the copy.
   if ($key === 'compose_auto_install') {
     $composeManager = new ComposeManager();
-    if ($value === '1') {
-      $composeManager->cacheComposeBinary();
-    } else {
+    if ($value === '0') {
       $composeManager->removeCachedComposeBinary();
+    } elseif (is_file(ComposeManager::COMPOSE_BINARY_PATH)) {
+      $cached = $composeManager->cacheComposeBinary();
+      if (!$composeManager->isAutoInstallEnabled()) {
+        // Switched off while this request copied. The off request found no
+        // finished copy to delete, so delete it here.
+        $composeManager->removeCachedComposeBinary();
+      } elseif (!$cached['success']) {
+        errorResponse('Saved, but ' . $cached['error'], 500);
+      }
     }
   }
 

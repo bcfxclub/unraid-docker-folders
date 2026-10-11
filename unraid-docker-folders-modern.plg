@@ -979,6 +979,9 @@ fi
 if [ -d "${CONFIG_DIR}" ]; then
   echo "Cleaning up old package files..."
   rm -f ${CONFIG_DIR}/${PLUGIN_NAME}-*.txz 2>/dev/null || true
+  # The ~65 MB flash copy of Docker Compose ("Reinstall Docker Compose after
+  # a reboot"). It is a cache, not user data.
+  rm -f "${CONFIG_DIR}/docker-compose" "${CONFIG_DIR}/docker-compose.tmp"
 fi
 
 echo "========================================="

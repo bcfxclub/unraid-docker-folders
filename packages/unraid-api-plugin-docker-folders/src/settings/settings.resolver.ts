@@ -3,6 +3,7 @@ import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { AuthAction, Resource } from '@unraid/shared/graphql.model.js';
 import { UsePermissions } from '@unraid/shared/use-permissions.directive.js';
 
+import { ComposeService } from '../compose/compose.service.js';
 import { DockerFoldersSetting, DockerFoldersSettingInput } from './settings.model.js';
 import { SettingsService } from './settings.service.js';
 
@@ -12,13 +13,17 @@ import { SettingsService } from './settings.service.js';
  * this uses the closest existing resource, the same one `FolderResolver` and
  * `ContainerResolver` use.
  *
- * Pure delegation, like `FolderResolver`: a rejected key or value throws
+ * Delegation, like `FolderResolver`, apart from the flash copy that
+ * `compose_auto_install` keeps in step. A rejected key or value throws
  * `BadRequestException` from the service, and the API turns that into a
  * GraphQL error the frontend reads the same way it reads PHP's 400 body.
  */
 @Resolver()
 export class SettingsResolver {
-    constructor(private readonly settingsService: SettingsService) {}
+    constructor(
+        private readonly settingsService: SettingsService,
+        private readonly compose: ComposeService
+    ) {}
 
     @UsePermissions({ action: AuthAction.READ_ANY, resource: Resource.DOCKER })
     @Query(() => [DockerFoldersSetting], {
@@ -33,7 +38,17 @@ export class SettingsResolver {
     @Mutation(() => DockerFoldersSetting, {
         description: 'Set one plugin setting. Rejects a key outside the fixed allowlist.',
     })
-    public setDockerFoldersSetting(@Args('input') input: DockerFoldersSettingInput): DockerFoldersSetting {
-        return this.settingsService.set(input.key, input.value);
+    public async setDockerFoldersSetting(
+        @Args('input') input: DockerFoldersSettingInput
+    ): Promise<DockerFoldersSetting> {
+        const setting = this.settingsService.set(input.key, input.value);
+        // Same side effect, and same error, as settings.php.
+        if (setting.key === 'compose_auto_install') {
+            const applied = await this.compose.applyAutoInstallSetting(input.value);
+            if (!applied.success) {
+                throw new Error(`Saved, but ${applied.error}`);
+            }
+        }
+        return setting;
     }
 }

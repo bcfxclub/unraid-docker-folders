@@ -30,11 +30,16 @@ final class ComposeRestoreTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (glob($this->dir . '/{,*/}{*,.tmp}', GLOB_BRACE) ?: [] as $f) {
-            is_file($f) && unlink($f);
+        // Not glob(GLOB_BRACE): musl, which the php:8.4-cli test image uses,
+        // has no GLOB_BRACE.
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($this->dir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($files as $file) {
+            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
         }
-        @rmdir($this->dir . '/plugins');
-        @rmdir($this->dir);
+        rmdir($this->dir);
     }
 
     private function binary(string $name, string $content): array
@@ -50,7 +55,7 @@ final class ComposeRestoreTest extends TestCase
         [$src, $sha] = $this->binary('src', 'compose-bytes');
         $cache = $this->dir . '/cache';
 
-        $this->assertTrue($this->manager->cacheComposeBinary($src, $cache, $sha));
+        $this->assertSame(['success' => true, 'error' => null], $this->manager->cacheComposeBinary($src, $cache, $sha));
         $this->assertSame('compose-bytes', file_get_contents($cache));
         $this->assertTrue(is_executable($cache));
         $this->assertFileDoesNotExist($cache . '.tmp');
@@ -62,7 +67,9 @@ final class ComposeRestoreTest extends TestCase
         [$src] = $this->binary('src', 'tampered');
         $wrong = hash('sha256', 'something else');
 
-        $this->assertFalse($this->manager->cacheComposeBinary($src, $this->dir . '/cache', $wrong));
+        $result = $this->manager->cacheComposeBinary($src, $this->dir . '/cache', $wrong);
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('not the pinned', $result['error']);
         $this->assertFileDoesNotExist($this->dir . '/cache');
 
         $this->assertFalse($this->manager->restoreComposeBinary($src, $this->dir . '/dest', $wrong));
@@ -72,7 +79,7 @@ final class ComposeRestoreTest extends TestCase
     #[Test]
     public function aMissingSourceIsReportedNotFatal(): void
     {
-        $this->assertFalse($this->manager->cacheComposeBinary($this->dir . '/none', $this->dir . '/cache'));
+        $this->assertFalse($this->manager->cacheComposeBinary($this->dir . '/none', $this->dir . '/cache')['success']);
         $this->assertFalse($this->manager->restoreComposeBinary($this->dir . '/none', $this->dir . '/dest'));
     }
 
@@ -89,11 +96,35 @@ final class ComposeRestoreTest extends TestCase
     }
 
     #[Test]
+    public function aSourceTheCallerVerifiedIsNotHashedAgain(): void
+    {
+        [$src] = $this->binary('src', 'compose-bytes');
+        $wrong = hash('sha256', 'something else');
+
+        // The hash is wrong on purpose: with $sourceVerified the check is skipped.
+        $this->assertTrue($this->manager->cacheComposeBinary($src, $this->dir . '/cache', $wrong, true)['success']);
+        $this->assertSame('compose-bytes', file_get_contents($this->dir . '/cache'));
+    }
+
+    #[Test]
+    public function aCopyOfTheSameSizeIsKeptWithoutRewritingIt(): void
+    {
+        [$src, $sha] = $this->binary('src', 'compose-bytes');
+        $cache = $this->dir . '/cache';
+        file_put_contents($cache, 'kept-already!');
+
+        $this->assertTrue($this->manager->cacheComposeBinary($src, $cache, $sha)['success']);
+        $this->assertSame('kept-already!', file_get_contents($cache));
+    }
+
+    #[Test]
     public function removingTheCachedCopyDeletesIt(): void
     {
         [$cache] = $this->binary('cache', 'x');
+        file_put_contents($cache . '.tmp', 'half');
         $this->manager->removeCachedComposeBinary($cache);
         $this->assertFileDoesNotExist($cache);
+        $this->assertFileDoesNotExist($cache . '.tmp');
 
         // Removing a copy that is not there is not an error.
         $this->manager->removeCachedComposeBinary($cache);

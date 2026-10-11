@@ -30,6 +30,12 @@ export interface ComposePathsConfig {
     readonly binaryVersion: string;
     /** `ComposeManager::COMPOSE_SHA256`, checked before the downloaded binary is trusted. */
     readonly binarySha256: string;
+    /**
+     * `ComposeManager::COMPOSE_CACHE_PATH`: the flash copy of the binary that
+     * `compose-autostart.php` restores after a reboot, when the
+     * `compose_auto_install` setting is on.
+     */
+    readonly cachePath: string;
 }
 
 export const DEFAULT_COMPOSE_PATHS: ComposePathsConfig = {
@@ -40,6 +46,7 @@ export const DEFAULT_COMPOSE_PATHS: ComposePathsConfig = {
     binaryPath: '/usr/lib/docker/cli-plugins/docker-compose',
     binaryVersion: '2.32.4',
     binarySha256: 'ed1917fb54db184192ea9d0717bcd59e3662ea79db48bff36d3475516c480a6b',
+    cachePath: `${CONFIG_DIR}/docker-compose`,
 };
 
 /** Overrides the filesystem layout. Only the tests supply one. */

@@ -314,6 +314,10 @@ if (file_exists($changelogPath)) {
   opacity: 1;
 }
 
+.save-status.failed {
+  color: #e53935;
+}
+
 .action-buttons {
   margin-top: 20px;
   display: flex;
@@ -1062,12 +1066,25 @@ function saveSetting(key, value) {
   xhr.open('POST', '/plugins/unraid-docker-folders-modern/api/settings.php', true);
   xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
   xhr.onload = function() {
-    if (statusEl) {
-      statusEl.classList.add('visible');
-      setTimeout(function() { statusEl.classList.remove('visible'); }, 2000);
+    var error = null;
+    if (xhr.status >= 400) {
+      try { error = JSON.parse(xhr.responseText).message; } catch (e) {}
+      error = error || ('Not saved (HTTP ' + xhr.status + ')');
     }
+    showSaveStatus(statusEl, error);
   };
+  xhr.onerror = function() { showSaveStatus(statusEl, 'Not saved: the server did not answer'); };
   xhr.send(body);
+}
+
+// "Saved" for 2 seconds, or the server's error for 8.
+function showSaveStatus(statusEl, error) {
+  if (!statusEl) return;
+  clearTimeout(statusEl.hideTimer);
+  statusEl.textContent = error || 'Saved';
+  statusEl.classList.toggle('failed', !!error);
+  statusEl.classList.add('visible');
+  statusEl.hideTimer = setTimeout(function() { statusEl.classList.remove('visible'); }, error ? 8000 : 2000);
 }
 
 // --- Backend switch ---
