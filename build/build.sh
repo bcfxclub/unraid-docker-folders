@@ -108,7 +108,7 @@ echo ""
 
 # Clean previous build
 STEP=0
-TOTAL_STEPS=$([ "$BUILD_TYPE" == "release" ] && echo "7" || echo "5")
+TOTAL_STEPS=$([ "$BUILD_TYPE" == "release" ] && echo "8" || echo "6")
 echo -e "${YELLOW}[$((++STEP))/${TOTAL_STEPS}]${NC} Cleaning previous build..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -136,74 +136,59 @@ fi
 echo -e "${GREEN}✓${NC} Frontend built successfully"
 echo ""
 
-# Update CHANGELOG.md (release builds only)
+# Release notes and CHANGELOG.md (release builds only)
 #
-# This PREPENDS the new release's commits. It deliberately does not regenerate
-# the file from git tags: CHANGELOG.md carries hand-written per-release
-# summaries, and regenerating would delete them every release.
+# build/release-notes.sh writes the notes once, as JSON, and every place that
+# shows them renders that one file: CHANGELOG.md, the PLG <CHANGES> section,
+# the tag message and the GitHub release. With ANTHROPIC_API_KEY set, Claude
+# sorts the commits by what a user notices. Without it, the commit prefix does.
+# In CI only the workflow's "Write release notes" step holds the key.
 #
-# Same-day releases (2026.02.23, 2026.02.23-2, ...) add to the existing section
-# rather than creating a duplicate heading.
+# CHANGELOG.md is PREPENDED, one section per version. It is never regenerated
+# from tags, because older sections carry hand-written summaries. The settings
+# page shows the newest section, and reads only items under a ### heading.
 if [ "$BUILD_TYPE" == "release" ]; then
-  echo -e "${YELLOW}[$((++STEP))/${TOTAL_STEPS}]${NC} Updating CHANGELOG.md..."
+  echo -e "${YELLOW}[$((++STEP))/${TOTAL_STEPS}]${NC} Writing release notes and CHANGELOG.md..."
   cd "$PROJECT_ROOT"
 
   CHANGELOG_FILE="${PROJECT_ROOT}/CHANGELOG.md"
-
-  # Helper: strip -N or -devN build suffix to get base date
-  strip_build_number() {
-    echo "$1" | sed 's/-dev[0-9]*$//' | sed 's/-[0-9]*$//'
-  }
-
-  CURRENT_BASE_DATE=$(strip_build_number "$VERSION")
+  # CI writes the notes in an earlier step and passes the file in
+  # RELEASE_NOTES_JSON, so this script, and the yarn and npm installs it runs,
+  # never see ANTHROPIC_API_KEY. A local build writes them here.
+  if [ -z "${RELEASE_NOTES_JSON:-}" ] || [ ! -s "$RELEASE_NOTES_JSON" ]; then
+    RELEASE_NOTES_JSON=$(mktemp)
+    "${SCRIPT_DIR}/release-notes.sh" generate "$("${SCRIPT_DIR}/release-notes.sh" range)" > "$RELEASE_NOTES_JSON"
+  fi
+  echo "Release notes:"
+  "${SCRIPT_DIR}/release-notes.sh" render plg "$RELEASE_NOTES_JSON"
 
   if [ ! -f "$CHANGELOG_FILE" ]; then
     printf '# Changelog\n\n' > "$CHANGELOG_FILE"
   fi
 
-  # Commits since the most recent tag
-  LAST_TAG=$(git tag -l --sort=-version:refname | head -n 1)
-  if [ -n "$LAST_TAG" ]; then
-    UNRELEASED=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s" --no-merges | grep -v "^- Update PLG.*for release" || true)
-  else
-    UNRELEASED=$(git log --pretty=format:"- %s" --no-merges | grep -v "^- Update PLG.*for release" || true)
-  fi
-
+  UNRELEASED=$("${SCRIPT_DIR}/release-notes.sh" render changelog "$RELEASE_NOTES_JSON")
   if [ -z "$UNRELEASED" ]; then
     echo -e "${YELLOW}⚠${NC} No new commits — CHANGELOG.md left unchanged"
+  elif grep -q "^## ${VERSION}$" "$CHANGELOG_FILE"; then
+    echo -e "${YELLOW}⚠${NC} CHANGELOG.md already has ${VERSION} — left unchanged"
   else
     NOTES_TMP=$(mktemp)
-
-    if grep -q "^## ${CURRENT_BASE_DATE}$" "$CHANGELOG_FILE"; then
-      # Same-day release: insert under the heading that already exists
-      printf '%s\n' "$UNRELEASED" > "$NOTES_TMP"
-      awk -v heading="## ${CURRENT_BASE_DATE}" -v notesfile="$NOTES_TMP" '
-        { print }
-        $0 == heading && !inserted {
+    printf '## %s\n%s\n\n' "$VERSION" "$UNRELEASED" > "$NOTES_TMP"
+    # Insert the section above the newest existing one
+    awk -v notesfile="$NOTES_TMP" '
+      /^## / && !inserted {
+        while ((getline line < notesfile) > 0) print line
+        close(notesfile)
+        inserted = 1
+      }
+      { print }
+      END {
+        if (!inserted) {
           while ((getline line < notesfile) > 0) print line
           close(notesfile)
-          inserted = 1
         }
-      ' "$CHANGELOG_FILE" > "${CHANGELOG_FILE}.tmp"
-    else
-      # New date: insert a section above the newest existing one
-      printf '## %s\n%s\n\n' "$CURRENT_BASE_DATE" "$UNRELEASED" > "$NOTES_TMP"
-      awk -v notesfile="$NOTES_TMP" '
-        /^## / && !inserted {
-          while ((getline line < notesfile) > 0) print line
-          close(notesfile)
-          inserted = 1
-        }
-        { print }
-        END {
-          if (!inserted) {
-            while ((getline line < notesfile) > 0) print line
-            close(notesfile)
-          }
-        }
-      ' "$CHANGELOG_FILE" > "${CHANGELOG_FILE}.tmp"
-    fi
-
+      }
+    ' "$CHANGELOG_FILE" > "${CHANGELOG_FILE}.tmp"
     mv "${CHANGELOG_FILE}.tmp" "$CHANGELOG_FILE"
     rm -f "$NOTES_TMP"
     echo -e "${GREEN}✓${NC} CHANGELOG.md updated"
@@ -212,12 +197,78 @@ if [ "$BUILD_TYPE" == "release" ]; then
   echo ""
 fi
 
+# Build the Unraid API plugin
+#
+# The GraphQL backend is an npm package the Unraid API loads, shipped inside
+# this .txz and installed by the .plg. It is versioned from the release
+# version, not from its own package.json, because npm caches a file: tarball
+# by name and version: reinstalling the same version after a change installs
+# the cached copy, silently. A new version per release makes that impossible.
+echo -e "${YELLOW}[$((++STEP))/${TOTAL_STEPS}]${NC} Building Unraid API plugin..."
+API_PLUGIN_DIR="${PROJECT_ROOT}/packages/unraid-api-plugin-docker-folders"
+API_PLUGIN_NAME="unraid-api-plugin-docker-folders"
+cd "$API_PLUGIN_DIR"
+
+# @unraid/shared is not on npm. Take it from the Unraid API's own release.
+if ! ls vendor/unraid-shared-*.tgz >/dev/null 2>&1; then
+    ./scripts/vendor-unraid-shared.sh release
+fi
+npm ci --no-audit --no-fund
+npm run build
+npm run validate
+
+# semver forbids leading zeros, so 2026.09.20-dev6 becomes 2026.9.20-dev6.
+NPM_VERSION=$(echo "$VERSION" | sed -E 's/^([0-9]+)\.0*([0-9]+)\.0*([0-9]+)/\1.\2.\3/')
+
+# Pack from a staging copy so the release never rewrites the committed
+# package.json, which build.sh does not commit.
+PACK_DIR=$(mktemp -d)
+cp -r dist package.json README.md "$PACK_DIR"/
+# contentHash covers what the API loads: every file under dist and the
+# committed package.json. It excludes the version, which changes every
+# build, so api-plugin.sh can skip reinstalling a backend whose code did not
+# change. A reinstall restarts the Unraid API.
+node -e "
+const fs = require('fs'), path = require('path'), crypto = require('crypto');
+const [dir, version] = process.argv.slice(1);
+const hash = crypto.createHash('sha256');
+const walk = (d) => fs.readdirSync(d).sort().flatMap((n) => {
+  const f = path.join(d, n);
+  return fs.statSync(f).isDirectory() ? walk(f) : [f];
+});
+for (const f of [path.join(dir, 'package.json'), ...walk(path.join(dir, 'dist'))]) {
+  hash.update(path.relative(dir, f) + '\\0');
+  hash.update(fs.readFileSync(f));
+}
+const f = path.join(dir, 'package.json');
+const p = JSON.parse(fs.readFileSync(f, 'utf8'));
+p.version = version;
+p.contentHash = hash.digest('hex');
+fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
+" "$PACK_DIR" "$NPM_VERSION"
+(cd "$PACK_DIR" && npm pack --silent >/dev/null)
+API_PLUGIN_TARBALL="${API_PLUGIN_NAME}-${NPM_VERSION}.tgz"
+if [ ! -f "${PACK_DIR}/${API_PLUGIN_TARBALL}" ]; then
+    echo -e "${RED}✗${NC} npm pack did not produce ${API_PLUGIN_TARBALL}"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} ${API_PLUGIN_TARBALL}"
+echo ""
+cd "$PROJECT_ROOT"
+
 # Copy backend files to build directory
 echo -e "${YELLOW}[$((++STEP))/${TOTAL_STEPS}]${NC} Packaging backend..."
 cd "$PROJECT_ROOT"
 
 # Copy the entire backend structure
 cp -r "${BACKEND_DIR}/usr" "${BUILD_DIR}/"
+
+# The API plugin travels inside the .txz. The .plg copies it to the flash
+# drive before installing it, because the Unraid API records the tarball's
+# path, and only /boot survives a reboot.
+mkdir -p "${BUILD_DIR}/usr/local/emhttp/plugins/${PLUGIN_NAME}/api-plugin"
+cp "${PACK_DIR}/${API_PLUGIN_TARBALL}" "${BUILD_DIR}/usr/local/emhttp/plugins/${PLUGIN_NAME}/api-plugin/"
+rm -rf "$PACK_DIR"
 
 # Copy CHANGELOG.md into plugin directory for settings page
 if [ -f "${PROJECT_ROOT}/CHANGELOG.md" ]; then
@@ -395,12 +446,7 @@ if [ "$BUILD_TYPE" == "release" ]; then
       # Insert release notes into PLG <CHANGES> section
       echo "Updating PLG release notes..."
 
-      LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-      if [ -n "$LAST_TAG" ]; then
-        PLG_NOTES=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s" --no-merges | grep -v "^- Update PLG.*for release" || true)
-      else
-        PLG_NOTES=$(git log --pretty=format:"- %s" --no-merges -20 | grep -v "^- Update PLG.*for release" || true)
-      fi
+      PLG_NOTES=$("${SCRIPT_DIR}/release-notes.sh" render plg "$RELEASE_NOTES_JSON")
 
       if [ -n "$PLG_NOTES" ]; then
         # Write notes to a temp file for awk to read
@@ -469,13 +515,7 @@ if [ "$BUILD_TYPE" == "release" ]; then
       # Create annotated tag
       echo "Creating tag: ${TAG_NAME}"
 
-      # Generate release notes from commits since last tag
-      LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-      if [ -n "$LAST_TAG" ]; then
-        COMMIT_LOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s" --no-merges | grep -v "^- Update PLG.*for release" || true)
-      else
-        COMMIT_LOG=$(git log --pretty=format:"- %s" --no-merges -20 | grep -v "^- Update PLG.*for release" || true)
-      fi
+      COMMIT_LOG=$("${SCRIPT_DIR}/release-notes.sh" render tag "$RELEASE_NOTES_JSON")
 
       # Fallback if no commits found
       if [ -z "$COMMIT_LOG" ]; then
@@ -553,13 +593,7 @@ EOF
             PRERELEASE_FLAG=""
           fi
 
-          # Generate changelog from commits since last tag
-          LAST_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
-          if [ -n "$LAST_TAG" ]; then
-            GH_COMMIT_LOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s" --no-merges | grep -v "^- Update PLG.*for release" || true)
-          else
-            GH_COMMIT_LOG=$(git log --pretty=format:"- %s" --no-merges -20 | grep -v "^- Update PLG.*for release" || true)
-          fi
+          GH_COMMIT_LOG=$("${SCRIPT_DIR}/release-notes.sh" render github "$RELEASE_NOTES_JSON")
 
           if [ -z "$GH_COMMIT_LOG" ]; then
             GH_COMMIT_LOG="- Release ${VERSION}"
@@ -567,9 +601,7 @@ EOF
 
           INSTALL_URL="https://raw.githubusercontent.com/rizowski/unraid-docker-folders/${CURRENT_BRANCH}/unraid-docker-folders-modern.plg"
 
-          RELEASE_BODY="## Changes
-
-${GH_COMMIT_LOG}
+          RELEASE_BODY="${GH_COMMIT_LOG}
 
 ### Installation
 \`\`\`

@@ -1,18 +1,35 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { Schedule, ScheduleHistoryEntry, BackupEntry } from '@/types/schedule';
-import { apiFetch } from '@/utils/csrf';
+import type { Schedule, ScheduleHistoryEntry, BackupEntry, ScheduleRunnerState } from '@/types/schedule';
+import { useBackend } from '@/backends';
 
-const API_BASE = '/plugins/unraid-docker-folders-modern/api';
 const FETCH_DEBOUNCE_MS = 500;
 
 export const useScheduleStore = defineStore('schedules', () => {
   const schedules = ref<Schedule[]>([]);
+  const runner = ref<ScheduleRunnerState | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
   let lastFetchTime = 0;
 
   const scheduleCount = computed(() => schedules.value.length);
+
+  /**
+   * True when nothing is running the schedules, so the UI must say so.
+   *
+   * The cron entry can be missing, or it can be present while the runner
+   * never fires. A stale heartbeat catches both. Stays false until the first
+   * response arrives, so the warning does not flash during load.
+   *
+   * With nothing enabled the cron entry is correctly absent and the heartbeat
+   * correctly goes stale, so there is no fault to report.
+   */
+  const runnerStalled = computed(() => {
+    const state = runner.value;
+    if (!state) return false;
+    if (!schedules.value.some((s) => s.enabled)) return false;
+    return !state.cron_installed || state.stale;
+  });
 
   function schedulesForTarget(targetType: string, targetId: string) {
     return schedules.value.filter(
@@ -31,12 +48,12 @@ export const useScheduleStore = defineStore('schedules', () => {
     error.value = null;
 
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php`);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      const { ok, error: failure, data } = await useBackend().schedules.list();
+      if (!ok) {
+        throw new Error(failure);
       }
-      const data = await response.json();
       schedules.value = data.schedules || [];
+      runner.value = data.runner || null;
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to fetch schedules';
       console.error('Error fetching schedules:', e);
@@ -47,12 +64,8 @@ export const useScheduleStore = defineStore('schedules', () => {
 
   async function createSchedule(data: Partial<Schedule>): Promise<{ success: boolean; id?: number; error?: string }> {
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-      const result = await response.json();
-      if (!response.ok) {
+      const { ok, data: result } = await useBackend().schedules.create(data);
+      if (!ok) {
         return { success: false, error: result.message || 'Failed to create schedule' };
       }
       await fetchSchedules(true);
@@ -65,11 +78,8 @@ export const useScheduleStore = defineStore('schedules', () => {
 
   async function updateSchedule(id: number, data: Partial<Schedule>): Promise<boolean> {
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php?id=${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      });
-      if (response.ok) {
+      const { ok } = await useBackend().schedules.update(id, data);
+      if (ok) {
         await fetchSchedules(true);
         return true;
       }
@@ -82,10 +92,8 @@ export const useScheduleStore = defineStore('schedules', () => {
 
   async function deleteSchedule(id: number): Promise<boolean> {
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php?id=${id}`, {
-        method: 'DELETE',
-      });
-      if (response.ok) {
+      const { ok } = await useBackend().schedules.remove(id);
+      if (ok) {
         schedules.value = schedules.value.filter((s) => s.id !== id);
         return true;
       }
@@ -103,11 +111,8 @@ export const useScheduleStore = defineStore('schedules', () => {
     }
 
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php?action=toggle&id=${id}`, {
-        method: 'POST',
-        body: JSON.stringify({ enabled }),
-      });
-      if (!response.ok) {
+      const { ok } = await useBackend().schedules.toggle(id, { enabled });
+      if (!ok) {
         if (schedule) schedule.enabled = !enabled;
         return false;
       }
@@ -132,13 +137,9 @@ export const useScheduleStore = defineStore('schedules', () => {
     if (updates.length === 0) return { success: true };
 
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php?action=bulk_toggle`, {
-        method: 'POST',
-        body: JSON.stringify({ updates }),
-      });
-      if (!response.ok) {
-        const result = await response.json().catch(() => ({}));
-        return { success: false, error: result.message || `HTTP ${response.status}` };
+      const { ok, error: failure } = await useBackend().schedules.bulkToggle({ updates });
+      if (!ok) {
+        return { success: false, error: failure };
       }
       await fetchSchedules(true);
       return { success: true };
@@ -151,13 +152,9 @@ export const useScheduleStore = defineStore('schedules', () => {
     if (ids.length === 0) return { success: true };
 
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php?action=bulk_delete`, {
-        method: 'POST',
-        body: JSON.stringify({ ids }),
-      });
-      if (!response.ok) {
-        const result = await response.json().catch(() => ({}));
-        return { success: false, error: result.message || `HTTP ${response.status}` };
+      const { ok, error: failure } = await useBackend().schedules.bulkDelete({ ids });
+      if (!ok) {
+        return { success: false, error: failure };
       }
       schedules.value = schedules.value.filter((s) => !ids.includes(s.id));
       await fetchSchedules(true);
@@ -169,12 +166,9 @@ export const useScheduleStore = defineStore('schedules', () => {
 
   async function runScheduleNow(id: number): Promise<{ success: boolean; message?: string }> {
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php?action=run&id=${id}`, {
-        method: 'POST',
-      });
-      const result = await response.json();
+      const { data: result } = await useBackend().schedules.run(id);
       await fetchSchedules(true);
-      return { success: result.success, message: result.message };
+      return { success: result.success ?? false, message: result.message };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to run schedule';
       return { success: false, message: msg };
@@ -183,9 +177,8 @@ export const useScheduleStore = defineStore('schedules', () => {
 
   async function getHistory(id: number, limit = 50): Promise<ScheduleHistoryEntry[]> {
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php?action=history&id=${id}&limit=${limit}`);
-      if (!response.ok) return [];
-      const data = await response.json();
+      const { ok, data } = await useBackend().schedules.history(id, limit);
+      if (!ok) return [];
       return data.history || [];
     } catch (e) {
       console.error('Error fetching schedule history:', e);
@@ -195,11 +188,8 @@ export const useScheduleStore = defineStore('schedules', () => {
 
   async function getBackups(targetType: string, targetId: string): Promise<BackupEntry[]> {
     try {
-      const response = await apiFetch(
-        `${API_BASE}/schedules.php?action=backups&target_type=${encodeURIComponent(targetType)}&target_id=${encodeURIComponent(targetId)}`,
-      );
-      if (!response.ok) return [];
-      const data = await response.json();
+      const { ok, data } = await useBackend().schedules.backups(targetType, targetId);
+      if (!ok) return [];
       return data.backups || [];
     } catch (e) {
       console.error('Error fetching backups:', e);
@@ -209,11 +199,8 @@ export const useScheduleStore = defineStore('schedules', () => {
 
   async function deleteBackup(path: string): Promise<boolean> {
     try {
-      const response = await apiFetch(`${API_BASE}/schedules.php?action=delete_backup`, {
-        method: 'POST',
-        body: JSON.stringify({ path }),
-      });
-      return response.ok;
+      const { ok } = await useBackend().schedules.deleteBackup({ path });
+      return ok;
     } catch (e) {
       console.error('Error deleting backup:', e);
       return false;
@@ -222,6 +209,8 @@ export const useScheduleStore = defineStore('schedules', () => {
 
   return {
     schedules,
+    runner,
+    runnerStalled,
     loading,
     error,
     scheduleCount,

@@ -1,0 +1,849 @@
+import { PassThrough } from 'node:stream';
+
+import { BadRequestException } from '@nestjs/common';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type {
+    DockerClient,
+    DockerDistributionInfo,
+    DockerListContainer,
+} from '../../containers/docker-client.js';
+import { DatabaseService } from '../../db/database.service.js';
+import type { EventBusService } from '../../events/event-bus.service.js';
+import { createMigratedDatabase, type TempDatabase } from '../../folders/__tests__/migrate.js';
+import type { RecreateResult, RecreateService } from '../recreate.service.js';
+import { ReleaseNotesService, type ReleaseFetcher } from '../release-notes.service.js';
+import { UpdateLogService } from '../update-log.service.js';
+import { UpdatesService } from '../updates.service.js';
+
+const PLEX = 'linuxserver/plex:latest';
+const PLEX_IMAGE_ID = 'sha256:image-plex';
+const SONARR = 'linuxserver/sonarr:latest';
+const SONARR_IMAGE_ID = 'sha256:image-sonarr';
+
+/**
+ * A stand-in for dockerode, narrow enough to hand-drive digests per image
+ * without a Docker socket. `containers` seeds `listContainers`; digests and
+ * failures are per-image maps a test can mutate before calling the service.
+ */
+function fakeDocker() {
+    let containers: DockerListContainer[] = [];
+    const localDigests = new Map<string, string[]>();
+    const remoteDigests = new Map<string, string>();
+    const remoteFailures = new Map<string, Error>();
+    const labels = new Map<string, Record<string, string>>();
+    const pullStreams = new Map<string, PassThrough>();
+    const pullFailures = new Map<string, Error>();
+    const calls: string[] = [];
+    // containerId -> its raw inspect's Config.Image, for updateContainer()'s
+    // tag lookup (docker.getContainer(name).inspect()).
+    const containerConfigImages = new Map<string, string>();
+    const containerInspectFailures = new Map<string, Error>();
+    // image ref -> the Id a tag-based `getImage(image).inspect()` answers
+    // with, for updateContainer()'s "is the tag already current" check.
+    const imageIds = new Map<string, string>();
+    const imageInspectFailures = new Map<string, Error>();
+
+    const client: DockerClient = {
+        listContainers: async () => {
+            calls.push('listContainers');
+            return containers;
+        },
+        // `updateContainer()` inspects by name (Docker accepts either), so
+        // this answers by looking the name (or id) up in the `containers`
+        // list, the way the real daemon resolves either to the same
+        // container. Not found there means Docker 404s the inspect, which
+        // `updateContainer()` catches and turns into "not found".
+        getContainer: (idOrName: string) => ({
+            inspect: async () => {
+                calls.push(`inspectContainer ${idOrName}`);
+                const failure = containerInspectFailures.get(idOrName);
+                if (failure) throw failure;
+                const listed = containers.find(
+                    (c) => (c.Names?.[0] ?? '').replace(/^\//, '') === idOrName || c.Id === idOrName
+                );
+                if (!listed) {
+                    throw Object.assign(new Error(`no such container: ${idOrName}`), { statusCode: 404 });
+                }
+                return {
+                    Id: listed.Id,
+                    Name: listed.Names?.[0] ?? `/${idOrName}`,
+                    Image: listed.ImageID ?? '',
+                    Config: { Image: containerConfigImages.get(listed.Id) ?? '' },
+                };
+            },
+            start: () => Promise.reject(new Error('not used here')),
+            stop: () => Promise.reject(new Error('not used here')),
+            restart: () => Promise.reject(new Error('not used here')),
+            unpause: () => Promise.reject(new Error('not used here')),
+            remove: () => Promise.reject(new Error('not used here')),
+        }),
+        getImage: (id: string) => ({
+            inspect: async () => {
+                calls.push(`inspect ${id}`);
+                const failure = imageInspectFailures.get(id);
+                if (failure) throw failure;
+                return {
+                    Id: imageIds.get(id),
+                    RepoDigests: localDigests.get(id) ?? [],
+                    Config: { Labels: labels.get(id) ?? {} },
+                };
+            },
+            remove: () => Promise.reject(new Error('not used here')),
+        }),
+        getEvents: () => Promise.reject(new Error('not used here')),
+        distributionInspect: async (imageRef: string): Promise<DockerDistributionInfo> => {
+            calls.push(`distributionInspect ${imageRef}`);
+            const failure = remoteFailures.get(imageRef);
+            if (failure) throw failure;
+            const digest = remoteDigests.get(imageRef);
+            return { Descriptor: digest ? { digest } : null };
+        },
+        pullImage: async (imageRef: string) => {
+            calls.push(`pullImage ${imageRef}`);
+            const failure = pullFailures.get(imageRef);
+            if (failure) throw failure;
+            const stream = new PassThrough();
+            pullStreams.set(imageRef, stream);
+            return stream;
+        },
+    };
+
+    return {
+        client,
+        calls,
+        setContainers: (value: DockerListContainer[]) => {
+            containers = value;
+        },
+        setLocalDigests: (imageId: string, digests: string[]) => localDigests.set(imageId, digests),
+        setLabels: (imageId: string, value: Record<string, string>) => labels.set(imageId, value),
+        setRemoteDigest: (image: string, digest: string) => remoteDigests.set(image, digest),
+        failRemote: (image: string, error: Error) => remoteFailures.set(image, error),
+        failPull: (image: string, error: Error) => pullFailures.set(image, error),
+        streamFor: (image: string) => {
+            const stream = pullStreams.get(image);
+            if (!stream) throw new Error(`no pull stream for ${image}`);
+            return stream;
+        },
+        setContainerConfigImage: (containerId: string, image: string) =>
+            containerConfigImages.set(containerId, image),
+        failContainerInspect: (containerId: string, error: Error) =>
+            containerInspectFailures.set(containerId, error),
+        setImageId: (imageRef: string, id: string) => imageIds.set(imageRef, id),
+        failImageInspect: (imageRef: string, error: Error) => imageInspectFailures.set(imageRef, error),
+    };
+}
+
+function fakeEvents() {
+    return { publish: vi.fn() } as unknown as EventBusService;
+}
+
+/** A silent stand-in — asserting on log text is `UpdateLogService`'s own test's job. */
+function fakeUpdateLog() {
+    return { log: vi.fn() } as unknown as UpdateLogService;
+}
+
+/**
+ * A real `ReleaseNotesService` (so the DB join under test is the real one),
+ * with a fetcher that fails the test if it is ever actually called. Per-test
+ * setup that has an image with both `updateAvailable: true` and a
+ * `sourceRepo` would call it for real otherwise — this is the guard against
+ * that happening by accident.
+ */
+function releaseNotesServiceThatNeverFetches(dbPath: string, log: UpdateLogService): ReleaseNotesService {
+    const fetcher: ReleaseFetcher = () => {
+        throw new Error('the GitHub fetcher must not be called in these tests');
+    };
+    return new ReleaseNotesService(new DatabaseService(dbPath), log, fetcher);
+}
+
+function fakeRecreate(results: Map<string, RecreateResult> = new Map()) {
+    const calls: string[] = [];
+    const service = {
+        recreateContainer: async (id: string) => {
+            calls.push(id);
+            return results.get(id) ?? { success: true, newId: `new-${id}`, error: null };
+        },
+    } as unknown as RecreateService;
+    return { service, calls };
+}
+
+/**
+ * Fixed, valid-hex ids (matching `CONTAINER_ID_PATTERN`) for the containers
+ * these tests use — a `docker.listContainers()` id is a real hex string, and
+ * the `containers=` validation in `pull.php` requires one too, so a fake
+ * `"id-plex"` would fail validation before ever being compared against.
+ */
+const CONTAINER_IDS: Record<string, string> = {
+    plex: 'aaaaaaaaaaaa',
+    plex2: 'bbbbbbbbbbbb',
+    sonarr: 'cccccccccccc',
+};
+
+function container(name: string, image: string, imageId: string): DockerListContainer {
+    return { Id: CONTAINER_IDS[name] ?? name, Names: [`/${name}`], Image: image, ImageID: imageId };
+}
+
+describe('UpdatesService', () => {
+    let temp: TempDatabase;
+    let docker: ReturnType<typeof fakeDocker>;
+    let events: EventBusService;
+    let updateLog: UpdateLogService;
+    let recreate: ReturnType<typeof fakeRecreate>;
+    let service: UpdatesService;
+
+    beforeEach(() => {
+        temp = createMigratedDatabase();
+        docker = fakeDocker();
+        events = fakeEvents();
+        updateLog = fakeUpdateLog();
+        recreate = fakeRecreate();
+        service = new UpdatesService(
+            docker.client,
+            new DatabaseService(temp.path),
+            events,
+            updateLog,
+            releaseNotesServiceThatNeverFetches(temp.path, updateLog),
+            recreate.service
+        );
+    });
+
+    afterEach(() => {
+        temp.cleanup();
+    });
+
+    describe('checkForUpdates', () => {
+        it('reports an update when the local and remote digests differ', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setLocalDigests(PLEX_IMAGE_ID, [`${PLEX}@sha256:old`]);
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+
+            const results = await service.checkForUpdates();
+
+            expect(results).toEqual([
+                expect.objectContaining({ image: PLEX, updateAvailable: true, error: null }),
+            ]);
+        });
+
+        it('reports no update when the digests match', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setLocalDigests(PLEX_IMAGE_ID, [`${PLEX}@sha256:same`]);
+            docker.setRemoteDigest(PLEX, 'sha256:same');
+
+            const [result] = await service.checkForUpdates();
+
+            expect(result.updateAvailable).toBe(false);
+        });
+
+        it('suppresses a stale update when the remote digest has not moved since the last no-update check', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            // Local RepoDigest still carries the old hash (e.g. multi-arch
+            // format mismatch), but the remote digest is unchanged from a
+            // prior check that already found no update.
+            docker.setLocalDigests(PLEX_IMAGE_ID, [`${PLEX}@sha256:mismatched-local-format`]);
+            docker.setRemoteDigest(PLEX, 'sha256:same-remote');
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare(
+                    `INSERT INTO image_update_checks (image, local_digest, remote_digest, update_available, checked_at)
+                     VALUES (?, NULL, ?, 0, 0)`
+                ).run(PLEX, 'sha256:same-remote');
+            });
+
+            const [result] = await service.checkForUpdates();
+
+            expect(result.updateAvailable).toBe(false);
+        });
+
+        it('reports an error and no update when the remote digest cannot be fetched', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.failRemote(PLEX, new Error('network unreachable'));
+
+            const [result] = await service.checkForUpdates();
+
+            expect(result).toEqual(
+                expect.objectContaining({
+                    updateAvailable: false,
+                    error: 'Failed to fetch remote digest',
+                })
+            );
+        });
+
+        it('skips an excluded image entirely, leaving it out of the response', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('update_check_exclude', ?, 0)").run(
+                    'linuxserver/*'
+                );
+            });
+
+            const results = await service.checkForUpdates();
+
+            expect(results).toEqual([]);
+            expect(docker.calls).not.toContain(`distributionInspect ${PLEX}`);
+        });
+
+        it('restricts a targeted check to the requested images, and leaves other cached rows alone', async () => {
+            docker.setContainers([
+                container('plex', PLEX, PLEX_IMAGE_ID),
+                container('sonarr', SONARR, SONARR_IMAGE_ID),
+            ]);
+            docker.setRemoteDigest(PLEX, 'sha256:new-plex');
+            docker.setRemoteDigest(SONARR, 'sha256:new-sonarr');
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare(
+                    `INSERT INTO image_update_checks (image, local_digest, remote_digest, update_available, checked_at)
+                     VALUES ('registry/untouched:latest', NULL, NULL, 0, 0)`
+                ).run();
+            });
+
+            const results = await service.checkForUpdates([PLEX]);
+
+            expect(results.map((r) => r.image)).toEqual([PLEX]);
+            expect(docker.calls).not.toContain(`distributionInspect ${SONARR}`);
+            // A targeted check must not run the stale-row cleanup.
+            expect(temp.rows("SELECT image FROM image_update_checks WHERE image = 'registry/untouched:latest'")).toHaveLength(1);
+        });
+
+        it('rejects a targeted check with no non-empty image names', async () => {
+            // Matches PHP's filter exactly: it checks for an empty string,
+            // not whitespace, so this (not a blank-string case) is the one
+            // that must fail.
+            await expect(service.checkForUpdates(['', ''])).rejects.toThrow(BadRequestException);
+        });
+
+        it('removes cached rows for images no container uses any more, on a full check only', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:same');
+            docker.setLocalDigests(PLEX_IMAGE_ID, [`${PLEX}@sha256:same`]);
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare(
+                    `INSERT INTO image_update_checks (image, local_digest, remote_digest, update_available, checked_at)
+                     VALUES ('registry/gone:latest', NULL, NULL, 0, 0)`
+                ).run();
+            });
+
+            await service.checkForUpdates();
+
+            expect(temp.rows('SELECT image FROM image_update_checks').map((r) => r.image)).toEqual([PLEX]);
+        });
+
+        it('announces "updates checked" exactly once per call, even for a targeted check', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:x');
+
+            await service.checkForUpdates([PLEX]);
+
+            expect(events.publish).toHaveBeenCalledWith('updates', 'checked');
+            expect((events.publish as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+        });
+
+        it('joins a cached release note only when its status is ok', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setLabels(PLEX_IMAGE_ID, {
+                'org.opencontainers.image.source': 'https://github.com/linuxserver/docker-plex',
+            });
+            docker.setRemoteDigest(PLEX, 'sha256:x');
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare(
+                    `INSERT INTO release_notes (repo, tag, name, published_at, url, summary, status, fetched_at)
+                     VALUES ('linuxserver/docker-plex', 'v1.2.3', 'v1.2.3', 100, 'https://x', 'notes', 'ok', 200)`
+                ).run();
+            });
+
+            const [result] = await service.checkForUpdates();
+
+            expect(result.sourceRepo).toBe('linuxserver/docker-plex');
+            expect(result.release).toEqual(
+                expect.objectContaining({ tag: 'v1.2.3', fetchedAt: 200 })
+            );
+        });
+    });
+
+    describe('getCached', () => {
+        it('reads back what a check wrote, including a null release for a not_found note', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setLabels(PLEX_IMAGE_ID, {
+                'org.opencontainers.image.source': 'https://github.com/linuxserver/docker-plex',
+            });
+            docker.setRemoteDigest(PLEX, 'sha256:x');
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare(
+                    `INSERT INTO release_notes (repo, status, fetched_at)
+                     VALUES ('linuxserver/docker-plex', 'not_found', 100)`
+                ).run();
+            });
+
+            await service.checkForUpdates();
+            const cached = service.getCached();
+
+            expect(cached).toEqual([expect.objectContaining({ image: PLEX, release: null })]);
+        });
+    });
+
+    describe('pullImage', () => {
+        it('rejects a malformed image name before ever touching Docker', async () => {
+            await expect(service.pullImage('../etc/passwd')).rejects.toThrow(BadRequestException);
+            expect(docker.calls).toEqual([]);
+        });
+
+        it('rejects recreate:true without containerIds', async () => {
+            await expect(service.pullImage(PLEX, { recreate: true })).rejects.toThrow(BadRequestException);
+        });
+
+        it('rejects a containers list with no valid ids', async () => {
+            await expect(service.pullImage(PLEX, { containers: ['not-an-id'] })).rejects.toThrow(
+                BadRequestException
+            );
+        });
+
+        it('reports success, updates the cache, and announces both events', async () => {
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+
+            const promise = service.pullImage(PLEX);
+            docker.streamFor(PLEX).end('{"status":"Pull complete"}\n');
+            const result = await promise;
+
+            expect(result).toEqual({ success: true, image: PLEX, error: null });
+            expect(events.publish).toHaveBeenCalledWith('updates', 'pulled');
+            expect(events.publish).toHaveBeenCalledWith('container', 'updated');
+            expect(temp.rows('SELECT update_available FROM image_update_checks WHERE image = ?', [PLEX])).toEqual([
+                { update_available: 0 },
+            ]);
+        });
+
+        it('preserves a previously known source_repo across a pull, unlike the PHP INSERT OR REPLACE', async () => {
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare(
+                    `INSERT INTO image_update_checks (image, local_digest, remote_digest, update_available, checked_at, source_url, source_repo)
+                     VALUES (?, NULL, NULL, 1, 0, 'https://github.com/linuxserver/docker-plex', 'linuxserver/docker-plex')`
+                ).run(PLEX);
+            });
+
+            const promise = service.pullImage(PLEX);
+            docker.streamFor(PLEX).end('');
+            await promise;
+
+            expect(temp.rows('SELECT source_repo FROM image_update_checks WHERE image = ?', [PLEX])).toEqual([
+                { source_repo: 'linuxserver/docker-plex' },
+            ]);
+        });
+
+        it('keeps the daemon\'s own error text when the pull never starts, matching PHP\'s curl_error() reason', async () => {
+            docker.failPull(PLEX, new Error('no such image'));
+
+            const result = await service.pullImage(PLEX);
+
+            expect(result).toEqual({ success: false, image: PLEX, error: 'no such image' });
+            expect(events.publish).not.toHaveBeenCalled();
+        });
+
+        it('falls back to the fixed "Pull failed" message only when the daemon error carries no text', async () => {
+            docker.failPull(PLEX, new Error(''));
+
+            const result = await service.pullImage(PLEX);
+
+            expect(result).toEqual({ success: false, image: PLEX, error: 'Pull failed' });
+        });
+
+        it('fails when the stream reports a mid-pull error, without writing the cache (deliberate PHP divergence)', async () => {
+            const promise = service.pullImage(PLEX);
+            docker.streamFor(PLEX).end('{"error":"manifest unknown"}\n');
+
+            const result = await promise;
+
+            expect(result).toEqual({ success: false, image: PLEX, error: 'manifest unknown' });
+            expect(events.publish).not.toHaveBeenCalled();
+            expect(temp.rows('SELECT * FROM image_update_checks')).toEqual([]);
+        });
+
+        it('auto-recreates matching containers when post_pull_action says to', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID), container('sonarr', SONARR, SONARR_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('post_pull_action', 'pull_and_auto_recreate', 0)").run();
+            });
+
+            const promise = service.pullImage(PLEX);
+            docker.streamFor(PLEX).end('');
+            const result = await promise;
+
+            expect(result.success).toBe(true);
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex]);
+        });
+
+        it('does not auto-recreate when post_pull_action is pull_only', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+
+            const promise = service.pullImage(PLEX);
+            docker.streamFor(PLEX).end('');
+            await promise;
+
+            expect(recreate.calls).toEqual([]);
+        });
+
+        it('force-recreates only the requested container ids', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID), container('plex2', PLEX, PLEX_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+
+            const promise = service.pullImage(PLEX, {
+                containers: [CONTAINER_IDS.plex2],
+                recreate: true,
+            });
+            docker.streamFor(PLEX).end('');
+            await promise;
+
+            // Only the requested id is recreated, not every container sharing the image.
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex2]);
+        });
+
+        it('aborts a pull stuck past the 10 minute timeout, keeping that as the reason', async () => {
+            vi.useFakeTimers();
+            try {
+                const promise = service.pullImage(PLEX);
+                // Never ends the stream: this is the "stuck" case the timer covers.
+                await vi.advanceTimersByTimeAsync(600_000);
+                const result = await promise;
+
+                expect(result).toEqual({ success: false, image: PLEX, error: 'Pull timed out' });
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('does not time out a pull that finishes well inside the window', async () => {
+            vi.useFakeTimers();
+            try {
+                docker.setRemoteDigest(PLEX, 'sha256:pulled');
+                const promise = service.pullImage(PLEX);
+                await vi.advanceTimersByTimeAsync(0);
+                docker.streamFor(PLEX).end('{"status":"Pull complete"}\n');
+                await vi.advanceTimersByTimeAsync(0);
+
+                const result = await promise;
+
+                expect(result).toEqual({ success: true, image: PLEX, error: null });
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+    });
+
+    describe('pullImageEvents', () => {
+        it('emits status, progress, complete, then done, in that order', async () => {
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+
+            const seen: string[] = [];
+            const done = new Promise<void>((resolve) => {
+                service.pullImageEvents(PLEX).subscribe({
+                    next: (event) => {
+                        seen.push(event.type);
+                        if (event.type === 'done') resolve();
+                    },
+                });
+            });
+
+            // Subscribing starts the pull synchronously (cold observable), so
+            // the stream exists by the time this runs.
+            docker.streamFor(PLEX).end('{"id":"layer1","status":"Downloading"}\n');
+            await done;
+
+            expect(seen).toEqual(['status', 'progress', 'complete', 'done']);
+        });
+
+        it('emits error then done on failure, never complete', async () => {
+            docker.failPull(PLEX, new Error('no such image'));
+
+            const seen: string[] = [];
+            const done = new Promise<void>((resolve) => {
+                service.pullImageEvents(PLEX).subscribe({
+                    next: (event) => {
+                        seen.push(event.type);
+                        if (event.type === 'done') resolve();
+                    },
+                });
+            });
+            await done;
+
+            expect(seen).toEqual(['status', 'error', 'done']);
+        });
+    });
+
+    describe('runScheduledCheck', () => {
+        it('skips entirely when the Docker socket is not present', async () => {
+            const withMissingSocket = new UpdatesService(
+                docker.client,
+                new DatabaseService(temp.path),
+                events,
+                updateLog,
+                releaseNotesServiceThatNeverFetches(temp.path, updateLog),
+                recreate.service,
+                '/no/such/socket'
+            );
+
+            await withMissingSocket.runScheduledCheck();
+
+            expect(docker.calls).toEqual([]);
+            expect(updateLog.log).toHaveBeenCalledWith('SKIP Docker socket not available');
+        });
+
+        it('runs the full check when the socket path exists, using it as a stand-in file', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+            const withRealSocket = new UpdatesService(
+                docker.client,
+                new DatabaseService(temp.path),
+                events,
+                updateLog,
+                releaseNotesServiceThatNeverFetches(temp.path, updateLog),
+                recreate.service,
+                temp.path // any existing file stands in for the socket path
+            );
+
+            await withRealSocket.runScheduledCheck();
+
+            expect(temp.rows('SELECT image FROM image_update_checks')).toEqual([{ image: PLEX }]);
+            expect(events.publish).toHaveBeenCalledWith('updates', 'checked');
+        });
+
+        it('sends a notification only for images that were not already flagged, when enabled', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID), container('sonarr', SONARR, SONARR_IMAGE_ID)]);
+            docker.setLocalDigests(PLEX_IMAGE_ID, [`${PLEX}@sha256:old-plex`]);
+            docker.setRemoteDigest(PLEX, 'sha256:new-plex'); // newly available this run
+            docker.setLocalDigests(SONARR_IMAGE_ID, [`${SONARR}@sha256:old-sonarr`]);
+            docker.setRemoteDigest(SONARR, 'sha256:already-known'); // already flagged before this run, digest unchanged
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('notify_on_updates', '1', 0)").run();
+                db.prepare(
+                    `INSERT INTO image_update_checks (image, local_digest, remote_digest, update_available, checked_at)
+                     VALUES (?, NULL, 'sha256:already-known', 1, 0)`
+                ).run(SONARR);
+            });
+            const withRealSocket = new UpdatesService(
+                docker.client,
+                new DatabaseService(temp.path),
+                events,
+                updateLog,
+                releaseNotesServiceThatNeverFetches(temp.path, updateLog),
+                recreate.service,
+                temp.path
+            );
+
+            await withRealSocket.runScheduledCheck();
+
+            expect(updateLog.log).toHaveBeenCalledWith(expect.stringContaining('NOTIFY Sent notification: 1 container update available (plex)'));
+        });
+
+        it('sends no notification when disabled, even with new updates', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+            const withRealSocket = new UpdatesService(
+                docker.client,
+                new DatabaseService(temp.path),
+                events,
+                updateLog,
+                releaseNotesServiceThatNeverFetches(temp.path, updateLog),
+                recreate.service,
+                temp.path
+            );
+
+            await withRealSocket.runScheduledCheck();
+
+            expect(updateLog.log).not.toHaveBeenCalledWith(expect.stringContaining('NOTIFY'));
+        });
+    });
+
+    /**
+     * `ScheduleManager::executeContainerUpdate()`. `DockerFoldersScheduleExecutors`
+     * is the only caller (see its own spec for the delegation and the stack
+     * refusal); these exercise the six steps directly.
+     */
+    describe('updateContainer', () => {
+        it("fails when the container isn't found", async () => {
+            docker.setContainers([]);
+
+            const result = await service.updateContainer('plex');
+
+            expect(result).toEqual({ success: false, message: "Container 'plex' not found" });
+        });
+
+        it('inspects the container by name and never lists every container, start to finish', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setLocalDigests(PLEX, [`${PLEX}@sha256:same`]);
+            docker.setRemoteDigest(PLEX, 'sha256:same');
+            docker.setImageId(PLEX, PLEX_IMAGE_ID);
+
+            await service.updateContainer('plex');
+
+            expect(docker.calls).toContain('inspectContainer plex');
+            expect(docker.calls).not.toContain('listContainers');
+        });
+
+        it.each(['', 'sha256:not-a-tag'])(
+            'fails when the container carries no usable image reference (%j)',
+            async (configImage) => {
+                docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+                docker.setContainerConfigImage(CONTAINER_IDS.plex, configImage);
+
+                const result = await service.updateContainer('plex');
+
+                expect(result).toEqual({
+                    success: false,
+                    message: 'Update check failed for plex: no image reference',
+                });
+                expect(docker.calls).not.toContain(`distributionInspect ${PLEX}`);
+            }
+        );
+
+        it('checks the tag the container was created from, not the list image, once Docker starts listing it by ID', async () => {
+            // The tag has moved to a newer build: Docker now lists the
+            // container under a bare image ID, and `resolveImageTag`'s name
+            // lookup (no matching template in this test) would fall back to
+            // that same ID. `Config.Image` still names the tag, and that is
+            // what must be checked and recreated against.
+            const movedId = 'sha256:old-image-id';
+            docker.setContainers([container('plex', movedId, movedId)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setLocalDigests(PLEX, [`${PLEX}@sha256:old`]); // keyed by the tag, not movedId
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+            docker.setImageId(PLEX, 'sha256:new-image-id');
+
+            const promise = service.updateContainer('plex');
+            // Several real awaits (list, inspect, the check itself) run
+            // before the pull starts, unlike `pullImage()` where it is the
+            // very first thing awaited — so the stream does not exist yet
+            // right after calling this, and the test has to wait for it.
+            await vi.waitFor(() => expect(docker.calls).toContain(`pullImage ${PLEX}`));
+            docker.streamFor(PLEX).end('');
+            const result = await promise;
+
+            expect(result).toEqual({ success: true, message: `Updated plex to the latest ${PLEX}` });
+            // The local digest came from inspecting the tag itself.
+            expect(docker.calls).toContain(`inspect ${PLEX}`);
+            expect(docker.calls).not.toContain(`inspect ${movedId}`);
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex]);
+        });
+
+        it('reports excluded, and success, when an exclude pattern matches the tag', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            new DatabaseService(temp.path).write((db) => {
+                db.prepare(
+                    "INSERT INTO settings (key, value, updated_at) VALUES ('update_check_exclude', ?, 0)"
+                ).run('linuxserver/*');
+            });
+
+            const result = await service.updateContainer('plex');
+
+            expect(result).toEqual({
+                success: true,
+                message: 'plex is excluded from update checks. Nothing to do',
+            });
+            expect(docker.calls).not.toContain(`distributionInspect ${PLEX}`);
+        });
+
+        it('fails when the update check itself errors', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.failRemote(PLEX, new Error('registry down'));
+
+            const result = await service.updateContainer('plex');
+
+            expect(result).toEqual({
+                success: false,
+                message: 'Update check failed for plex: Failed to fetch remote digest',
+            });
+        });
+
+        it('fails when the pull fails, and never reaches the recreate step', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            // The check that decides `updateAvailable` reads this via
+            // `getImage(<tag>).inspect()`, keyed by the tag itself — see the
+            // `refsOnly` comment on `performCheck()`.
+            docker.setLocalDigests(PLEX, [`${PLEX}@sha256:old`]);
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+            docker.failPull(PLEX, new Error('no such image'));
+
+            const result = await service.updateContainer('plex');
+
+            expect(result).toEqual({ success: false, message: 'Pull failed for plex: no such image' });
+            expect(recreate.calls).toEqual([]);
+            expect(events.publish).not.toHaveBeenCalled();
+        });
+
+        it('reports up to date, without recreating, when the tag id already matches the container', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setLocalDigests(PLEX, [`${PLEX}@sha256:same`]);
+            docker.setRemoteDigest(PLEX, 'sha256:same');
+            docker.setImageId(PLEX, PLEX_IMAGE_ID);
+
+            const result = await service.updateContainer('plex');
+
+            expect(result).toEqual({ success: true, message: 'plex is up to date' });
+            expect(recreate.calls).toEqual([]);
+        });
+
+        it('pulls, recreates, and reports success when an update is available', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setLocalDigests(PLEX, [`${PLEX}@sha256:old`]);
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+            docker.setImageId(PLEX, 'sha256:new-image-id');
+
+            const promise = service.updateContainer('plex');
+            await vi.waitFor(() => expect(docker.calls).toContain(`pullImage ${PLEX}`));
+            docker.streamFor(PLEX).end('{"status":"Pull complete"}\n');
+            const result = await promise;
+
+            expect(result).toEqual({ success: true, message: `Updated plex to the latest ${PLEX}` });
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex]);
+            expect(events.publish).toHaveBeenCalledWith('updates', 'pulled');
+            expect(events.publish).toHaveBeenCalledWith('container', 'updated');
+            // Only the update itself is announced — never post_pull_action's
+            // own bookkeeping, since this bypasses runPull() entirely.
+            expect((events.publish as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
+        });
+
+        it('recreates without pulling when the tag is already current but the container still runs an older image id', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setLocalDigests(PLEX, [`${PLEX}@sha256:same`]);
+            docker.setRemoteDigest(PLEX, 'sha256:same'); // no update available
+            docker.setImageId(PLEX, 'sha256:already-pulled'); // a prior pull moved the tag already
+
+            const result = await service.updateContainer('plex');
+
+            expect(result).toEqual({ success: true, message: `Updated plex to the latest ${PLEX}` });
+            expect(docker.calls).not.toContain(`pullImage ${PLEX}`);
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex]);
+        });
+
+        it('fails when the recreate fails', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setLocalDigests(PLEX, [`${PLEX}@sha256:same`]);
+            docker.setRemoteDigest(PLEX, 'sha256:same');
+            docker.setImageId(PLEX, 'sha256:new-image-id');
+            const failingRecreate = fakeRecreate(
+                new Map([[CONTAINER_IDS.plex, { success: false, newId: null, error: 'stop failed' }]])
+            );
+            const withFailingRecreate = new UpdatesService(
+                docker.client,
+                new DatabaseService(temp.path),
+                events,
+                updateLog,
+                releaseNotesServiceThatNeverFetches(temp.path, updateLog),
+                failingRecreate.service
+            );
+
+            const result = await withFailingRecreate.updateContainer('plex');
+
+            expect(result).toEqual({ success: false, message: 'Update failed for plex: stop failed' });
+        });
+    });
+});

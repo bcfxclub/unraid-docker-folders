@@ -11,6 +11,7 @@ require_once dirname(__DIR__) . '/include/config.php';
 require_once dirname(__DIR__) . '/include/auth.php';
 require_once dirname(__DIR__) . '/classes/Database.php';
 require_once dirname(__DIR__) . '/classes/CronManager.php';
+require_once dirname(__DIR__) . '/classes/ComposeManager.php';
 
 header('Content-Type: application/json');
 
@@ -42,6 +43,19 @@ try {
 
 function handleGet()
 {
+  // Polled by the settings page while the GraphQL backend installs or is
+  // removed. Read only.
+  if (($_GET['action'] ?? '') === 'backend-status') {
+    $apiVersion = dfmUnraidApiVersion();
+    jsonResponse([
+      'mode' => dfmBackendMode(),
+      'plugin' => dfmReadJsonFile(DFM_API_PLUGIN_STATE_FILE),
+      'rollback' => dfmReadJsonFile(DFM_BACKEND_ROLLBACK_MARKER),
+      'apiVersion' => $apiVersion,
+      'apiSupported' => dfmApiVersionSupported($apiVersion, dfmApiCompatRange()),
+    ]);
+  }
+
   $db = Database::getInstance();
   $rows = $db->fetchAll('SELECT key, value FROM settings');
 
@@ -92,13 +106,30 @@ function handlePost()
     'post_pull_action',
     'update_concurrency',
     'log_refresh_interval',
+    'stats_refresh_interval',
     'compose_export_dir',
+    'compose_auto_install',
     'backup_destination',
     'default_retention_count',
     'sort_mode', 'sort_folders',
+    'backend_mode',
   ];
   if (!in_array($key, $allowedKeys, true)) {
     errorResponse('Invalid settings key', 400);
+  }
+
+  // backend_mode picks which backend the Vue app talks to. Anything other
+  // than the two known values would leave the frontend with no transport, so
+  // reject rather than store it.
+  if ($key === 'backend_mode' && !in_array($value, BACKEND_MODES, true)) {
+    errorResponse('Invalid backend mode', 400);
+  }
+
+  // A checkbox stores '0' or '1' only. A JSON 1 or true would be stored as
+  // '1' but fail the === '1' test below, which deletes the flash copy of a
+  // setting that then reads as on.
+  if ($key === 'compose_auto_install' && !in_array($value, ['0', '1'], true)) {
+    errorResponse('compose_auto_install must be "0" or "1"', 400);
   }
 
   // Validate sort_mode against the known set of modes.
@@ -134,21 +165,65 @@ function handlePost()
   }
 
   // Clamp bounded numeric settings — the UI <select> is not the only writer.
-  if ($key === 'update_concurrency') {
+  // The plugin clamps its stats stream to 1s..300s, so a stored
+  // stats_refresh_interval outside that would not take effect.
+  $integerRanges = [
+    'update_concurrency' => [1, 5],
+    'stats_refresh_interval' => [1, 300],
+  ];
+  if (isset($integerRanges[$key])) {
+    [$min, $max] = $integerRanges[$key];
     $n = (int) $value;
-    if ($n < 1 || $n > 5) {
-      errorResponse('update_concurrency must be between 1 and 5', 400);
+    if ($n < $min || $n > $max) {
+      errorResponse("{$key} must be between {$min} and {$max}", 400);
     }
     $value = (string) $n;
   }
 
-  // Upsert: insert or update
-  $existing = $db->fetchOne('SELECT key FROM settings WHERE key = ?', [$key]);
+  // Switching backends installs or removes the GraphQL backend in the Unraid
+  // API, which restarts the API, so the script runs detached. GraphQL is not
+  // stored here: the script stores it once the backend answers, so a failed
+  // install leaves the page on PHP. PHP is stored at once, before the removal.
+  if ($key === 'backend_mode') {
+    // The run id tags the state file, so the page waits for this run and not
+    // for a boot or watchdog run that writes the same file. The rollback
+    // marker stays until the install succeeds; the script deletes it then.
+    $run = bin2hex(random_bytes(8));
+    if ($value === 'graphql') {
+      // The page disables the option on an untested API, but a POST can skip
+      // the page. api-plugin.sh refuses too; this answers before it starts.
+      $versionReason = dfmApiVersionReason(dfmUnraidApiVersion(), dfmApiCompatRange());
+      if ($versionReason !== '') {
+        errorResponse($versionReason, 409);
+      }
+      dfmLaunchApiPlugin('install', $run);
+      jsonResponse(['success' => true, 'key' => $key, 'value' => dfmBackendMode(), 'pending' => 'install', 'run' => $run]);
+    }
+    dfmWriteBackendMode($db, 'php');
+    dfmLaunchApiPlugin('remove', $run);
+    jsonResponse(['success' => true, 'key' => $key, 'value' => 'php', 'pending' => 'remove', 'run' => $run]);
+  }
 
-  if ($existing) {
-    $db->update('settings', ['value' => $value, 'updated_at' => $now], 'key = ?', [$key]);
-  } else {
-    $db->insert('settings', ['key' => $key, 'value' => $value, 'updated_at' => $now]);
+  dfmUpsertSetting($db, $key, $value);
+
+  // Keep the flash copy of the compose binary in step with the option: take a
+  // copy when it is switched on and compose is already installed, drop it
+  // when it is switched off. With compose not installed yet, the install or
+  // the next boot takes the copy.
+  if ($key === 'compose_auto_install') {
+    $composeManager = new ComposeManager();
+    if ($value === '0') {
+      $composeManager->removeCachedComposeBinary();
+    } elseif (is_file(ComposeManager::COMPOSE_BINARY_PATH)) {
+      $cached = $composeManager->cacheComposeBinary();
+      if (!$composeManager->isAutoInstallEnabled()) {
+        // Switched off while this request copied. The off request found no
+        // finished copy to delete, so delete it here.
+        $composeManager->removeCachedComposeBinary();
+      } elseif (!$cached['success']) {
+        errorResponse('Saved, but ' . $cached['error'], 500);
+      }
+    }
   }
 
   // When update_check_schedule changes, update or remove the cron file

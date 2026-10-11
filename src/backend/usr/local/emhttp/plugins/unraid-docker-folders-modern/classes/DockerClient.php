@@ -7,6 +7,8 @@
  * @package UnraidDockerModern
  */
 
+require_once __DIR__ . '/DockerStreamDemuxer.php';
+
 class DockerClient
 {
   private $socketPath;
@@ -15,6 +17,8 @@ class DockerClient
   /** HTTP status behind the last failure, or 0 if it wasn't an HTTP error. */
   private $lastErrorCode = 0;
   private $imageInfoCache = [];
+  /** Cached result of readHostMemoryTotal(), null until first read. */
+  private $hostMemoryTotal = null;
 
   private static $cgroupLayout = null;
   private static $cgroupLayoutDetected = false;
@@ -136,7 +140,7 @@ class DockerClient
     if (!empty($missing)) {
       $requests = [];
       foreach ($missing as $id) {
-        $requests[$id] = "/containers/{$id}/json";
+        $requests[$id] = "/containers/" . rawurlencode($id) . "/json";
       }
       $results = $this->requestMulti($requests);
 
@@ -167,11 +171,15 @@ class DockerClient
         $imageRequests = [];
         foreach (array_unique($needImage) as $imageId) {
           if ($imageId !== '') {
-            $imageRequests[$imageId] = "/images/{$imageId}/json";
+            $imageRequests[$imageId] = "/images/" . rawurlencode($imageId) . "/json";
           }
         }
-        $imageResults = empty($imageRequests) ? [] : $this->requestMulti($imageRequests);
-        $fresh = self::mergeImageUsers($fresh, $needImage, $imageResults);
+        $imageStatus = [];
+        $imageResults = empty($imageRequests) ? [] : $this->requestMulti($imageRequests, $imageStatus);
+        $goneImages = array_keys(array_filter($imageStatus, function ($code) {
+          return $code === 404;
+        }));
+        $fresh = self::mergeImageUsers($fresh, $needImage, $imageResults, $goneImages);
       }
 
       foreach ($fresh as $id => $facts) {
@@ -207,17 +215,31 @@ class DockerClient
    * then stay on screen until the next reboot. Dropping it costs one more
    * inspect on the next list.
    *
+   * That retry only helps when the failure was transient. An image that
+   * Docker reports as gone (404), or a container with no image id, will
+   * never resolve, and dropping it meant one more inspect on every list,
+   * forever. Those are cached with imageUser set to the container's own
+   * user. That reads as "the image asks for this user", so the unknown answer
+   * raises no finding, which is what the dropped entry showed before.
+   *
    * @param array $fresh        id => facts, each already carrying imageUser ''
    * @param array $needImage    id => image ID, for the containers to resolve
    * @param array $imageResults image ID => /images/{id}/json payload, or absent
-   * @return array The facts map, minus any container with no image payload
+   * @param array $goneImages   image IDs that Docker answered 404 for
+   * @return array The facts map, minus any container whose image failed
+   *               for a reason that may pass
    */
-  public static function mergeImageUsers(array $fresh, array $needImage, array $imageResults)
+  public static function mergeImageUsers(array $fresh, array $needImage, array $imageResults, array $goneImages = [])
   {
+    $gone = array_flip($goneImages);
     foreach ($needImage as $id => $imageId) {
       $image = $imageId === '' ? null : ($imageResults[$imageId] ?? null);
       if (!is_array($image)) {
-        unset($fresh[$id]);
+        if ($imageId === '' || isset($gone[$imageId])) {
+          $fresh[$id]['imageUser'] = (string) ($fresh[$id]['user'] ?? '');
+        } else {
+          unset($fresh[$id]);
+        }
         continue;
       }
       $config = isset($image['Config']) && is_array($image['Config']) ? $image['Config'] : [];
@@ -293,7 +315,7 @@ class DockerClient
    * @param string $key
    * @return string
    */
-  private static function envValue($env, $key)
+  public static function envValue($env, $key)
   {
     $prefix = $key . '=';
     $len = strlen($prefix);
@@ -357,7 +379,7 @@ class DockerClient
    */
   public function inspectContainer($id)
   {
-    $response = $this->request('GET', "/containers/{$id}/json");
+    $response = $this->request('GET', "/containers/" . rawurlencode($id) . "/json");
 
     if (!$response) {
       return null;
@@ -381,7 +403,7 @@ class DockerClient
     if (!empty($info['State']['Paused'])) {
       return $this->unpauseContainer($id);
     }
-    $response = $this->request('POST', "/containers/{$id}/start");
+    $response = $this->request('POST', "/containers/" . rawurlencode($id) . "/start");
     return $response !== false;
   }
 
@@ -394,7 +416,7 @@ class DockerClient
    */
   public function stopContainer($id, $timeout = 10)
   {
-    $response = $this->request('POST', "/containers/{$id}/stop?t={$timeout}", null, $timeout + 5);
+    $response = $this->request('POST', "/containers/" . rawurlencode($id) . "/stop?t={$timeout}", null, $timeout + 5);
     return $response !== false;
   }
 
@@ -407,19 +429,19 @@ class DockerClient
    */
   public function restartContainer($id, $timeout = 10)
   {
-    $response = $this->request('POST', "/containers/{$id}/restart?t={$timeout}", null, $timeout + 5);
+    $response = $this->request('POST', "/containers/" . rawurlencode($id) . "/restart?t={$timeout}", null, $timeout + 5);
     return $response !== false;
   }
 
   public function pauseContainer($id)
   {
-    $response = $this->request('POST', "/containers/{$id}/pause");
+    $response = $this->request('POST', "/containers/" . rawurlencode($id) . "/pause");
     return $response !== false;
   }
 
   public function unpauseContainer($id)
   {
-    $response = $this->request('POST', "/containers/{$id}/unpause");
+    $response = $this->request('POST', "/containers/" . rawurlencode($id) . "/unpause");
     return $response !== false;
   }
 
@@ -433,7 +455,7 @@ class DockerClient
   public function removeContainer($id, $force = false)
   {
     $params = $force ? '?force=1' : '';
-    $response = $this->request('DELETE', "/containers/{$id}{$params}");
+    $response = $this->request('DELETE', "/containers/" . rawurlencode($id) . "{$params}");
     return $response !== false;
   }
 
@@ -443,7 +465,7 @@ class DockerClient
   public function removeImage($imageId, $force = false)
   {
     $params = $force ? '?force=1' : '';
-    $response = $this->request('DELETE', "/images/" . urlencode($imageId) . $params);
+    $response = $this->request('DELETE', "/images/" . rawurlencode($imageId) . $params);
     return $response !== false;
   }
 
@@ -458,7 +480,7 @@ class DockerClient
    */
   public function getContainerLogs($id, $tail = 100)
   {
-    $raw = $this->requestRaw('GET', "/containers/{$id}/logs?stdout=1&stderr=1&timestamps=1&tail={$tail}");
+    $raw = $this->requestRaw('GET', "/containers/" . rawurlencode($id) . "/logs?stdout=1&stderr=1&timestamps=1&tail={$tail}");
     if ($raw === false) {
       // A 400 from /logs specifically means the container's logging driver
       // can't be read back (--log-driver=none, syslog, …). This is the only
@@ -501,7 +523,21 @@ class DockerClient
       $output
     );
 
-    // Simplify Docker RFC3339Nano timestamps to YYYY-MM-DD HH:MM:SS
+    // Docker stamps each line in UTC. Show that stamp in the server's own time
+    // zone, the default config.php sets, so it reads in order beside the lines
+    // below whose own local timestamp replaces it.
+    $zone = new DateTimeZone(date_default_timezone_get());
+    $utc = new DateTimeZone('UTC');
+    $output = preg_replace_callback(
+      '/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\.\d+Z/m',
+      function ($m) use ($zone, $utc) {
+        $stamp = new DateTime($m[1] . ' ' . $m[2], $utc);
+        return $stamp->setTimezone($zone)->format('Y-m-d H:i:s');
+      },
+      $output
+    );
+
+    // Simplify any other Docker RFC3339Nano timestamps to YYYY-MM-DD HH:MM:SS
     $output = preg_replace(
       '/(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\.\d+Z/',
       '$1 $2',
@@ -605,7 +641,7 @@ class DockerClient
    */
   public function getContainerStats($id)
   {
-    $response = $this->request('GET', "/containers/{$id}/stats?stream=0");
+    $response = $this->request('GET', "/containers/" . rawurlencode($id) . "/stats?stream=0");
     return $response ?: null;
   }
 
@@ -617,7 +653,7 @@ class DockerClient
    */
   public function getImageInfo($imageId)
   {
-    $response = $this->request('GET', "/images/{$imageId}/json");
+    $response = $this->request('GET', "/images/" . rawurlencode($imageId) . "/json");
     return $response ?: null;
   }
 
@@ -648,6 +684,13 @@ class DockerClient
    */
   public function getContainerLogSize($fullId)
   {
+    // A full container id is 64 hex characters. The callers fall back to the
+    // id from the request when Docker returns none, and that value goes into
+    // a filesystem path here, so anything else is refused.
+    if (!is_string($fullId) || !preg_match('/^[a-f0-9]{64}$/', $fullId)) {
+      return 0;
+    }
+
     $logPath = "/var/lib/docker/containers/{$fullId}/{$fullId}-json.log";
     if (file_exists($logPath)) {
       return (int) filesize($logPath);
@@ -708,6 +751,8 @@ class DockerClient
       'startedAt' => $startedAt,
       'imageSize' => $imageSize,
       'logSize' => $logSize,
+      'hostCpus' => $this->getHostCpuCount($stats),
+      'hostMemory' => $this->readHostMemoryTotal(),
     ];
   }
 
@@ -715,10 +760,14 @@ class DockerClient
    * Execute multiple Docker API requests in parallel via curl_multi
    *
    * @param array $requests Associative array of ['key' => '/api/path', ...]
+   * @param array $status   Filled with ['key' => HTTP status, ...], 0 for a
+   *                        transport failure, so a caller can tell a 404 from
+   *                        a timeout
    * @return array Associative array of ['key' => decoded_json | null, ...]
    */
-  private function requestMulti($requests)
+  private function requestMulti($requests, &$status = [])
   {
+    $status = [];
     if (empty($requests)) {
       return [];
     }
@@ -753,6 +802,7 @@ class DockerClient
       $response = curl_multi_getcontent($ch);
       $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
       $error = curl_error($ch);
+      $status[$key] = $error ? 0 : (int) $httpCode;
 
       if ($error || $httpCode < 200 || $httpCode >= 300) {
         $results[$key] = null;
@@ -980,6 +1030,30 @@ class DockerClient
   }
 
   /**
+   * Read the host's total memory (MemTotal) from /proc/meminfo, in bytes.
+   *
+   * Cached per instance — /proc/meminfo does not change within a request's
+   * lifetime, and this is called once per container in a batch.
+   *
+   * @return int Host MemTotal in bytes, or 0 if it could not be read
+   */
+  private function readHostMemoryTotal()
+  {
+    if ($this->hostMemoryTotal !== null) {
+      return $this->hostMemoryTotal;
+    }
+
+    $total = 0;
+    $memInfo = @file_get_contents('/proc/meminfo');
+    if ($memInfo && preg_match('/MemTotal:\s+(\d+)\s+kB/', $memInfo, $m)) {
+      $total = (int) $m[1] * 1024;
+    }
+
+    $this->hostMemoryTotal = $total;
+    return $total;
+  }
+
+  /**
    * Fast batch stats using cgroup filesystem reads + cached slow data.
    * Falls back to Docker API if cgroup reads are unavailable.
    *
@@ -1037,7 +1111,7 @@ class DockerClient
     if (!empty($staleIds)) {
       $inspectRequests = [];
       foreach ($staleIds as $id) {
-        $inspectRequests[$id] = "/containers/{$id}/json";
+        $inspectRequests[$id] = "/containers/" . rawurlencode($id) . "/json";
       }
       $inspectResults = $this->requestMulti($inspectRequests);
 
@@ -1050,7 +1124,7 @@ class DockerClient
 
       $imageRequests = [];
       foreach (array_keys($imageMap) as $imageId) {
-        $imageRequests[$imageId] = "/images/{$imageId}/json";
+        $imageRequests[$imageId] = "/images/" . rawurlencode($imageId) . "/json";
       }
       $imageResults = $this->requestMulti($imageRequests);
 
@@ -1079,8 +1153,8 @@ class DockerClient
       $this->saveJsonCache(self::SLOW_CACHE_PATH, $slowCache);
     }
 
-    $systemMemLimit = null;
     $output = [];
+    $hostMemory = $this->readHostMemoryTotal();
 
     foreach ($ids as $id) {
       if (isset($fallbackSet[$id])) {
@@ -1104,14 +1178,7 @@ class DockerClient
 
       $memLimit = $cg['memory_limit'];
       if ($memLimit === PHP_INT_MAX) {
-        if ($systemMemLimit === null) {
-          $systemMemLimit = 0;
-          $memInfo = @file_get_contents('/proc/meminfo');
-          if ($memInfo && preg_match('/MemTotal:\s+(\d+)\s+kB/', $memInfo, $m)) {
-            $systemMemLimit = (int) $m[1] * 1024;
-          }
-        }
-        $memLimit = $systemMemLimit;
+        $memLimit = $hostMemory;
       }
 
       $memPercent = $memLimit > 0 ? round(($cg['memory_usage'] / $memLimit) * 100, 2) : 0;
@@ -1130,6 +1197,8 @@ class DockerClient
         'startedAt' => $slow['startedAt'] ?? '',
         'imageSize' => $slow['imageSize'] ?? 0,
         'logSize' => $slow['logSize'] ?? 0,
+        'hostCpus' => $cg['online_cpus'],
+        'hostMemory' => $hostMemory,
       ];
     }
 
@@ -1165,7 +1234,7 @@ class DockerClient
     // Phase 1: Fetch all container stats in parallel
     $statsRequests = [];
     foreach ($ids as $id) {
-      $statsRequests[$id] = "/containers/{$id}/stats?stream=0";
+      $statsRequests[$id] = "/containers/" . rawurlencode($id) . "/stats?stream=0";
     }
     $statsResults = $this->requestMulti($statsRequests);
 
@@ -1173,7 +1242,7 @@ class DockerClient
     $inspectRequests = [];
     foreach ($ids as $id) {
       if ($statsResults[$id] !== null) {
-        $inspectRequests[$id] = "/containers/{$id}/json";
+        $inspectRequests[$id] = "/containers/" . rawurlencode($id) . "/json";
       }
     }
     $inspectResults = $this->requestMulti($inspectRequests);
@@ -1190,7 +1259,7 @@ class DockerClient
 
     $imageRequests = [];
     foreach (array_keys($imageMap) as $imageId) {
-      $imageRequests[$imageId] = "/images/{$imageId}/json";
+      $imageRequests[$imageId] = "/images/" . rawurlencode($imageId) . "/json";
     }
     $imageResults = $this->requestMulti($imageRequests);
 
@@ -1239,6 +1308,8 @@ class DockerClient
         'startedAt' => $startedAt,
         'imageSize' => $imageSize,
         'logSize' => $logSize,
+        'hostCpus' => $this->getHostCpuCount($stats),
+        'hostMemory' => $this->readHostMemoryTotal(),
       ];
     }
 
@@ -1335,7 +1406,162 @@ class DockerClient
    */
   public function inspectContainerRaw($id)
   {
-    return $this->request('GET', "/containers/{$id}/json") ?: null;
+    return $this->request('GET', "/containers/" . rawurlencode($id) . "/json") ?: null;
+  }
+
+  /**
+   * The ids and names of the containers that carry every one of $labels,
+   * straight from the list endpoint. listContainers() also builds the
+   * autostart and facts maps, which a lookup by label does not need.
+   *
+   * @param array $labels label => value
+   * @return array[] ['id' => string, 'name' => string]
+   */
+  public function findContainersByLabels(array $labels)
+  {
+    $filter = [];
+    foreach ($labels as $key => $value) {
+      $filter[] = "{$key}={$value}";
+    }
+    $response = $this->request('GET', '/containers/json?all=1&filters=' . rawurlencode(json_encode(['label' => $filter])));
+
+    $found = [];
+    foreach (is_array($response) ? $response : [] as $c) {
+      $found[] = ['id' => $c['Id'], 'name' => ltrim($c['Names'][0] ?? '', '/')];
+    }
+    return $found;
+  }
+
+  // The most stderr execRun() keeps. pg_dump can print a warning per table,
+  // and only the first lines explain a failure.
+  const EXEC_STDERR_CAP = 65536;
+
+  /**
+   * Run a command inside a running container, with no shell and no TTY.
+   *
+   * $cmd is an argv array, so no argument is ever parsed by a shell. $env
+   * holds "NAME=value" strings. They travel in the request body, so a
+   * password in them never appears on a command line or in a process list.
+   *
+   * Stdout goes to $onStdout chunk by chunk, so a dump of any size streams to
+   * disk without being held in memory. Stderr is kept, up to
+   * EXEC_STDERR_CAP bytes.
+   *
+   * @param string $id Container ID or name
+   * @param string[] $cmd The command and its arguments
+   * @param string[] $env Extra environment, as NAME=value
+   * @param callable $onStdout Receives each stdout chunk
+   * @param int $timeout Seconds before the request is cut off, 0 for none
+   * @return array ['ok' => bool, 'exit_code' => int|null, 'stderr' => string, 'error' => string]
+   */
+  public function execRun($id, array $cmd, array $env, callable $onStdout, $timeout = 60)
+  {
+    $result = ['ok' => false, 'exit_code' => null, 'stderr' => '', 'error' => ''];
+
+    $created = $this->request('POST', '/containers/' . rawurlencode($id) . '/exec', [
+      'AttachStdin' => false,
+      'AttachStdout' => true,
+      'AttachStderr' => true,
+      'Tty' => false,
+      'Cmd' => array_values($cmd),
+      'Env' => array_values($env),
+    ]);
+    if (!is_array($created) || empty($created['Id'])) {
+      $result['error'] = $this->lastError !== '' ? $this->lastError : 'Could not create the exec';
+      return $result;
+    }
+    $execId = $created['Id'];
+
+    $stderr = '';
+    $demuxer = new DockerStreamDemuxer($onStdout, function ($payload) use (&$stderr) {
+      if (strlen($stderr) < self::EXEC_STDERR_CAP) {
+        $stderr .= substr($payload, 0, self::EXEC_STDERR_CAP - strlen($stderr));
+      }
+    });
+
+    if (!file_exists($this->socketPath)) {
+      $result['error'] = "Docker socket not found: {$this->socketPath}";
+      return $result;
+    }
+
+    $body = json_encode(['Detach' => false, 'Tty' => false]);
+    $status = 0;
+    $errorBody = '';
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_UNIX_SOCKET_PATH, $this->socketPath);
+    curl_setopt($ch, CURLOPT_URL, "http://localhost/{$this->apiVersion}/exec/" . rawurlencode($execId) . '/start');
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'Content-Length: ' . strlen($body)]);
+    curl_setopt($ch, CURLOPT_TIMEOUT, (int) $timeout);
+    // A failed start answers with a JSON error, not a frame stream. Read the
+    // status before the first body chunk to tell the two apart.
+    curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $chunk) use ($demuxer, &$status, &$errorBody) {
+      if ($status === 0) {
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+      }
+      if ($status < 200 || $status >= 300) {
+        $errorBody .= $chunk;
+        return strlen($chunk);
+      }
+      return $demuxer->feed($chunk);
+    });
+    curl_exec($ch);
+    $curlError = curl_error($ch);
+    if ($status === 0) {
+      $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    }
+    curl_close($ch);
+
+    $result['stderr'] = $stderr;
+
+    if ($curlError !== '') {
+      $result['error'] = "Docker API error: {$curlError}";
+      return $result;
+    }
+    if ($status < 200 || $status >= 300) {
+      $decoded = json_decode($errorBody, true);
+      $result['error'] = "Docker API HTTP {$status}"
+        . (is_array($decoded) && isset($decoded['message']) ? ': ' . $decoded['message'] : '');
+      return $result;
+    }
+    if ($demuxer->hasPartialFrame()) {
+      $result['error'] = 'The output stream ended early';
+      return $result;
+    }
+
+    // Docker can report Running with no ExitCode for a moment after the
+    // stream ends. Wait a few seconds for the real code.
+    $inspect = $this->request('GET', '/exec/' . rawurlencode($execId) . '/json');
+    for ($i = 0; $i < 50 && is_array($inspect) && !empty($inspect['Running']); $i++) {
+      usleep(100000);
+      $inspect = $this->request('GET', '/exec/' . rawurlencode($execId) . '/json');
+    }
+    if (!is_array($inspect) || !array_key_exists('ExitCode', $inspect)) {
+      $result['error'] = 'Could not read the exit code';
+      return $result;
+    }
+
+    $result['exit_code'] = $inspect['ExitCode'] === null ? null : (int) $inspect['ExitCode'];
+    $result['ok'] = $result['exit_code'] === 0;
+    return $result;
+  }
+
+  /**
+   * execRun() for a command with small output, returned as a string.
+   *
+   * @return array execRun()'s result plus 'stdout'
+   */
+  public function execCapture($id, array $cmd, array $env = [], $timeout = 30)
+  {
+    $stdout = '';
+    $result = $this->execRun($id, $cmd, $env, function ($payload) use (&$stdout) {
+      if (strlen($stdout) < 4 * 1024 * 1024) {
+        $stdout .= $payload;
+      }
+    }, $timeout);
+    $result['stdout'] = $stdout;
+    return $result;
   }
 
   /**
@@ -1347,7 +1573,7 @@ class DockerClient
    */
   public function renameContainer($id, $newName)
   {
-    $response = $this->request('POST', "/containers/{$id}/rename?name=" . urlencode($newName));
+    $response = $this->request('POST', "/containers/" . rawurlencode($id) . "/rename?name=" . urlencode($newName));
     return $response !== false;
   }
 
@@ -1423,6 +1649,21 @@ class DockerClient
 
     // Remove read-only HostConfig fields
     unset($createBody['HostConfig']['ContainerIDFile']);
+
+    // The same {} to [] problem for string maps. Docker refuses an array
+    // where it wants a map, so a container with no labels failed to recreate
+    // with "cannot unmarshal array into ... Config.Labels".
+    if (isset($createBody['Labels']) && $createBody['Labels'] === []) {
+      $createBody['Labels'] = (object) [];
+    }
+    foreach (['Sysctls', 'StorageOpt', 'Tmpfs', 'Annotations'] as $field) {
+      if (isset($createBody['HostConfig'][$field]) && $createBody['HostConfig'][$field] === []) {
+        $createBody['HostConfig'][$field] = (object) [];
+      }
+    }
+    if (isset($createBody['HostConfig']['LogConfig']['Config']) && $createBody['HostConfig']['LogConfig']['Config'] === []) {
+      $createBody['HostConfig']['LogConfig']['Config'] = (object) [];
+    }
 
     // Fix PortBindings: PHP json_decode turns {} into [] (empty array),
     // but Docker expects an object/map for PortBindings and each binding value.
@@ -1524,6 +1765,35 @@ class DockerClient
   }
 
   /**
+   * Split an image reference into the fromImage and tag that /images/create
+   * takes.
+   *
+   * A digest pin ("foo@sha256:...") goes whole as fromImage with no tag.
+   * Otherwise the tag is the text after the last ":", but only when that
+   * colon comes after the last "/". In "registry:5000/foo/bar" the colon
+   * belongs to the registry port, and the tag defaults to "latest". Leaving
+   * the tag out for a name without a digest would pull every tag.
+   *
+   * @param string $reference An image reference
+   * @return array [fromImage, tag], where tag is null for a digest pin
+   */
+  public static function splitImageReference($reference)
+  {
+    $reference = (string) $reference;
+    if (strpos($reference, '@') !== false) {
+      return [$reference, null];
+    }
+
+    $colon = strrpos($reference, ':');
+    $slash = strrpos($reference, '/');
+    if ($colon !== false && ($slash === false || $colon > $slash)) {
+      return [substr($reference, 0, $colon), substr($reference, $colon + 1)];
+    }
+
+    return [$reference, 'latest'];
+  }
+
+  /**
    * Pull a Docker image with progress callback
    *
    * @param string $imageName Image to pull (e.g. linuxserver/plex:latest)
@@ -1532,16 +1802,18 @@ class DockerClient
    */
   public function pullImage($imageName, callable $onProgress)
   {
+    // This path does not go through request(), which is what resets it.
+    $this->lastError = '';
+
     if (!file_exists($this->socketPath)) {
+      $this->lastError = "Docker socket not found: {$this->socketPath}";
       return false;
     }
 
-    // Split name:tag
-    $parts = explode(':', $imageName, 2);
-    $fromImage = $parts[0];
-    $tag = $parts[1] ?? 'latest';
+    list($fromImage, $tag) = self::splitImageReference($imageName);
 
-    $url = "http://localhost/{$this->apiVersion}/images/create?fromImage=" . urlencode($fromImage) . "&tag=" . urlencode($tag);
+    $url = "http://localhost/{$this->apiVersion}/images/create?fromImage=" . urlencode($fromImage)
+      . ($tag !== null ? "&tag=" . urlencode($tag) : '');
 
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_UNIX_SOCKET_PATH, $this->socketPath);
@@ -1551,17 +1823,39 @@ class DockerClient
     curl_setopt($ch, CURLOPT_HEADER, false);
     curl_setopt($ch, CURLOPT_TIMEOUT, 600); // 10 minute timeout
 
-    // Stream response chunks to the callback
-    curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($onProgress) {
-      // Docker sends newline-delimited JSON
-      $lines = explode("\n", $data);
-      foreach ($lines as $line) {
-        $line = trim($line);
-        if (empty($line)) continue;
-        $decoded = json_decode($line, true);
-        if ($decoded !== null) {
-          $onProgress($decoded);
-        }
+    // Docker answers 200 as soon as the pull starts, then streams progress.
+    // A pull that fails after that, such as "manifest unknown", arrives as a
+    // line with an "error" key under the same 200. The status alone cannot
+    // report it.
+    $streamError = '';
+    // A non-2xx answer, such as a 404 for an unknown image, is one
+    // {"message": ...} object instead of a stream.
+    $apiMessage = '';
+
+    // Docker sends newline-delimited JSON, but curl hands over chunks that
+    // can end in the middle of a line. A line split that way decodes as
+    // nothing, and an "error" line lost like that made a failed pull look
+    // like a success. Only whole lines are decoded; the rest waits.
+    $pending = '';
+    $handleLine = function ($line) use ($onProgress, &$streamError, &$apiMessage) {
+      $line = trim($line);
+      if ($line === '') return;
+      $decoded = json_decode($line, true);
+      if (!is_array($decoded)) return;
+      if (isset($decoded['error']) && $streamError === '') {
+        $streamError = (string) $decoded['error'];
+      }
+      if (isset($decoded['message']) && $apiMessage === '') {
+        $apiMessage = (string) $decoded['message'];
+      }
+      $onProgress($decoded);
+    };
+
+    curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($handleLine, &$pending) {
+      $pending .= $data;
+      while (($nl = strpos($pending, "\n")) !== false) {
+        $handleLine(substr($pending, 0, $nl));
+        $pending = substr($pending, $nl + 1);
       }
       return strlen($data);
     });
@@ -1571,12 +1865,28 @@ class DockerClient
     $error = curl_error($ch);
     curl_close($ch);
 
+    // The last line may have no newline after it.
+    $handleLine($pending);
+
     if ($error) {
       error_log("Docker pull error: {$error}");
+      $this->lastError = $error;
       return false;
     }
 
-    return $httpCode >= 200 && $httpCode < 300;
+    if ($streamError !== '') {
+      error_log("Docker pull error: {$streamError}");
+      $this->lastError = $streamError;
+      return false;
+    }
+
+    if ($httpCode < 200 || $httpCode >= 300) {
+      $this->lastError = "Docker API HTTP {$httpCode}" . ($apiMessage !== '' ? ": {$apiMessage}" : '');
+      error_log("Docker pull error: {$this->lastError}");
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -1594,13 +1904,39 @@ class DockerClient
               - ($preCpuStats['cpu_usage']['total_usage'] ?? 0);
     $systemDelta = ($cpuStats['system_cpu_usage'] ?? 0)
                  - ($preCpuStats['system_cpu_usage'] ?? 0);
-    $onlineCpus = $cpuStats['online_cpus'] ?? 1;
+    $onlineCpus = $this->getHostCpuCount($stats);
 
     if ($systemDelta > 0 && $cpuDelta >= 0) {
       return round(($cpuDelta / $systemDelta) * $onlineCpus * 100, 2);
     }
 
     return 0.0;
+  }
+
+  /**
+   * Determine the host's online CPU count from a Docker stats payload.
+   *
+   * Docker reports `cpu_stats.online_cpus` on modern kernels; older ones omit
+   * it, so this falls back to the length of the percpu_usage array, and then
+   * to 1 if neither is present. Mirrors the online_cpus lookup used in
+   * calculateCpuPercent().
+   *
+   * @param array $stats Raw Docker stats
+   * @return int Host online CPU count
+   */
+  private function getHostCpuCount($stats)
+  {
+    $cpuStats = $stats['cpu_stats'] ?? [];
+    if (isset($cpuStats['online_cpus'])) {
+      return (int) $cpuStats['online_cpus'];
+    }
+
+    $percpu = $cpuStats['cpu_usage']['percpu_usage'] ?? [];
+    if (is_array($percpu) && count($percpu) > 0) {
+      return count($percpu);
+    }
+
+    return 1;
   }
 
   /**
@@ -1687,7 +2023,7 @@ class DockerClient
    * @param string $containerName Container name for template lookup (optional)
    * @return string Resolved tag or original reference
    */
-  private function resolveImageTag($imageRef, $containerName = '')
+  public function resolveImageTag($imageRef, $containerName = '')
   {
     if (!$imageRef || strpos($imageRef, 'sha256:') !== 0) {
       return $imageRef;
@@ -1940,6 +2276,12 @@ class DockerClient
    * @param string $path API path
    * @param array|null $data Request body
    * @return mixed Response data or false on error
+   *
+   * Every caller that puts a container id or image id in $path runs it through
+   * rawurlencode(). An id reaches here from $_GET['id'], and a "/" or "?" in it
+   * would select a different Docker endpoint. getRemoteImageDigest() is the
+   * exception: /distribution/ takes a full image reference, which comes from
+   * Docker's own list or from pull.php's validation, and it is sent as is.
    */
   private function request($method, $path, $data = null, $timeout = 5)
   {

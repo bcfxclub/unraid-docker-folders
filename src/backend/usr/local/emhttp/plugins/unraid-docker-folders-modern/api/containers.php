@@ -110,6 +110,16 @@ function handleGet($dockerClient)
     // TCP_PORT_n variables, so the preview cannot describe ports without it.
     $driver = $dockerClient->getNetworkDriver((string)($inspect['HostConfig']['NetworkMode'] ?? ''));
 
+    // After an update-triggered recreate, Config.Image can be a sha256 digest.
+    // The Unraid template needs the tag a user would recognize, the same one
+    // the container list shows.
+    if (!empty($inspect['Config']['Image'])) {
+      $inspect['Config']['Image'] = $dockerClient->resolveImageTag(
+        $inspect['Config']['Image'],
+        ltrim((string)($inspect['Name'] ?? ''), '/')
+      );
+    }
+
     $result = AdoptBuilder::build($inspect, $image, $driver);
     $result['managed'] = $inspect['Config']['Labels']['net.unraid.docker.managed'] ?? null;
 
@@ -132,6 +142,14 @@ function handleGet($dockerClient)
     // List all containers
     $containers = $dockerClient->listContainers(true);
 
+    // listContainers() answers [] both for a server with no containers and for
+    // a request that failed. Only the failure sets lastError. Report it,
+    // instead of serving an empty list that looks like every container is
+    // gone, and stop before the reconcile and compose sync run on no data.
+    if (empty($containers) && $dockerClient->getLastError() !== '') {
+      errorResponse('Cannot reach Docker: ' . $dockerClient->getLastError(), 503);
+    }
+
     // Reconcile container IDs (handles container recreate/update)
     $folderManager = new FolderManager();
     $folderManager->reconcileContainerIds($containers);
@@ -139,7 +157,7 @@ function handleGet($dockerClient)
     // Auto-group Docker Compose stacks into folders
     $changed = $folderManager->syncComposeStacks($containers);
     if ($changed) {
-      WebSocketPublisher::publish('folders', 'updated');
+      WebSocketPublisher::publish('folder', 'updated');
     }
 
     // Security findings are derived in the frontend from fields already on each
@@ -182,7 +200,7 @@ function handlePost($dockerClient)
       errorResponse('Invalid container name', 400);
     }
     $data = getRequestData();
-    $enabled = !empty($data['enabled']);
+    $enabled = requestFlag($data['enabled'] ?? false);
     $delay = isset($data['delay']) ? max(0, (int)$data['delay']) : null;
 
     // Update Unraid's autostart flat file (authoritative source)
@@ -307,11 +325,11 @@ function handlePost($dockerClient)
         require_once dirname(__DIR__) . '/classes/FolderManager.php';
         $folderManager = new FolderManager();
         $folderManager->removeContainerByName($containerName);
-        WebSocketPublisher::publish('folders', 'updated');
+        WebSocketPublisher::publish('folder', 'updated');
 
         // Optionally remove the image
         $data = getRequestData();
-        if (!empty($data['remove_image']) && $containerImage) {
+        if (requestFlag($data['remove_image'] ?? false) && $containerImage) {
           $dockerClient->removeImage($containerImage, true);
         }
       }

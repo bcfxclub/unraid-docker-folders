@@ -13,7 +13,7 @@ import type { Schedule } from '@/types/schedule';
 import type { Container } from '@/stores/docker';
 import type { Folder } from '@/types/folder';
 
-vi.mock('@/composables/useWebSocket', () => ({ initWebSocket: vi.fn() }));
+vi.mock('@/composables/useLiveUpdates', () => ({ initLiveUpdates: vi.fn() }));
 
 const COLLAPSE_KEY = 'docker-folders-widget-collapsed';
 const SETTINGS_KEY = 'docker-folders-widget-settings';
@@ -94,6 +94,20 @@ describe('WidgetApp', () => {
     makeContainer({ id: 'c2', name: 'sonarr', image: 'linuxserver/sonarr', state: 'exited' }),
     makeContainer({ id: 'c3', name: 'redis', image: 'redis:7' }),
   ];
+
+  it('shows placeholder rows during the first load, then the containers', async () => {
+    const { wrapper, dockerStore } = await mountWidget(containers, []);
+    dockerStore.loading = true;
+    await flushPromises();
+    expect(wrapper.find('[aria-busy="true"]').exists()).toBe(true);
+    expect(wrapper.findAll('.skeleton').length).toBeGreaterThan(0);
+    expect(wrapper.find('.widget-row').exists()).toBe(false);
+
+    dockerStore.loading = false;
+    await flushPromises();
+    expect(wrapper.find('.skeleton').exists()).toBe(false);
+    expect(rowNames(wrapper)).toContain('plex');
+  });
 
   it('lists folders in order with their members, then an Other group', async () => {
     const { wrapper } = await mountWidget(containers, [makeFolder(['sonarr', 'plex'])]);
@@ -270,10 +284,63 @@ describe('WidgetApp', () => {
       expect(bars[1].classes()).toContain('bg-error');
     });
 
+    it('shows every running container as a share of the host, including a collapsed folder', async () => {
+      // The Media folder stays collapsed, so plex's row is not mounted.
+      saveSettings({ startCollapsed: true, showStats: true });
+      const GB = 1024 ** 3;
+      const host = { hostCpus: 4, hostMemory: 16 * GB };
+      const { wrapper, statsStore } = await mountWidget(containers, [makeFolder(['plex'])], {
+        stats: { c1: { cpuPercent: 300, memoryUsage: 2 * GB, ...host }, c3: { cpuPercent: 100, memoryUsage: 2 * GB, ...host } },
+      });
+      expect(wrapper.findAll('.widget-row')).toHaveLength(0);
+      const total = wrapper.find('.widget-total');
+      expect(total.text()).toContain('All running');
+      expect(total.text()).toContain('2 containers');
+      // (300 + 100) / 4 cores, and 4 GB of 16 GB, each on its own arc.
+      const arcs = total.findAll('.widget-arc');
+      expect(arcs.map((a) => a.text())).toEqual(['100.0%CPUof 4 cores', '25.0%Memory4.0 GB / 16.0 GB']);
+      expect(arcs[0].find('.arc-fill').attributes('stroke-dasharray')).toBe('100 100');
+      expect(arcs[0].find('.arc-fill').classes()).toContain('text-error');
+      expect(arcs[1].find('.arc-fill').attributes('stroke-dasharray')).toBe('25 100');
+      expect(arcs[1].find('.arc-fill').classes()).toContain('text-success');
+      expect(total.attributes('title')).toBe('CPU 100.0% of 4 cores · Memory 4.0 GB / 16.0 GB');
+      expect(statsStore.registerVisible).toHaveBeenCalledWith('c1');
+      expect(statsStore.registerVisible).toHaveBeenCalledWith('c3');
+      expect(statsStore.registerVisible).not.toHaveBeenCalledWith('c2');
+    });
+
+    it('unregisters the running containers on unmount', async () => {
+      saveSettings({ startCollapsed: false, showStats: true });
+      const { wrapper, statsStore } = await mountWidget(containers, []);
+      expect(wrapper.find('.widget-total').exists()).toBe(true);
+      wrapper.unmount();
+      expect(statsStore.unregisterVisible).toHaveBeenCalledWith('c1');
+      expect(statsStore.unregisterVisible).toHaveBeenCalledWith('c3');
+    });
+
     it('registers nothing and shows no numbers when off', async () => {
       const { wrapper, statsStore } = await mountWidget(containers, [], { stats: { c1: { cpuPercent: 3 } } });
       expect(rowText(wrapper, 'plex')).not.toContain('%');
       expect(statsStore.registerVisible).not.toHaveBeenCalled();
+      expect(wrapper.find('.widget-total').exists()).toBe(false);
+    });
+
+    it('measures stats while the dashboard tile is folded, even with stats off', async () => {
+      const { statsStore } = await mountWidget(containers, []);
+      const fold = (collapsed: boolean) =>
+        window.dispatchEvent(new MessageEvent('message', {
+          data: { type: 'docker-folders-tile-collapsed', collapsed },
+          origin: window.location.origin,
+          source: window.parent,
+        }));
+      fold(true);
+      await flushPromises();
+      expect(statsStore.registerVisible).toHaveBeenCalledWith('c1');
+      expect(statsStore.registerVisible).toHaveBeenCalledWith('c3');
+      fold(false);
+      await flushPromises();
+      expect(statsStore.unregisterVisible).toHaveBeenCalledWith('c1');
+      expect(statsStore.unregisterVisible).toHaveBeenCalledWith('c3');
     });
   });
 

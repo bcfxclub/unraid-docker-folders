@@ -6,6 +6,7 @@ require_once dirname(__DIR__) . '/classes/Database.php';
 require_once dirname(__DIR__) . '/classes/CronManager.php';
 require_once dirname(__DIR__) . '/classes/ScheduleManager.php';
 require_once dirname(__DIR__) . '/classes/BackupManager.php';
+require_once dirname(__DIR__) . '/classes/PostgresBackup.php';
 require_once dirname(__DIR__) . '/classes/WebSocketPublisher.php';
 
 header('Content-Type: application/json');
@@ -65,7 +66,12 @@ function handleGet()
       errorResponse('Missing target_type or target_id', 400);
     }
     $backup = new BackupManager();
-    jsonResponse(['backups' => $backup->listBackups($targetType, $targetId)]);
+    $prefixes = PostgresBackup::archivePrefixesFor(
+      $manager->listSchedules(['target_type' => $targetType, 'target_id' => $targetId]),
+      $targetType,
+      $targetId
+    );
+    jsonResponse(['backups' => $backup->listBackups($targetType, $targetId, $prefixes)]);
     return;
   }
 
@@ -86,7 +92,48 @@ function handleGet()
     $filters['target_id'] = $_GET['target_id'];
   }
 
-  jsonResponse(['schedules' => $manager->listSchedules($filters)]);
+  jsonResponse([
+    'schedules' => $manager->listSchedules($filters),
+    'runner' => runnerState(),
+  ]);
+}
+
+/**
+ * Health of the per-minute schedule runner, for the warning row in the UI.
+ *
+ * last_tick is the mtime of the heartbeat file the runner touches on every
+ * cron invocation. The crontab is only read when that heartbeat is missing or
+ * stale: a fresh tick already proves the entry is installed, and this runs on
+ * every load of the schedules screen.
+ *
+ * A stale heartbeat also repairs the cron entry, which makes this a GET that
+ * writes. CLAUDE.md lists GET mutation as a known gap, so this one states its
+ * case: the write is idempotent, its content comes from a class constant and
+ * never from the request, it happens at most once per stale window, and the
+ * alternative is a button that asks the user to fix a fault they did not
+ * cause. See CronManager::repairSchedulerIfMissing().
+ */
+function runnerState()
+{
+  $lastTick = file_exists(SCHEDULER_TICK_FILE) ? filemtime(SCHEDULER_TICK_FILE) : null;
+  $fresh = $lastTick !== null && (time() - $lastTick) <= SCHEDULER_TICK_STALE_SECONDS;
+  $cron = $fresh
+    ? ['installed' => true, 'repaired' => false]
+    : CronManager::repairSchedulerIfMissing();
+
+  // The staleness decision belongs here, not in the browser. last_tick is a
+  // server timestamp, and the frontend holds the response until something
+  // refetches, so comparing it against the browser clock would both drift with
+  // the open tab and skew with any clock difference between the two machines.
+  return [
+    'last_tick' => $lastTick,
+    'stale' => !$fresh,
+    'stale_after' => SCHEDULER_TICK_STALE_SECONDS,
+    'cron_installed' => $cron['installed'],
+    // True only on the response that put the entry back, so the UI can say the
+    // first run is still up to a minute away rather than repeat the warning.
+    'repaired' => $cron['repaired'],
+  ];
 }
 
 function handlePost()
@@ -140,9 +187,79 @@ function handlePost()
     if (!$id) {
       errorResponse('Missing schedule id', 400);
     }
+    $schedule = $manager->getSchedule($id);
+    if (!$schedule) {
+      errorResponse('Schedule not found', 404);
+    }
+    // An update pulls for minutes, longer than a web request should stay
+    // open, and a request cut off in the middle of a recreate leaves the
+    // container renamed or stopped. Its process records the result.
+    if ($schedule['action'] === 'update') {
+      jsonResponse($manager->startDetached($schedule));
+      return;
+    }
     $result = $manager->executeSchedule($id);
     WebSocketPublisher::publish('schedules', 'executed', ['id' => $id]);
     jsonResponse($result);
+    return;
+  }
+
+  // What the backup form needs to offer Postgres mode. Body: { target_type,
+  // target_id, service? }, where service names the compose service of a
+  // stack. Never returns a password.
+  if ($action === 'postgres_info') {
+    $postgres = new PostgresBackup();
+    $target = requirePostgresTarget($postgres, getRequestData());
+    $info = $postgres->info($target['id']);
+    if ($info === null) {
+      errorResponse('Container not found', 404);
+    }
+    jsonResponse($info);
+    return;
+  }
+
+  // List the databases. POST, because the body can carry a password. Body:
+  // { target_type, target_id, service?, credentials, user?, password?,
+  // schedule_id? }. With custom credentials, schedule_id and no password,
+  // the saved password of that schedule is used, so the edit form can reload
+  // the list without asking for it again.
+  if ($action === 'postgres_databases') {
+    $data = getRequestData();
+    $postgres = new PostgresBackup();
+    $target = requirePostgresTarget($postgres, $data);
+
+    $pg = [
+      'credentials' => PostgresBackup::credentialsOf($data),
+      'user' => isset($data['user']) ? $data['user'] : '',
+      'password' => isset($data['password']) && is_string($data['password']) ? $data['password'] : '',
+    ];
+    if ($pg['credentials'] === PostgresBackup::CREDENTIALS_CUSTOM) {
+      if (!PostgresBackup::isValidUser($pg['user'])) {
+        errorResponse('Invalid Postgres user', 400);
+      }
+      if (strlen($pg['password']) > PostgresBackup::MAX_PASSWORD_LENGTH) {
+        errorResponse('Postgres password is too long', 400);
+      }
+      if ($pg['password'] === '' && !empty($data['schedule_id'])) {
+        // Only a schedule with this same target lends its password.
+        $id = (int) $data['schedule_id'];
+        $stored = $manager->getSchedule($id);
+        $storedService = $stored['backup_config']['postgres']['service'] ?? null;
+        if ($stored
+          && $stored['target_type'] === $data['target_type']
+          && $stored['target_id'] === $data['target_id']
+          && ($data['target_type'] === 'container' || $storedService === ($data['service'] ?? null))
+        ) {
+          $pg = PostgresBackup::mergeStoredPassword(
+            ['mode' => PostgresBackup::MODE_POSTGRES, 'postgres' => $pg],
+            $manager->getStoredBackupConfig($id)
+          )['postgres'];
+        }
+      }
+    }
+
+    $credentials = $postgres->resolveCredentials($target['id'], $pg);
+    jsonResponse($postgres->listDatabases($target['id'], $credentials['user'], $credentials['password']));
     return;
   }
 
@@ -188,7 +305,7 @@ function handlePost()
 /**
  * Reject a target_type or action outside the allowlist with a 400. Checks only
  * the fields that are present, so POST (all required) and a partial PUT share it.
- * Must match the CHECK constraints on the schedules table (migration 015).
+ * Must match the CHECK constraints on the schedules table (migration 018).
  */
 function validateScheduleFields($data)
 {
@@ -196,10 +313,38 @@ function validateScheduleFields($data)
     errorResponse('Invalid target_type', 400);
   }
 
-  $validActions = ['start', 'stop', 'pause', 'resume', 'restart', 'backup'];
+  $validActions = ['start', 'stop', 'pause', 'resume', 'restart', 'backup', 'update'];
   if (isset($data['action']) && !in_array($data['action'], $validActions, true)) {
     errorResponse('Invalid action', 400);
   }
+
+  // A stack updates through Compose, which this action does not run. A PUT
+  // passes the stored values for the fields it leaves out.
+  if (($data['action'] ?? null) === 'update' && ($data['target_type'] ?? null) === 'stack') {
+    errorResponse('Update is not supported for compose stacks', 400);
+  }
+}
+
+/**
+ * The container a Postgres request names, or a 400 or 404. A stack names its
+ * compose service, which resolves through the compose labels.
+ */
+function requirePostgresTarget(PostgresBackup $postgres, $data)
+{
+  $type = is_array($data) && isset($data['target_type']) ? $data['target_type'] : '';
+  $id = is_array($data) && isset($data['target_id']) ? $data['target_id'] : '';
+  $service = is_array($data) && isset($data['service']) ? $data['service'] : null;
+  if (!in_array($type, ['container', 'stack'], true) || !PostgresBackup::isValidServiceName($id)) {
+    errorResponse('Invalid target', 400);
+  }
+  if ($type === 'stack' && !PostgresBackup::isValidServiceName($service)) {
+    errorResponse('Invalid service name', 400);
+  }
+  $target = $postgres->resolveTarget($type, $id, $type === 'stack' ? $service : null);
+  if (!$target) {
+    errorResponse('Container not found', 404);
+  }
+  return $target;
 }
 
 function handlePut()
@@ -214,9 +359,20 @@ function handlePut()
     errorResponse('Invalid request data', 400);
   }
 
-  validateScheduleFields($data);
-
   $manager = new ScheduleManager();
+  $stored = $manager->getSchedule($id);
+  if (!$stored) {
+    errorResponse('Schedule not found', 404);
+  }
+
+  // The stored row fills in what a partial PUT leaves out, so changing only
+  // the action still meets the target type it will run against.
+  // A null counts as left out, as updateSchedule() reads it with isset().
+  validateScheduleFields(array_merge($data, [
+    'action' => $data['action'] ?? $stored['action'],
+    'target_type' => $data['target_type'] ?? $stored['target_type'],
+  ]));
+
   $ok = $manager->updateSchedule($id, $data);
 
   if (!$ok) {

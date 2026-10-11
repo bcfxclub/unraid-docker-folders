@@ -19,6 +19,8 @@ if (!file_exists(DB_PATH)) return;
 // They are computed here because a nowdoc cannot hold a PHP expression, and are
 // substituted by str_replace after the string is built.
 $frameSrcVersion = dfmAssetVersion(PLUGIN_DIR . '/include/frameSrc.js');
+// Which backend the widget frame should use. See dfmBackendMode() in config.php.
+$backendMode = dfmBackendMode();
 $widgetVersion = dfmAssetVersion(PLUGIN_DIR . '/assets/widget.html');
 
 // A nowdoc, not a heredoc: the inline JavaScript below uses jQuery's `$`, and a
@@ -34,6 +36,18 @@ $tile = <<<'EOT'
       <i class="icon-docker f32"></i>
       <div class="section">
         <h3 class="tile-header-main">Docker Folders</h3>
+        <span class="flex flex-row flex-wrap items-center gap-4">
+          <!-- The dashboard shows span.switch only while the tile is folded, the
+               way the System tile shows its RAM bar. The widget frame sends the
+               numbers, because it keeps running while its row is hidden. -->
+          <span class="switch">
+            <span class="dfm-summary">
+              <span id="dfm-summary-count">-- running</span>
+              <span class="dfm-summary-item">CPU <span class="dfm-summary-cpu">--</span><span class="dfm-summary-track"><span id="dfm-summary-cpu"></span></span></span>
+              <span class="dfm-summary-item">RAM <span class="dfm-summary-memory">--</span><span class="dfm-summary-track"><span id="dfm-summary-memory"></span></span></span>
+            </span>
+          </span>
+        </span>
       </div>
     </span>
     <span class="tile-header-right">
@@ -45,7 +59,21 @@ $tile = <<<'EOT'
   </span>
 </td></tr>
 <tr><td>
+  <style>
+    /* The folded-tile summary on one line. Unraid's own head_bar layout
+       stacks one bar per line, so these are small inline bars in its colors.
+       The header keeps the icon beside the title, and a narrow tile wraps
+       the summary between items instead. */
+    #docker_folders_view .tile-header-left { flex-wrap: nowrap; min-width: 0; }
+    #docker_folders_view .tile-header-left .section { min-width: 0; }
+    #docker_folders_view .dfm-summary { display: inline-flex; flex-wrap: wrap; align-items: center; column-gap: 12px; }
+    #docker_folders_view .dfm-summary > span { white-space: nowrap; }
+    #docker_folders_view .dfm-summary-item { display: inline-flex; align-items: center; gap: 5px; }
+    #docker_folders_view .dfm-summary-track { position: relative; display: inline-block; width: 40px; height: 8px; background-color: var(--usage-disk-background-color); }
+    #docker_folders_view .dfm-summary-track > span { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background-color: var(--gray-400); }
+  </style>
   <iframe id="docker-folders-widget-frame" scrolling="no" style="display:block;width:100%;height:40px;border:none;"></iframe>
+  <script>window.dockerFoldersBackendMode = '__DFM_BACKEND__';</script>
   <script>window.dockerFoldersAssetVersion = '__DFM_WIDGET_V__';</script>
   <script src="/plugins/unraid-docker-folders-modern/include/frameSrc.js?v=__DFM_FRAMESRC_V__"></script>
   <script>
@@ -65,13 +93,47 @@ $tile = <<<'EOT'
       if (frame.contentWindow) frame.contentWindow.postMessage({ type: 'docker-folders-widget-settings' }, location.origin);
     });
 
+    var frameRow = frame.closest('tr');
+
+    // The folded-tile summary. Same load thresholds as the widget's own bars.
+    function loadBar(name, percent) {
+      var label = document.querySelector('.dfm-summary-' + name);
+      var bar = document.getElementById('dfm-summary-' + name);
+      if (typeof percent !== 'number') {
+        label.textContent = '--';
+        bar.style.width = '0';
+        return;
+      }
+      var text = percent.toFixed(1) + '%';
+      label.textContent = text;
+      label.style.color = percent > 80 ? '#f0000c' : percent > 50 ? '#e68a00' : '#4f8a10';
+      bar.className = percent > 80 ? 'redbar' : percent > 50 ? 'orangebar' : '';
+      bar.style.width = Math.min(percent, 100) + '%';
+    }
+
     window.addEventListener('message', function(e) {
       if (!e.data || typeof e.data !== 'object') return;
       if (e.source !== frame.contentWindow) return;
       if (e.data.type === 'docker-folders-resize') {
         frame.style.height = e.data.height + 'px';
       }
+      if (e.data.type === 'docker-folders-widget-ready' && e.origin === location.origin) sendCollapsed();
+      if (e.data.type === 'docker-folders-summary' && e.origin === location.origin) {
+        document.getElementById('dfm-summary-count').textContent = e.data.running + ' / ' + e.data.total + ' running';
+        loadBar('cpu', e.data.cpu);
+        loadBar('memory', e.data.memory);
+      }
     });
+
+    // Folding the tile hides this row with an inline display:none, which is all
+    // the dashboard's openClose() changes. Tell the frame, so it keeps
+    // measuring stats for the header while its own rows are out of sight.
+    function sendCollapsed() {
+      if (!frame.contentWindow) return;
+      frame.contentWindow.postMessage({ type: 'docker-folders-tile-collapsed', collapsed: frameRow.style.display === 'none' }, location.origin);
+    }
+    // The widget also asks once it has mounted (docker-folders-widget-ready).
+    new MutationObserver(sendCollapsed).observe(frameRow, { attributes: true, attributeFilter: ['style'] });
 
     // Set src only after the dashboard sorts its tiles. sortTables() moves each
     // tile with appendTo, and moving an iframe reloads it, so an earlier src
@@ -87,8 +149,8 @@ $tile = <<<'EOT'
 EOT;
 
 $mytiles['unraid-docker-folders-modern']['column2'] = str_replace(
-  ['__DFM_WIDGET_V__', '__DFM_FRAMESRC_V__'],
-  [$widgetVersion, $frameSrcVersion],
+  ['__DFM_WIDGET_V__', '__DFM_FRAMESRC_V__', '__DFM_BACKEND__'],
+  [$widgetVersion, $frameSrcVersion, $backendMode],
   $tile
 );
 ?>

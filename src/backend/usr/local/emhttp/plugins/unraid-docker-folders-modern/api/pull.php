@@ -127,19 +127,7 @@ try {
 
     // Post-pull operations are non-critical — never let them prevent complete/done
     try {
-      // Get the current remote digest so the update checker knows this version
-      // was pulled and won't flag it as outdated (prevents false positives from
-      // multi-arch digest mismatches between RepoDigests and distribution API)
-      $remoteDigest = $dockerClient->getRemoteImageDigest($image);
-      $localDigest = $dockerClient->getImageDigest($image);
-
-      $db = Database::getInstance();
-      $db->query(
-        'INSERT OR REPLACE INTO image_update_checks (image, local_digest, remote_digest, update_available, checked_at, error)
-         VALUES (:image, :local, :remote, 0, :now, NULL)',
-        [':image' => $image, ':local' => $localDigest, ':remote' => $remoteDigest, ':now' => time()]
-      );
-      logUpdate("PULL DB updated {$image}: local={$localDigest}, remote={$remoteDigest}");
+      recordImagePulled($dockerClient, Database::getInstance(), $image);
     } catch (\Throwable $e) {
       logUpdate("PULL WARN {$image}: DB update failed: " . $e->getMessage());
     }
@@ -185,20 +173,16 @@ try {
           $cName = $container['name'];
           $cId = $container['id'];
 
-          logUpdate("RECREATE Starting recreate for {$cName} ({$cId})");
           sendSSE('recreating', ['container' => $cName, 'message' => "Recreating {$cName}..."]);
 
-          $recreateResult = $dockerClient->recreateContainer($cId);
+          $recreateResult = recreateOneContainer($dockerClient, $cName, $cId);
 
           if ($recreateResult['success']) {
-            logUpdate("RECREATE OK {$cName} -> new ID {$recreateResult['newId']}");
             sendSSE('recreated', ['container' => $cName, 'message' => "{$cName} updated successfully"]);
           } else {
-            $errMsg = $recreateResult['error'] ?? 'Unknown error';
-            logUpdate("RECREATE FAIL {$cName}: {$errMsg}");
             sendSSE('recreate_error', [
               'container' => $cName,
-              'message' => "Failed to recreate {$cName}: {$errMsg}",
+              'message' => "Failed to recreate {$cName}: {$recreateResult['error']}",
             ]);
           }
         }
@@ -210,8 +194,9 @@ try {
 
     sendSSE('complete', ['message' => 'Pull complete', 'image' => $image]);
   } else {
-    logUpdate("PULL FAIL {$image}");
-    sendSSE('error', ['message' => 'Pull failed']);
+    $reason = $dockerClient->getLastError();
+    logUpdate("PULL FAIL {$image}" . ($reason !== '' ? ": {$reason}" : ''));
+    sendSSE('error', ['message' => 'Pull failed' . ($reason !== '' ? ": {$reason}" : '')]);
   }
 } catch (\Throwable $e) {
   logUpdate("PULL ERROR {$image}: " . $e->getMessage());

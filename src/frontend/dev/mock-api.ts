@@ -776,6 +776,8 @@ function generateMockStats(id: string) {
     startedAt: new Date(Date.now() - profile.startedHoursAgo * 3600_000).toISOString(),
     imageSize: Math.round(profile.imageSizeMB * MB),
     logSize: Math.round(profile.logSizeMB * MB),
+    hostCpus: 16,
+    hostMemory: 64 * 1024 * MB,
   };
 }
 
@@ -1210,7 +1212,12 @@ async function handleSchedules(req: any, res: any, params: Record<string, string
     let filtered = mockSchedules;
     if (targetType) filtered = filtered.filter(s => s.target_type === targetType);
     if (targetId) filtered = filtered.filter(s => s.target_id === targetId);
-    return json(res, { schedules: filtered });
+    // A fresh heartbeat, so the dev server does not show the "runner stalled"
+    // warning. Set last_tick to 0 to exercise that path by hand.
+    return json(res, {
+      schedules: filtered,
+      runner: { last_tick: Math.floor(Date.now() / 1000), stale: false, stale_after: 300, cron_installed: true, repaired: false },
+    });
   }
 
   if (req.method === 'POST') {
@@ -1354,6 +1361,64 @@ function handleComposeStream(req: any, res: any, params: Record<string, string>)
 
 // --- Vite plugin ---
 
+/**
+ * A small fake directory tree, keyed by the parent path.
+ *
+ * Host paths and container paths live in the same map, because the dev server
+ * has no mounts to translate between them.
+ */
+const MOCK_TREE: Record<string, string[]> = {
+  '/mnt': ['user', 'cache', 'disk1'],
+  '/mnt/user': ['appdata', 'backups', 'domains', 'isos'],
+  '/mnt/user/appdata': ['plex', 'sonarr', 'radarr', 'nginx'],
+  '/mnt/user/backups': ['docker-folders'],
+  '/boot/config/plugins': ['unraid-docker-folders-modern'],
+  '/config': ['databases', 'logs', 'cache'],
+  '/config/databases': [],
+  '/data': ['media', 'downloads'],
+};
+
+// Folders the mock says hold a database, so the quiesce warning can be seen.
+const MOCK_SQLITE_DIRS = ['/config', '/config/databases', '/mnt/user/appdata/sonarr'];
+
+function handlePaths(_req: any, res: any, params: Record<string, string>) {
+  const scope = params.scope || 'host';
+  const typed = params.path || '';
+  const roots = ['/mnt', '/boot/config/plugins'];
+
+  if (scope === 'host') {
+    const matching = roots.filter((r) => !typed || r.toLowerCase().startsWith(typed.toLowerCase()));
+    if (matching.length) {
+      json(res, { base: '', entries: matching.map((p) => ({ name: p, path: p })), has_sqlite: false });
+      return;
+    }
+  }
+
+  const slash = typed.lastIndexOf('/');
+  const endsWithSlash = typed.endsWith('/');
+  const parent = endsWithSlash ? typed.replace(/\/+$/, '') : slash <= 0 ? '' : typed.slice(0, slash);
+  const prefix = endsWithSlash || slash < 0 ? '' : typed.slice(slash + 1);
+
+  // Still above every mount: offer the container's own top level paths.
+  if (scope === 'container' && !MOCK_TREE[parent]) {
+    const mounts = ['/config', '/data'].filter(
+      (p) => !typed || p.toLowerCase().startsWith(typed.toLowerCase()),
+    );
+    json(res, { base: '', entries: mounts.map((p) => ({ name: p, path: p })), has_sqlite: false });
+    return;
+  }
+
+  const names = (MOCK_TREE[parent] || []).filter(
+    (n) => !prefix || n.toLowerCase().startsWith(prefix.toLowerCase()),
+  );
+
+  json(res, {
+    base: parent,
+    entries: names.map((n) => ({ name: n, path: `${parent}/${n}` })),
+    has_sqlite: MOCK_SQLITE_DIRS.includes(parent),
+  });
+}
+
 export function mockApiPlugin(): Plugin {
   return {
     name: 'mock-api',
@@ -1385,6 +1450,8 @@ export function mockApiPlugin(): Plugin {
             handleComposeStream(req, res, params);
           } else if (endpoint === 'schedules.php') {
             await handleSchedules(req, res, params);
+          } else if (endpoint === 'paths.php') {
+            handlePaths(req, res, params);
           } else {
             json(res, { error: true, message: 'Not found' }, 404);
           }

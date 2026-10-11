@@ -8,8 +8,19 @@
     <testsuite name="Auth">
       <file>AuthTest.php</file>
     </testsuite>
+    <testsuite name="ApiVersion">
+      <file>ApiVersionTest.php</file>
+    </testsuite>
+    <testsuite name="BackendWatchdog">
+      <file>BackendWatchdogTest.php</file>
+    </testsuite>
     <testsuite name="DockerClientStats">
+      <file>DbCopyScriptTest.php</file>
       <file>DockerClientStatsTest.php</file>
+      <file>DockerClientLogsTest.php</file>
+    </testsuite>
+    <testsuite name="ImageReference">
+      <file>ImageReferenceTest.php</file>
     </testsuite>
     <testsuite name="UpdateCheck">
       <file>UpdateCheckTest.php</file>
@@ -23,6 +34,9 @@
     <testsuite name="FolderManager">
       <file>FolderManagerTest.php</file>
     </testsuite>
+    <testsuite name="RequestFlag">
+      <file>RequestFlagTest.php</file>
+    </testsuite>
     <testsuite name="ServerTimezone">
       <file>ServerTimezoneTest.php</file>
     </testsuite>
@@ -32,14 +46,37 @@
     <testsuite name="ScheduleAction">
       <file>ScheduleActionTest.php</file>
     </testsuite>
+    <testsuite name="ScheduleClaim">
+      <file>ScheduleClaimTest.php</file>
+    </testsuite>
     <testsuite name="ScheduleMigration">
       <file>ScheduleMigrationTest.php</file>
+    </testsuite>
+    <testsuite name="ComposeExec">
+      <file>ComposeExecTest.php</file>
+    </testsuite>
+    <testsuite name="ComposeServiceNames">
+      <file>ComposeServiceNamesTest.php</file>
     </testsuite>
     <testsuite name="ContainerFacts">
       <file>ContainerFactsTest.php</file>
     </testsuite>
+    <testsuite name="BackupDelete">
+      <file>BackupDeleteTest.php</file>
+    </testsuite>
+    <testsuite name="BackupSafety">
+      <file>BackupSafetyTest.php</file>
+    </testsuite>
+    <testsuite name="PostgresBackup">
+      <file>DockerExecDemuxTest.php</file>
+      <file>PostgresBackupTest.php</file>
+      <file>PostgresBackupRunTest.php</file>
+    </testsuite>
     <testsuite name="SecurityAdvisor">
       <file>SecurityAdvisorTest.php</file>
+    </testsuite>
+    <testsuite name="ComposeRestore">
+      <file>ComposeRestoreTest.php</file>
     </testsuite>
   </testsuites>
 </phpunit>

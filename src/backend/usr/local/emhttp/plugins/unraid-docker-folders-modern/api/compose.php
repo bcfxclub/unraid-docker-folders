@@ -17,6 +17,17 @@ header('Content-Type: application/json');
 requireAuth();
 
 $method = $_SERVER['REQUEST_METHOD'];
+
+// One rule for the project name, shared with compose-stream.php. Before, this
+// endpoint checked nothing and compose-stream.php accepted "..". The name is
+// looked up in compose_stacks and passed to "docker compose -p", so it must be
+// one path segment. Dots stay legal, because a stack imported from
+// compose.manager keeps its directory name.
+$projectParam = $_GET['project'] ?? null;
+if ($projectParam !== null && $projectParam !== '' && safeComposeProjectParam($projectParam) === null) {
+  errorResponse('Invalid project name', 400);
+}
+
 $composeManager = new ComposeManager();
 
 try {
@@ -174,7 +185,7 @@ function handlePost($composeManager)
     }
 
     WebSocketPublisher::publish('compose', 'create', ['project' => $projectName]);
-    WebSocketPublisher::publish('folders', 'updated');
+    WebSocketPublisher::publish('folder', 'updated');
     jsonResponse($result);
   }
 
@@ -204,7 +215,7 @@ function handlePost($composeManager)
     }
 
     $data = getRequestData();
-    $forceRecreate = !empty($data['force_recreate']);
+    $forceRecreate = requestFlag($data['force_recreate'] ?? false);
     $result = $composeManager->stackUp($project, $forceRecreate);
 
     WebSocketPublisher::publish('compose', 'up', ['project' => $project]);
@@ -403,8 +414,8 @@ function handlePost($composeManager)
     }
 
     $data = getRequestData();
-    $enabled = !empty($data['enabled']);
-    $forceRecreate = !empty($data['force_recreate']);
+    $enabled = requestFlag($data['enabled'] ?? false);
+    $forceRecreate = requestFlag($data['force_recreate'] ?? false);
 
     $composeManager->setAutostart($project, $enabled, $forceRecreate);
 
@@ -418,6 +429,12 @@ function handlePost($composeManager)
 
   // Set description
   if ($action === 'set_description') {
+    // Every other per-stack write is refused while management is off, which
+    // is when compose.manager owns the stacks. This one was the exception.
+    if (!$status['management_enabled']) {
+      errorResponse('Compose management is disabled', 403);
+    }
+
     $data = getRequestData();
     if (!isset($data['description'])) {
       errorResponse('description is required', 400);

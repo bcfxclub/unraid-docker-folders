@@ -4,6 +4,8 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import FolderHeader from '../FolderHeader.vue';
 import { useDockerStore } from '@/stores/docker';
 import { useSettingsStore } from '@/stores/settings';
+import { useStatsStore } from '@/stores/stats';
+import { makeContainer, makeContainerStats } from '@/test/fixtures';
 import type { Folder } from '@/types/folder';
 
 function makeFolder(overrides: Partial<Folder> = {}): Folder {
@@ -296,5 +298,30 @@ describe('FolderHeader', () => {
     await wrapper.vm.$nextTick();
 
     expect(wrapper.find('.kebab-menu-item').exists()).toBe(false);
+  });
+
+  describe('collapsed folder stats', () => {
+    const GB = 1024 ** 3;
+    const entry = (cpuPercent: number, memoryUsage: number) =>
+      makeContainerStats({ cpuPercent, memoryUsage, memoryLimit: 32 * GB, hostCpus: 8, hostMemory: 32 * GB });
+
+    it('adds up the members instead of averaging them', () => {
+      const docker = useDockerStore();
+      docker.containers = [makeContainer({ id: 'a', name: 'a' }), makeContainer({ id: 'b', name: 'b' })];
+      useStatsStore().stats = { a: entry(400, 4 * GB), b: entry(0, 4 * GB) };
+
+      const wrapper = mountHeader({
+        collapsed: true,
+        containers: [{ container_name: 'a' }, { container_name: 'b' }] as unknown as Folder['containers'],
+      });
+
+      // CPU: 400% + 0%, on the rows' one-core scale, not 400% over 8 host
+      // cores. Memory: 8 GB of 32 GB. An average would have shown 200% CPU.
+      const text = wrapper.text();
+      expect(text).toContain('400.0%');
+      expect(text).toContain('25.0%');
+      expect(text).not.toContain('200.0%');
+      expect(text).not.toContain('50.0%');
+    });
   });
 });

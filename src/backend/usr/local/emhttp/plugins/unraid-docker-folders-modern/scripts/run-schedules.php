@@ -11,7 +11,30 @@ require_once dirname(__DIR__) . '/classes/BackupManager.php';
 
 set_time_limit(300);
 
+// Heartbeat first, before every early exit below, so the file proves cron
+// itself fired rather than proving a schedule ran. api/schedules.php reports
+// its mtime, and the schedules screen warns when it goes stale.
+@touch(SCHEDULER_TICK_FILE);
+
+// Switch back to PHP if the GraphQL backend broke. It runs at shutdown, after
+// the schedules and after any early exit below, so its checks never delay a
+// schedule, and an error in it never stops one.
+register_shutdown_function(function () {
+  try {
+    require_once dirname(__DIR__) . '/classes/BackendWatchdog.php';
+    BackendWatchdog::run();
+  } catch (Throwable $e) {
+    error_log('Backend watchdog error: ' . $e->getMessage());
+  }
+});
+
 if (!file_exists(DOCKER_SOCKET)) {
+  exit(0);
+}
+
+// In GraphQL mode the Unraid API plugin runs due schedules instead, and a
+// schedule fired by both would run twice. See dfmPhpOwnsSchedules().
+if (!dfmPhpOwnsSchedules()) {
   exit(0);
 }
 
@@ -35,12 +58,7 @@ try {
   // Automatic runs happen with nobody watching, so tell the user about a
   // failure. A manual "Run now" shows its result in the UI instead.
   foreach ($results as $result) {
-    if (!empty($result['success'])) {
-      continue;
-    }
-    $notification = buildScheduleFailureNotification($result, $result['message'] ?? '');
-    sendUnraidNotification($notification['subject'], $notification['description'], 'warning');
-    error_log('Schedule failed: ' . $notification['subject'] . ' (' . $notification['description'] . ')');
+    notifyScheduleResult($result);
   }
 } catch (Exception $e) {
   error_log('Schedule runner error: ' . $e->getMessage());

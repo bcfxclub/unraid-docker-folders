@@ -131,7 +131,127 @@
 
 
 
-###2026.09.20
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###2026.10.11-dev4
+- Fixed: A collapsed folder now shows its CPU as the sum of its containers, so one container using a full core no longer shows as about 1% on large hosts.
+- Fixed: Copying the restore steps in the GraphQL warning dialog in Settings no longer closes the dialog, so the install button can be reached.
+###2026.10.11-dev3
+- Fixed: The option to reinstall Docker Compose after a reboot now works fully: the settings page shows the server's error when the copy to flash fails instead of always saying "Saved", and the flash copy is removed when the option is off or the plugin is uninstalled.
+- Internal fixes and performance improvements.
+###2026.10.11-dev2
+- New: A new setting can reinstall Docker Compose automatically after a reboot, keeping a verified copy on the flash drive so compose stacks can autostart again.
+###2026.10.11-dev1
+- Improved: The settings page no longer shows a green accent bar on each settings box.
+- Improved: The GraphQL backend only runs on tested Unraid API versions, and the settings page refuses to switch to it on an untested version.
+- Improved: A server using the GraphQL backend switches back to the PHP backend on its own when an Unraid API update moves it outside the tested versions.
+- Improved: Release notes in the changelog and on the settings page are now written for users and sorted into New, Improved and Fixed.
+- Fixed: The GraphQL backend now installs on Unraid 7.3.3 and 7.4.0-rc1, and a failed install is reported instead of passing silently.
+###2026.10.04-dev1
+- feat(settings): make users copy the restore steps before the GraphQL install
+###2026.09.29-dev1
+- feat(schedules): write one Postgres backup per database
+###2026.09.28-dev1
+- feat(schedules): add a Postgres backup mode for backup schedules
+- fix(schedules): run updates in the background, and other review fixes
+- feat(schedules): add an update action that pulls and recreates a container
+- feat(backend): skip the backend reinstall when its code did not change
+###2026.09.24-dev1
+- chore(backend): turn off npm's audit and funding notices for the backend install
+- fix(backend): restart the Unraid API once when the backend is removed
+- fix(backend): review fixes for the on-demand GraphQL backend
+- fix(backend): time out every API call, and expire a stuck install for the watchdog
+- feat(backend): install the GraphQL backend only on demand, and roll back when it breaks
+###2026.09.23-dev4
+- refactor(logs): one timestamp pass, and require the log time zone
+- fix(logs): show Docker's line stamps in the server's time zone
+###2026.09.23-dev3
+- feat(dashboard): put the folded tile's summary on one line
+- feat(dashboard): show running count, CPU and RAM on the folded tile
+- test(container-card): stop a stats fetch from replacing seeded stats
+- feat(widget): show the all-running total as two arc gauges
+- fix(containers): keep volumes and ports in one order across refreshes
+- feat(ui): show shimmer skeletons during the first load
+- refactor: clean up after review of the stats and database changes
+- perf(graphql): share one database handle, and speed up the page load
+- feat(stats): measure folder and total stats against the host
+- fix(plg): skip the Unraid API plugin install when it is current
+###2026.09.23-dev2
+- fix(build): lock @unraid/shared to the tarball CI downloads
+- feat(settings): mark the GraphQL backend as unstable
+- feat(graphql): add a GraphQL backend beside PHP, chosen by a setting
+###2026.09.23-dev1
+- fix(backups): check deleteBackup() containment with pathIsWithin() again
+- fix(schedules): report a lock file that cannot be opened as a failure
+- fix(compose): recheck every stack before an import rollback deletes files
+- fix(compose): do not roll back a file the import did not create
+- fix(compose): check project names with one shared rule
+- docs(docker): merge the two docblocks on request()
+- fix(backups): report the archive this stack backup actually wrote
+- fix(updates): decode whole lines of a pull stream and report every failure
+- fix(compose): apply the 128-character name limit in compose.php too
+- fix(compose): import only stacks the API can address, and keep a racing import's files
+- perf(compose): cache a missing docker compose too
+- fix(compose): stop execCommand spinning once its pipes close
+- fix(compose): give up, down, stop and pull 600 seconds
+- docs(docker): name the one path request() gets unencoded
+- fix(api): read "false" as false in request flags
+- refactor(updates): stop writing the unused release_notes.etag
+- fix(updates): keep autolink URLs in release-note summaries
+- refactor(compose): drop snapshotVersion's unused $sourcePath
+- fix(compose): copy imported files outside the database transaction
+- fix(compose): check the project name the same way in both endpoints
+- fix(compose): keep exporting stacks whose names contain a dot
+- fix(compose): refuse set_description while management is off
+- fix(compose): list services for a stack that has no compose_file set
+- perf(compose): check for docker compose once per request
+- fix(compose): enforce execCommand's timeout and read both pipes together
+- fix(ports): count random host ports in conflict detection
+- docs(claude): describe how PHP actually runs here
+- fix(updates): count each checked image once
+- fix(compose): update a stack row only when its paths change
+- fix(docker): stop inspecting a container whose image is gone
+- fix(websocket): return whether a publish succeeded
+- fix(websocket): send nothing while Unraid pauses publishing
+- fix(stats): accept only a full container id in getContainerLogSize
+- fix(docker): URL-encode every id in a Docker socket path
+- fix(schedules): run one schedule at most once at a time
+- fix(updates): release the session lock during a manual check
+- fix(containers): report a Docker failure instead of an empty list
+- fix(updates): split an image reference with a registry port or digest
+- fix(updates): keep the release-notes link after a pull
+- fix(adopt): write the image tag, not a digest, into the template
+- fix(websocket): publish folder refreshes as entity "folder"
+- fix(compose): refuse an unsafe project name in exportConfigs
+- fix(updates): fail a pull when Docker streams an error
+- test(backups): pin what deleteBackup may delete
+- fix(backups): list only the target's own archives
+- fix(backups): report the newest archive of a stack backup
+- fix(backups): fail a stack backup that archived nothing
+- fix(backups): report a failed restart when the archive also fails
+- fix(backups): remove the partial archive when tar fails
+- fix(backups): prune only the archives the target wrote
+- fix(backups): delete only an archive the plugin wrote
+- fix(schedules): claim each due slot, so two runners cannot both run it
+- fix(updates): recreate a container that has no labels
+- fix(websocket): publish to nchan over the Unix socket
+###2026.09.20-dev8
+- fix(schedules): read the right crontab spool and repair the runner itself
+###2026.09.20-dev7
+- feat(schedules): suggest backup paths, quiet the container, watch the runner
+###2026.09.20-dev6
 - test(settings): pin the security advisor default to on
 ###2026.09.20-dev5
 - fix(install): use installpkg so a colliding package name cannot skip the install (#16)
@@ -572,7 +692,10 @@ if [ -f "${CONFIG_DIR}/data.db" ]; then
   # Create backup of existing database before migration
   BACKUP_FILE="${CONFIG_DIR}/backups/pre-upgrade-$(date +%Y%m%d-%H%M%S).db"
   echo "Creating backup: ${BACKUP_FILE}"
-  cp "${CONFIG_DIR}/data.db" "${BACKUP_FILE}"
+  # Through SQLite, not cp: the database is in use while this runs (the Unraid
+  # API plugin, PHP requests, the schedule runner), and a raw copy of a WAL
+  # database misses commits still in data.db-wal. See scripts/db-copy.php.
+  php "${PLUGIN_DIR}/scripts/db-copy.php" backup "${CONFIG_DIR}/data.db" "${BACKUP_FILE}" >> "${LOG_FILE}" 2>&1
 
   if [ $? -eq 0 ]; then
     echo "Backup created successfully." >> "${LOG_FILE}"
@@ -607,10 +730,18 @@ if [ $MIGRATION_STATUS -ne 0 ]; then
   echo ""
 
   # Restore backup if this was an upgrade
+  # Each migration runs in its own transaction, so the failed one already
+  # rolled back. The restore also undoes any migration that succeeded earlier
+  # in this run. It writes through SQLite rather than cp: a file copied over
+  # the live database while connections have it open would meet the old WAL.
   if [ $DB_EXISTS -eq 1 ] && [ -f "${BACKUP_FILE}" ]; then
     echo "Restoring database from backup..."
-    cp "${BACKUP_FILE}" "${CONFIG_DIR}/data.db"
-    echo "Database restored from backup." >> "${LOG_FILE}"
+    if php "${PLUGIN_DIR}/scripts/db-copy.php" restore "${BACKUP_FILE}" "${CONFIG_DIR}/data.db" >> "${LOG_FILE}" 2>&1; then
+      echo "Database restored from backup." >> "${LOG_FILE}"
+    else
+      echo "WARNING: Restore failed. The database is as the failed migration left it, and the backup is at ${BACKUP_FILE}."
+      echo "WARNING: Restore from ${BACKUP_FILE} failed" >> "${LOG_FILE}"
+    fi
   fi
 
   echo "See log file for details: ${LOG_FILE}"
@@ -673,6 +804,25 @@ find "${PLUGIN_DIR}" -type f -name "*.css" -exec chmod 644 {} \;
 if [ -f "${CONFIG_DIR}/data.db" ]; then
   chmod 644 "${CONFIG_DIR}/data.db"
   echo "Database permissions set." >> "${LOG_FILE}"
+fi
+
+# The GraphQL backend: the Unraid API plugin that serves GraphQL mode. It is
+# installed only while backend_mode is graphql, so a PHP-mode server never
+# carries code inside its Unraid API. scripts/api-plugin.sh does the work;
+# the settings page and the backend watchdog call the same script.
+#
+# This runs on every boot, not only on install. The API's node_modules live
+# in RAM, so a backend installed into them can be gone after a reboot, and
+# this puts it back. An unreadable mode touches nothing.
+API_PLUGIN_SCRIPT="${PLUGIN_DIR}/scripts/api-plugin.sh"
+chmod 755 "${API_PLUGIN_SCRIPT}" 2>/dev/null
+BACKEND_MODE=$(php -r 'require "/usr/local/emhttp/plugins/unraid-docker-folders-modern/include/config.php"; $m = dfmReadBackendMode(); echo $m === null ? "unknown" : $m;' 2>/dev/null)
+echo "Backend mode: ${BACKEND_MODE:-unknown}" >> "${LOG_FILE}"
+if [ "${BACKEND_MODE}" = "graphql" ]; then
+  /bin/bash "${API_PLUGIN_SCRIPT}" install
+elif [ "${BACKEND_MODE}" = "php" ] && [ -d "/usr/local/unraid-api/node_modules/unraid-api-plugin-docker-folders" ]; then
+  # Left by an older release, which installed it for every user.
+  /bin/bash "${API_PLUGIN_SCRIPT}" remove
 fi
 
 # Verify installation
@@ -777,12 +927,24 @@ if [ -x /usr/local/sbin/update_cron ]; then
   /usr/local/sbin/update_cron >/dev/null 2>&1
 fi
 
+# Take the GraphQL backend out of the Unraid API. It lives in the API's own
+# dependency list, so leaving it would keep a plugin loaded whose PHP half,
+# settings page and database readers are gone.
+if [ -f "${PLUGIN_DIR}/scripts/api-plugin.sh" ]; then
+  /bin/bash "${PLUGIN_DIR}/scripts/api-plugin.sh" remove
+fi
+rm -rf "${CONFIG_DIR}/api-plugin"
+
 # Backup data before removal
 if [ -f "${CONFIG_DIR}/data.db" ]; then
   echo "Backing up database..."
   mkdir -p "${CONFIG_DIR}/backups"
   BACKUP_FILE="${CONFIG_DIR}/backups/data-backup-$(date +%Y%m%d-%H%M%S).db"
-  cp "${CONFIG_DIR}/data.db" "${BACKUP_FILE}"
+  # Through SQLite, so the backup includes commits still in data.db-wal.
+  # cp is the fallback if the script or php is already gone.
+  if ! php "${PLUGIN_DIR}/scripts/db-copy.php" backup "${CONFIG_DIR}/data.db" "${BACKUP_FILE}" >/dev/null 2>&1; then
+    cp "${CONFIG_DIR}/data.db" "${BACKUP_FILE}"
+  fi
   echo "Database backed up to: ${BACKUP_FILE}"
 fi
 
@@ -825,6 +987,9 @@ fi
 if [ -d "${CONFIG_DIR}" ]; then
   echo "Cleaning up old package files..."
   rm -f ${CONFIG_DIR}/${PLUGIN_NAME}-*.txz 2>/dev/null || true
+  # The ~65 MB flash copy of Docker Compose ("Reinstall Docker Compose after
+  # a reboot"). It is a cache, not user data.
+  rm -f "${CONFIG_DIR}/docker-compose" "${CONFIG_DIR}/docker-compose.tmp"
 fi
 
 echo "========================================="

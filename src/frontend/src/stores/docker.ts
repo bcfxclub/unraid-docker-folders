@@ -6,7 +6,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { useFolderStore } from './folders';
 import { useSettingsStore } from './settings';
-import { apiFetch } from '@/utils/csrf';
+import { useBackend } from '@/backends';
 import { sortByMode } from '@/utils/sortMode';
 
 export interface ContainerPort {
@@ -28,6 +28,29 @@ export interface HostPortBinding {
   hostPort: number;
   containerPort: number;
   type: string; // 'tcp' | 'udp'
+}
+
+/**
+ * The host ports a container holds right now.
+ *
+ * `hostPorts` comes from the backend's inspect cache, which skips a binding
+ * with no fixed host port (`-p 80` or `-P`). Docker picks a new port for those
+ * on every start, and that cache never expires, so storing one would go stale.
+ * A running container reports the port Docker picked in the list response's
+ * `ports[].PublicPort`, so it is read live here instead.
+ */
+export function heldBindings(c: Container): HostPortBinding[] {
+  const held = [...(c.hostPorts ?? [])];
+  if (c.state !== 'running') return held;
+  for (const p of c.ports ?? []) {
+    if (!p.PublicPort) continue;
+    const type = (p.Type || 'tcp').toLowerCase();
+    // Docker lists a port once per address family, and a fixed binding is
+    // already in hostPorts. One entry per port and protocol is enough.
+    if (held.some((b) => b.hostPort === p.PublicPort && b.type === type)) continue;
+    held.push({ hostIp: p.IP ?? '', hostPort: p.PublicPort, containerPort: p.PrivatePort, type });
+  }
+  return held;
 }
 
 export interface ConflictDetail {
@@ -52,6 +75,22 @@ export interface PullRequest {
   managed: string | null;
   id: string;
   force?: boolean;
+}
+
+/**
+ * Docker builds `Mounts` and the list API's `Ports` by walking a Go map, so
+ * their order changes from one fetch to the next, and the details view would
+ * swap rows on a refresh. Sort them once here, so every view gets one order:
+ * mounts by container path, ports by container port, protocol, then host port.
+ */
+export function withStableOrder(c: Container): Container {
+  return {
+    ...c,
+    mounts: [...(c.mounts ?? [])].sort((a, b) => a.Destination.localeCompare(b.Destination) || a.Source.localeCompare(b.Source)),
+    ports: [...(c.ports ?? [])].sort(
+      (a, b) => a.PrivatePort - b.PrivatePort || a.Type.localeCompare(b.Type) || (a.PublicPort ?? 0) - (b.PublicPort ?? 0) || (a.IP ?? '').localeCompare(b.IP ?? ''),
+    ),
+  };
 }
 
 export interface Container {
@@ -103,8 +142,6 @@ export interface Container {
   autostartDelay: number;
 }
 
-const API_BASE = '/plugins/unraid-docker-folders-modern/api';
-
 export const useDockerStore = defineStore('docker', () => {
   // State
   const containers = ref<Container[]>([]);
@@ -146,7 +183,7 @@ export const useDockerStore = defineStore('docker', () => {
   const boundHostPorts = computed<Map<number, string>>(() => {
     const owners = new Map<number, string>();
     for (const c of containers.value) {
-      for (const b of c.hostPorts ?? []) {
+      for (const b of heldBindings(c)) {
         if (!owners.has(b.hostPort)) owners.set(b.hostPort, c.name);
       }
     }
@@ -162,7 +199,7 @@ export const useDockerStore = defineStore('docker', () => {
     const occupied: Array<{ port: number; type: string; ip: string; name: string }> = [];
     for (const c of containers.value) {
       if (c.state !== 'running') continue;
-      for (const b of c.hostPorts ?? []) {
+      for (const b of heldBindings(c)) {
         occupied.push({ port: b.hostPort, type: b.type, ip: b.hostIp, name: c.name });
       }
     }
@@ -263,14 +300,13 @@ export const useDockerStore = defineStore('docker', () => {
     error.value = null;
 
     try {
-      const response = await apiFetch(`${API_BASE}/containers.php`);
+      const { ok, error: failure, data } = await useBackend().containers.list();
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (!ok) {
+        throw new Error(failure);
       }
 
-      const data = await response.json();
-      containers.value = data.containers || [];
+      containers.value = (data.containers || []).map(withStableOrder);
       securityDismissals.value = data.dismissals || [];
       initialLoadDone = true;
     } catch (e) {
@@ -283,11 +319,9 @@ export const useDockerStore = defineStore('docker', () => {
 
   async function startContainer(id: string): Promise<boolean> {
     try {
-      const response = await apiFetch(`${API_BASE}/containers.php?action=start&id=${id}`, {
-        method: 'POST',
-      });
+      const { ok } = await useBackend().containers.action('start', id);
 
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(`Failed to start container`);
       }
 
@@ -303,11 +337,9 @@ export const useDockerStore = defineStore('docker', () => {
 
   async function resumeContainer(id: string): Promise<boolean> {
     try {
-      const response = await apiFetch(`${API_BASE}/containers.php?action=resume&id=${id}`, {
-        method: 'POST',
-      });
+      const { ok } = await useBackend().containers.action('resume', id);
 
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(`Failed to resume container`);
       }
 
@@ -323,11 +355,9 @@ export const useDockerStore = defineStore('docker', () => {
 
   async function stopContainer(id: string): Promise<boolean> {
     try {
-      const response = await apiFetch(`${API_BASE}/containers.php?action=stop&id=${id}`, {
-        method: 'POST',
-      });
+      const { ok } = await useBackend().containers.action('stop', id);
 
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(`Failed to stop container`);
       }
 
@@ -343,11 +373,9 @@ export const useDockerStore = defineStore('docker', () => {
 
   async function restartContainer(id: string): Promise<boolean> {
     try {
-      const response = await apiFetch(`${API_BASE}/containers.php?action=restart&id=${id}`, {
-        method: 'POST',
-      });
+      const { ok } = await useBackend().containers.action('restart', id);
 
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(`Failed to restart container`);
       }
 
@@ -363,12 +391,13 @@ export const useDockerStore = defineStore('docker', () => {
 
   async function removeContainer(id: string, removeImage = false): Promise<boolean> {
     try {
-      const response = await apiFetch(`${API_BASE}/containers.php?action=remove&id=${id}`, {
-        method: 'POST',
-        body: removeImage ? JSON.stringify({ remove_image: true }) : undefined,
-      });
+      const { ok } = await useBackend().containers.action(
+        'remove',
+        id,
+        removeImage ? { remove_image: true } : undefined,
+      );
 
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(`Failed to remove container`);
       }
 
@@ -385,13 +414,10 @@ export const useDockerStore = defineStore('docker', () => {
 
   async function toggleAutostart(name: string, enabled: boolean, delay?: number): Promise<boolean> {
     try {
-      const body: Record<string, unknown> = { enabled };
+      const body: { enabled: boolean; delay?: number } = { enabled };
       if (delay !== undefined) body.delay = delay;
-      const response = await apiFetch(
-        `${API_BASE}/containers.php?action=autostart&name=${encodeURIComponent(name)}`,
-        { method: 'POST', body: JSON.stringify(body) }
-      );
-      if (!response.ok) {
+      const { ok } = await useBackend().containers.setAutostart(name, body);
+      if (!ok) {
         throw new Error('Failed to update autostart');
       }
       // Update local state immediately

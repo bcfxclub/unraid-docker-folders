@@ -17,6 +17,12 @@ class ComposeManager
   /** Where docker compose CLI plugin binary lives */
   const COMPOSE_BINARY_PATH = '/usr/lib/docker/cli-plugins/docker-compose';
 
+  /**
+   * Flash copy of the verified binary. /usr/lib is RAM, so the binary is gone
+   * after every reboot; this copy lets boot restore it without a download.
+   */
+  const COMPOSE_CACHE_PATH = CONFIG_DIR . '/docker-compose';
+
   /** Version of Docker Compose to install when missing */
   const COMPOSE_VERSION = '2.32.4';
 
@@ -37,6 +43,17 @@ class ComposeManager
     'compose.yaml',
   ];
 
+  /**
+   * Seconds that up, down, stop, and pull may run. "up -d" pulls any missing
+   * image first, which takes minutes on a slow link. Matches
+   * execCommandStreaming().
+   */
+  const STACK_COMMAND_TIMEOUT = 600;
+
+  // The answer of "docker compose version", or null before the first ask.
+  // See isComposeAvailable().
+  private $composeAvailable = null;
+
   public function __construct()
   {
     $this->db = Database::getInstance();
@@ -49,10 +66,19 @@ class ComposeManager
    */
   public function isComposeAvailable()
   {
+    // getAllStacks() calls stackPs() once per stack, and each asked again,
+    // which ran "docker compose version" once per stack on every list. Both
+    // answers are kept. installComposeBinary() clears the answer, because a
+    // no can turn into a yes within the same request.
+    if ($this->composeAvailable !== null) {
+      return $this->composeAvailable;
+    }
+
     $output = [];
     $code = -1;
     @exec('docker compose version 2>&1', $output, $code);
-    return $code === 0;
+    $this->composeAvailable = $code === 0;
+    return $this->composeAvailable;
   }
 
   /**
@@ -128,8 +154,136 @@ class ComposeManager
     }
 
     @chmod(self::COMPOSE_BINARY_PATH, 0755);
+    $this->composeAvailable = null;
+
+    if ($this->isAutoInstallEnabled()) {
+      $cached = $this->cacheComposeBinary(self::COMPOSE_BINARY_PATH, self::COMPOSE_CACHE_PATH, self::COMPOSE_SHA256, true);
+      if (!$cached['success']) {
+        error_log('Docker Folders: no flash copy of Docker Compose: ' . $cached['error']);
+      }
+    }
 
     return ['success' => true, 'error' => null];
+  }
+
+  // ─── Reinstall after reboot ────────────────────────────────────────
+
+  /**
+   * Whether the user asked for compose to be put back whenever Docker starts
+   */
+  public function isAutoInstallEnabled()
+  {
+    $row = $this->db->fetchOne("SELECT value FROM settings WHERE key = 'compose_auto_install'");
+    return $row && $row['value'] === '1';
+  }
+
+  /**
+   * Copy a verified binary to flash so a reboot can restore it offline.
+   * The copy is only made when it matches the pinned SHA256.
+   *
+   * A copy of the same size already on flash is kept without reading it back:
+   * it was verified when it was written, and restoreComposeBinary() checks
+   * its hash again before it is used. Reading 65 MB from a USB stick here
+   * would only slow the settings request.
+   *
+   * @param bool $sourceVerified true when the caller just checked $source
+   *   against $sha, as installComposeBinary() does, so it is not hashed twice
+   * @return array ['success' => bool, 'error' => string|null]
+   */
+  public function cacheComposeBinary($source = self::COMPOSE_BINARY_PATH, $dest = self::COMPOSE_CACHE_PATH, $sha = self::COMPOSE_SHA256, $sourceVerified = false)
+  {
+    if (!is_file($source)) {
+      return ['success' => false, 'error' => 'Docker Compose is not installed'];
+    }
+    if (!$sourceVerified && hash_file('sha256', $source) !== $sha) {
+      return [
+        'success' => false,
+        'error' => 'the installed Docker Compose is not the pinned ' . self::COMPOSE_VERSION . ' build, so no copy was kept',
+      ];
+    }
+    if (is_file($dest) && filesize($dest) === filesize($source)) {
+      return ['success' => true, 'error' => null];
+    }
+    if (!$this->copyExecutable($source, $dest)) {
+      return ['success' => false, 'error' => 'the copy could not be written to ' . dirname($dest)];
+    }
+    return ['success' => true, 'error' => null];
+  }
+
+  /**
+   * Remove the flash copy (used when the option is switched off), and any
+   * half-written copy a concurrent request left behind
+   */
+  public function removeCachedComposeBinary($dest = self::COMPOSE_CACHE_PATH)
+  {
+    foreach ([$dest, $dest . '.tmp'] as $file) {
+      if (is_file($file)) {
+        @unlink($file);
+      }
+    }
+  }
+
+  /**
+   * Put the compose binary back in place from the flash copy.
+   *
+   * @return bool true when the binary was restored
+   */
+  public function restoreComposeBinary($source = self::COMPOSE_CACHE_PATH, $dest = self::COMPOSE_BINARY_PATH, $sha = self::COMPOSE_SHA256)
+  {
+    if (!is_file($source) || hash_file('sha256', $source) !== $sha) {
+      return false;
+    }
+    $dir = dirname($dest);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+      return false;
+    }
+    if (!$this->copyExecutable($source, $dest)) {
+      return false;
+    }
+    $this->composeAvailable = null;
+    return true;
+  }
+
+  /**
+   * Copy through a .tmp file and rename, so a reader never sees half a binary.
+   */
+  private function copyExecutable($source, $dest)
+  {
+    $tmp = $dest . '.tmp';
+    if (!@copy($source, $tmp)) {
+      @unlink($tmp);
+      return false;
+    }
+    @chmod($tmp, 0755);
+    if (!@rename($tmp, $dest)) {
+      @unlink($tmp);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Make sure docker compose is usable, for the boot hook. Does nothing
+   * unless the compose_auto_install setting is on.
+   *
+   * @return array ['available' => bool, 'action' => present|restored|installed|disabled|failed, 'error' => string|null]
+   */
+  public function ensureComposeBinary()
+  {
+    if ($this->isComposeAvailable()) {
+      return ['available' => true, 'action' => 'present', 'error' => null];
+    }
+    if (!$this->isAutoInstallEnabled()) {
+      return ['available' => false, 'action' => 'disabled', 'error' => null];
+    }
+    if ($this->restoreComposeBinary() && $this->isComposeAvailable()) {
+      return ['available' => true, 'action' => 'restored', 'error' => null];
+    }
+    $result = $this->installComposeBinary();
+    if (!$result['success']) {
+      return ['available' => false, 'action' => 'failed', 'error' => $result['error']];
+    }
+    return ['available' => $this->isComposeAvailable(), 'action' => 'installed', 'error' => null];
   }
 
   // ─── Conflict Detection ────────────────────────────────────────────
@@ -254,7 +408,9 @@ class ComposeManager
    */
   private function parseComposeServiceNames($stack)
   {
-    if (empty($stack['compose_file'])) return [];
+    // No early return on an empty compose_file. resolveComposeFilePath()
+    // falls back to the standard names in working_dir, and a stack known
+    // only by its directory has services too.
     $path = $this->resolveComposeFilePath($stack);
     if (!$path || !file_exists($path)) return [];
     $content = @file_get_contents($path);
@@ -330,22 +486,26 @@ class ComposeManager
   public function upsertStack($projectName, $workingDir, $composeFile)
   {
     $existing = $this->db->fetchOne(
-      'SELECT project_name FROM compose_stacks WHERE project_name = ?',
+      'SELECT project_name, working_dir, compose_file FROM compose_stacks WHERE project_name = ?',
       [$projectName]
     );
 
     $now = time();
 
     if ($existing) {
-      // Only update paths if they changed (don't overwrite user settings)
-      $updates = ['updated_at' => $now];
-      if ($workingDir) {
+      // Write only a path that changed. This runs on every container-list
+      // GET, so writing unconditionally bumped updated_at on every poll.
+      $updates = [];
+      if ($workingDir && $workingDir !== $existing['working_dir']) {
         $updates['working_dir'] = $workingDir;
       }
-      if ($composeFile) {
+      if ($composeFile && $composeFile !== $existing['compose_file']) {
         $updates['compose_file'] = $composeFile;
       }
-      $this->db->update('compose_stacks', $updates, 'project_name = ?', [$projectName]);
+      if (!empty($updates)) {
+        $updates['updated_at'] = $now;
+        $this->db->update('compose_stacks', $updates, 'project_name = ?', [$projectName]);
+      }
     } else {
       $this->db->insert('compose_stacks', [
         'project_name' => $projectName,
@@ -546,12 +706,76 @@ class ComposeManager
 
     fclose($pipes[0]); // Close stdin
 
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
+    // Read both pipes together, and stop at $timeout. Reading stdout to the
+    // end before stderr could hang for good: a command that fills the stderr
+    // pipe waits for it to drain while this side waits for stdout to end.
+    // $timeout was also accepted and never used.
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+
+    $stdout = '';
+    $stderr = '';
+    $exitCode = null;
+    $deadline = time() + $timeout;
+
+    while (true) {
+      // A pipe at EOF stays readable, so select would return at once on every
+      // pass and the loop would spin. Watch only the pipes still open, and
+      // sleep when none is left but the process has not exited yet.
+      $read = array_values(array_filter([$pipes[1], $pipes[2]], function ($p) {
+        return !feof($p);
+      }));
+      $write = null;
+      $except = null;
+      if (empty($read)) {
+        usleep(100000);
+      } elseif (@stream_select($read, $write, $except, 1) === false) {
+        break;
+      }
+      foreach ($read as $stream) {
+        $chunk = fread($stream, 8192);
+        if ($chunk === false || $chunk === '') {
+          continue;
+        }
+        if ($stream === $pipes[1]) {
+          $stdout .= $chunk;
+        } else {
+          $stderr .= $chunk;
+        }
+      }
+
+      $status = proc_get_status($process);
+      if (!$status['running']) {
+        // proc_get_status() reports the real exit code only once, and older
+        // PHP makes proc_close() return -1 after that. Keep this one.
+        $exitCode = $status['exitcode'];
+        $stdout .= (string) stream_get_contents($pipes[1]);
+        $stderr .= (string) stream_get_contents($pipes[2]);
+        break;
+      }
+
+      if ($timeout > 0 && time() >= $deadline) {
+        proc_terminate($process);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($process);
+        return [
+          'success' => false,
+          'output' => $stdout,
+          // proc_terminate() signals only the shell. The command it started,
+          // such as docker compose, can still be running.
+          'error' => "Command timed out after {$timeout} seconds. It may still be running.",
+          'exit_code' => -1,
+        ];
+      }
+    }
+
     fclose($pipes[1]);
     fclose($pipes[2]);
-
-    $exitCode = proc_close($process);
+    $closeCode = proc_close($process);
+    if ($exitCode === null) {
+      $exitCode = $closeCode;
+    }
 
     return [
       'success' => $exitCode === 0,
@@ -843,7 +1067,7 @@ class ComposeManager
 
     $cmd .= ' 2>&1';
 
-    return $this->execCommand($cmd);
+    return $this->execCommand($cmd, self::STACK_COMMAND_TIMEOUT);
   }
 
   /**
@@ -859,7 +1083,7 @@ class ComposeManager
 
     $cmd .= ' down 2>&1';
 
-    return $this->execCommand($cmd);
+    return $this->execCommand($cmd, self::STACK_COMMAND_TIMEOUT);
   }
 
   /**
@@ -875,7 +1099,7 @@ class ComposeManager
 
     $cmd .= ' stop 2>&1';
 
-    return $this->execCommand($cmd);
+    return $this->execCommand($cmd, self::STACK_COMMAND_TIMEOUT);
   }
 
   /**
@@ -906,7 +1130,7 @@ class ComposeManager
 
     $cmd .= ' pull 2>&1';
 
-    return $this->execCommand($cmd, 300); // 5 min timeout for pulls
+    return $this->execCommand($cmd, self::STACK_COMMAND_TIMEOUT);
   }
 
   /**
@@ -1018,7 +1242,7 @@ class ComposeManager
     if (file_exists($path)) {
       $currentContent = @file_get_contents($path);
       if ($currentContent !== false) {
-        $this->snapshotVersion($projectName, 'compose', $path, $currentContent);
+        $this->snapshotVersion($projectName, 'compose', $currentContent);
       }
     }
 
@@ -1089,7 +1313,7 @@ class ComposeManager
     if ($path && file_exists($path)) {
       $currentContent = @file_get_contents($path);
       if ($currentContent !== false && $currentContent !== '') {
-        $this->snapshotVersion($projectName, 'env', $path, $currentContent);
+        $this->snapshotVersion($projectName, 'env', $currentContent);
       }
     }
 
@@ -1158,7 +1382,7 @@ class ComposeManager
 
   // ─── File Versioning ────────────────────────────────────────────────
 
-  private function snapshotVersion($projectName, $fileType, $sourcePath, $content)
+  private function snapshotVersion($projectName, $fileType, $content)
   {
     $hash = md5($content);
 
@@ -1420,91 +1644,150 @@ class ComposeManager
       return $result;
     }
 
+    // Two phases. The file copies run first, outside any transaction, and
+    // the rows go in afterwards in one short transaction. Copying inside the
+    // transaction held SQLite's write lock for the whole copy, and a rollback
+    // left the copied files behind with no row pointing at them.
+    $plans = [];
+    foreach ($dirs as $dir) {
+      if ($dir === '.' || $dir === '..') continue;
+
+      $projectPath = self::COMPOSE_PLUGIN_PROJECTS . '/' . $dir;
+      if (!is_dir($projectPath)) continue;
+
+      // compose.php and compose-stream.php refuse any other name, so a stack
+      // imported under one could never be started, edited, or deleted. This
+      // also keeps hidden directories such as ".git" out.
+      if (safeComposeProjectParam($dir) === null) {
+        $result['errors'][] = $dir . ': unsupported project name, skipped';
+        continue;
+      }
+
+      $projectName = $dir;
+
+      // Check if already imported
+      $existing = $this->db->fetchOne(
+        'SELECT project_name FROM compose_stacks WHERE project_name = ?',
+        [$projectName]
+      );
+      if ($existing) {
+        $result['stacks_skipped']++;
+        continue;
+      }
+
+      // Read metadata files
+      $name = $this->readMetadataFile($projectPath . '/name');
+      $description = $this->readMetadataFile($projectPath . '/description');
+      $autostart = strtolower(trim($this->readMetadataFile($projectPath . '/autostart') ?? '')) === 'true';
+      $isIndirect = file_exists($projectPath . '/indirect');
+
+      // Determine source compose file path and working directory
+      $sourceDir = null;
+      $sourceComposeFile = null;
+
+      if ($isIndirect) {
+        // Indirect: the file contains a path to the actual compose location
+        $indirectPath = $this->readMetadataFile($projectPath . '/indirect');
+        if ($indirectPath && is_dir($indirectPath)) {
+          $sourceDir = $indirectPath;
+        }
+      } else {
+        // Direct: compose file is in the project directory
+        $sourceDir = $projectPath;
+      }
+
+      // Find actual compose file in source
+      if ($sourceDir) {
+        $sourceComposeFile = $this->findComposeFile($sourceDir);
+      }
+
+      // Copy files into our own plugin directory so stacks are self-contained
+      $destDir = COMPOSE_STACKS_DIR . '/' . $projectName;
+      $createdDir = false;
+      if (!is_dir($destDir)) {
+        $createdDir = @mkdir($destDir, 0755, true);
+      }
+
+      $composeFile = null;
+      $envFile = null;
+      $copied = [];
+
+      // A file is recorded as copied only when this run created it. One that
+      // was already there is overwritten, but a rollback must not delete it.
+      if ($sourceComposeFile && file_exists($sourceComposeFile)) {
+        $destFile = $destDir . '/' . basename($sourceComposeFile);
+        $existed = file_exists($destFile);
+        if (@copy($sourceComposeFile, $destFile)) {
+          $composeFile = $destFile;
+          if (!$existed) {
+            $copied[] = $destFile;
+          }
+        } else {
+          $result['errors'][] = $projectName . ': failed to copy compose file';
+        }
+      }
+
+      // Copy .env if it exists in source
+      if ($sourceDir && file_exists($sourceDir . '/.env')) {
+        $destEnv = $destDir . '/.env';
+        $existed = file_exists($destEnv);
+        if (@copy($sourceDir . '/.env', $destEnv)) {
+          $envFile = $destEnv;
+          if (!$existed) {
+            $copied[] = $destEnv;
+          }
+        }
+      }
+
+      $plans[] = [
+        'project' => $projectName,
+        'name' => $name,
+        'description' => $description,
+        'autostart' => $autostart,
+        'working_dir' => $destDir,
+        'compose_file' => $composeFile,
+        'env_file' => $envFile,
+        'created_dir' => $createdDir,
+        'copied' => $copied,
+      ];
+    }
+
+    if (empty($plans)) {
+      return $result;
+    }
+
     $this->db->beginTransaction();
 
     try {
-      foreach ($dirs as $dir) {
-        if ($dir === '.' || $dir === '..') continue;
+      foreach ($plans as $i => $plan) {
+        $projectName = $plan['project'];
+        $name = $plan['name'];
+        $now = time();
 
-        $projectPath = self::COMPOSE_PLUGIN_PROJECTS . '/' . $dir;
-        if (!is_dir($projectPath)) continue;
-
-        $projectName = $dir;
-
-        // Check if already imported
-        $existing = $this->db->fetchOne(
+        // Checked again inside the transaction. An import that overlapped this one
+        // (a double click) can have committed the same project since the
+        // copy phase. Its row points at the files this run copied over, so
+        // they must not be removed by the rollback below.
+        $taken = $this->db->fetchOne(
           'SELECT project_name FROM compose_stacks WHERE project_name = ?',
           [$projectName]
         );
-        if ($existing) {
+        if ($taken) {
+          $plans[$i]['copied'] = [];
+          $plans[$i]['created_dir'] = false;
           $result['stacks_skipped']++;
           continue;
         }
 
-        // Read metadata files
-        $name = $this->readMetadataFile($projectPath . '/name');
-        $description = $this->readMetadataFile($projectPath . '/description');
-        $autostart = strtolower(trim($this->readMetadataFile($projectPath . '/autostart') ?? '')) === 'true';
-        $isIndirect = file_exists($projectPath . '/indirect');
-
-        // Determine source compose file path and working directory
-        $sourceDir = null;
-        $sourceComposeFile = null;
-
-        if ($isIndirect) {
-          // Indirect: the file contains a path to the actual compose location
-          $indirectPath = $this->readMetadataFile($projectPath . '/indirect');
-          if ($indirectPath && is_dir($indirectPath)) {
-            $sourceDir = $indirectPath;
-          }
-        } else {
-          // Direct: compose file is in the project directory
-          $sourceDir = $projectPath;
-        }
-
-        // Find actual compose file in source
-        if ($sourceDir) {
-          $sourceComposeFile = $this->findComposeFile($sourceDir);
-        }
-
-        // Copy files into our own plugin directory so stacks are self-contained
-        $destDir = COMPOSE_STACKS_DIR . '/' . $projectName;
-        if (!is_dir($destDir)) {
-          @mkdir($destDir, 0755, true);
-        }
-
-        $workingDir = $destDir;
-        $composeFile = null;
-        $envFile = null;
-
-        if ($sourceComposeFile && file_exists($sourceComposeFile)) {
-          $destFile = $destDir . '/' . basename($sourceComposeFile);
-          if (@copy($sourceComposeFile, $destFile)) {
-            $composeFile = $destFile;
-          } else {
-            $result['errors'][] = $projectName . ': failed to copy compose file';
-          }
-        }
-
-        // Copy .env if it exists in source
-        if ($sourceDir && file_exists($sourceDir . '/.env')) {
-          $destEnv = $destDir . '/.env';
-          if (@copy($sourceDir . '/.env', $destEnv)) {
-            $envFile = $destEnv;
-          }
-        }
-
-        $now = time();
-
         // Insert compose_stacks row
         $this->db->insert('compose_stacks', [
           'project_name' => $projectName,
-          'working_dir' => $workingDir,
-          'compose_file' => $composeFile,
-          'env_file' => $envFile,
-          'autostart' => $autostart ? 1 : 0,
+          'working_dir' => $plan['working_dir'],
+          'compose_file' => $plan['compose_file'],
+          'env_file' => $plan['env_file'],
+          'autostart' => $plan['autostart'] ? 1 : 0,
           'autostart_force_recreate' => 0,
-          'description' => $description ?: ($name ?: null),
+          'description' => $plan['description'] ?: ($name ?: null),
           'imported_from' => 'compose_plugin',
           'created_at' => $now,
           'updated_at' => $now,
@@ -1537,7 +1820,35 @@ class ComposeManager
     } catch (Exception $e) {
       $this->db->rollback();
       $result['success'] = false;
+      $result['stacks_imported'] = 0;
       $result['errors'][] = $e->getMessage();
+
+      // No row survived, so remove what this run copied. Only files this run
+      // wrote, and a directory only if this run created it and it is empty.
+      // The in-transaction check above only reached the plans before the one
+      // that threw. A racing import can have committed any of the rest, and
+      // its row points at these files, so look again now.
+      // If that lookup fails too, keep the files: an orphan is safer than
+      // deleting a live stack's compose file.
+      foreach ($plans as $plan) {
+        try {
+          $owned = $this->db->fetchOne(
+            'SELECT project_name FROM compose_stacks WHERE project_name = ?',
+            [$plan['project']]
+          );
+        } catch (Exception $lookupError) {
+          $owned = true;
+        }
+        if ($owned) {
+          continue;
+        }
+        foreach ($plan['copied'] as $file) {
+          @unlink($file);
+        }
+        if ($plan['created_dir']) {
+          @rmdir($plan['working_dir']);
+        }
+      }
     }
 
     return $result;
@@ -1582,7 +1893,22 @@ class ComposeManager
 
     foreach ($stacks as $stack) {
       $projectName = $stack['project_name'];
+
+      // project_name comes from the com.docker.compose.project label of a
+      // running container, which anyone who can start a container can set.
+      // A value such as "../../etc" would put these root-owned writes outside
+      // the export directory. safePathComponent() and not safeProjectName():
+      // a stack imported from compose.manager keeps its directory name, which
+      // can contain a dot.
+      if (safePathComponent($projectName) === null) {
+        $errors[] = "Skipped a stack with an unsafe project name";
+        continue;
+      }
       $projectDir = $exportDir . '/' . $projectName;
+      if (!pathIsWithin($projectDir, $exportDir)) {
+        $errors[] = "Skipped a stack with an unsafe project name";
+        continue;
+      }
 
       if (!is_dir($projectDir)) {
         if (!@mkdir($projectDir, 0755, true)) {

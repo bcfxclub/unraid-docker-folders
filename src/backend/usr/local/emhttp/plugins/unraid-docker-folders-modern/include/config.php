@@ -34,9 +34,28 @@ define('BACKUP_ALLOWED_ROOTS', ['/mnt', '/boot/config/plugins']);
 // Sort modes for folders and folder contents. Must match SortMode in
 // src/frontend/src/types/folder.ts.
 define('SORT_MODES', ['manual', 'name-asc', 'name-desc', 'status', 'created-asc', 'created-desc']);
+define('BACKEND_MODES', ['php', 'graphql']);
+define('GRAPHQL_PLUGIN_NAME', 'unraid-api-plugin-docker-folders');
+define('UNRAID_API_DIR', '/usr/local/unraid-api');
+define('UNRAID_API_SOCKET', '/var/run/unraid-api.sock');
 
 // Database
 define('DB_PATH', CONFIG_DIR . '/data.db');
+
+// Schedule runner heartbeat. scripts/run-schedules.php touches this on every
+// cron invocation, and api/schedules.php reports its mtime so the UI can tell
+// the user when the runner stopped firing. /var/run is in RAM on purpose —
+// DB_PATH lives on the USB flash device, and a heartbeat row would write to it
+// every 60 seconds forever.
+define('SCHEDULER_TICK_FILE', '/var/run/' . PLUGIN_NAME . '.tick');
+// Older than this and the runner counts as stale. Two missed minutes, so a
+// single slow tick does not raise a warning.
+define('SCHEDULER_TICK_STALE_SECONDS', 300);
+// Last time the plugin rewrote its cron file to repair a missing runner entry.
+// The repair writes to CONFIG_DIR, which is the USB flash device, so a box
+// where the repair cannot succeed must not write flash on every load of the
+// schedules screen. One attempt per stale window is enough.
+define('SCHEDULER_REPAIR_FILE', '/var/run/' . PLUGIN_NAME . '.repair');
 
 // Logging
 define('UPDATE_LOG_PATH', CONFIG_DIR . '/update-check.log');
@@ -54,7 +73,20 @@ if (!defined('DOCKER_API_VERSION')) {
 }
 
 // nchan WebSocket
-define('NCHAN_PUB_URL', 'http://localhost:4433/pub/docker-modern');
+//
+// The publisher listens on a Unix socket, not on a TCP port. `conf.d/servers.conf`
+// sets `listen unix:/var/run/nginx.socket` for the `/pub/` locations, and nothing
+// listens on localhost:4433, which is what this constant used to say. Every
+// publish therefore failed and live updates fell back to the 30-second poll.
+//
+// `buffer_length` is required, not optional. The location sets
+// `nchan_message_buffer_length $arg_buffer_length`, so without the query
+// parameter the buffer length is empty and nchan answers 403 instead of 201.
+//
+// `/usr/local/emhttp/plugins/dynamix/include/publish.php` is Unraid's own
+// publisher and is where this shape comes from.
+define('NCHAN_SOCKET_PATH', '/var/run/nginx.socket');
+define('NCHAN_PUB_URL', 'http://localhost/pub/docker-modern?buffer_length=1');
 define('NCHAN_SUB_PATH', '/sub/docker-modern');
 
 // Error reporting (disable in production)
@@ -126,6 +158,31 @@ date_default_timezone_set(detectServerTimezone());
 
 require_once __DIR__ . '/paths.php';
 require_once dirname(__DIR__) . '/classes/ReleaseNotes.php';
+
+/**
+ * Read a request flag as a boolean.
+ *
+ * JSON sends true or false, but a form sends strings, and !empty() reads the
+ * string "false" as true. This accepts a bool, a number, or the strings that
+ * FILTER_VALIDATE_BOOLEAN knows ("1", "true", "on", "yes" and their opposites).
+ * Anything else is false.
+ *
+ * @param mixed $value
+ * @return bool
+ */
+function requestFlag($value)
+{
+  if (is_bool($value)) {
+    return $value;
+  }
+  if (is_int($value) || is_float($value)) {
+    return $value != 0;
+  }
+  if (is_string($value)) {
+    return filter_var(trim($value), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+  }
+  return false;
+}
 
 /**
  * Read JSON request data from the request body.
@@ -222,11 +279,18 @@ function imageCheckResult($image, array $overrides = [])
  * @param array|null $onlyImages Restrict the check to these image references
  *                               (e.g. one container's image, or a compose
  *                               stack's images). Null checks everything.
+ * @param array $localRefs Image => local image reference, checked even when no
+ *                         container lists that image. A scheduled update keys
+ *                         on the tag the container was created from, which
+ *                         Docker stops listing once the tag moves. When these
+ *                         cover every requested image, no container is listed.
  * @return array ['results' => [...], 'checked' => int, 'skipped' => int, 'errors' => int, 'newUpdates' => int]
  */
-function checkAllImageUpdates($dockerClient, $db, callable $log, $onlyImages = null)
+function checkAllImageUpdates($dockerClient, $db, callable $log, $onlyImages = null, array $localRefs = [])
 {
-  $containers = $dockerClient->listContainers(true);
+  $refsOnly = $onlyImages !== null && $localRefs
+    && !array_diff(array_map('strval', $onlyImages), array_keys($localRefs));
+  $containers = $refsOnly ? [] : $dockerClient->listContainers(true);
 
   // Load exclude patterns from settings
   $excludePatterns = [];
@@ -255,6 +319,7 @@ function checkAllImageUpdates($dockerClient, $db, callable $log, $onlyImages = n
   // Targeted check: restrict to the requested images. Only images that
   // actually belong to a container are checked — unknown names are ignored.
   if ($onlyImages !== null) {
+    $uniqueImages += $localRefs;
     $requested = array_fill_keys(array_map('strval', $onlyImages), true);
     $uniqueImages = array_intersect_key($uniqueImages, $requested);
     $log('INFO Targeted check for ' . count($onlyImages) . ' image(s), ' . count($uniqueImages) . ' matched running container image(s)');
@@ -283,10 +348,13 @@ function checkAllImageUpdates($dockerClient, $db, callable $log, $onlyImages = n
       continue;
     }
 
+    // Counted once, before the try. An exception after the count used to be
+    // counted again in the catch, so the image showed up twice in the total.
+    $checked++;
+
     // Wrap each image check in try/catch so one failure doesn't kill the loop
     try {
       $check = $dockerClient->checkImageUpdate($imageName, $imageId);
-      $checked++;
 
       // Suppress false positives: if we previously marked this image as
       // up-to-date (e.g. after a pull) and the remote digest hasn't changed,
@@ -346,7 +414,6 @@ function checkAllImageUpdates($dockerClient, $db, callable $log, $onlyImages = n
     } catch (\Throwable $e) {
       $log('FATAL ' . $imageName . ': ' . $e->getMessage());
       $errors++;
-      $checked++;
       $results[$imageName] = imageCheckResult($imageName, ['error' => $e->getMessage()]);
     }
   }
@@ -388,6 +455,57 @@ function checkAllImageUpdates($dockerClient, $db, callable $log, $onlyImages = n
     'newUpdates' => $newUpdates,
     'containersByImage' => $containersByImage,
   ];
+}
+
+/**
+ * Recreate one container on its image's current build, with the update log
+ * lines that pull.php and a scheduled update share.
+ *
+ * @return array DockerClient::recreateContainer()'s result, error always set on failure
+ */
+function recreateOneContainer($dockerClient, $name, $id)
+{
+  logUpdate("RECREATE Starting recreate for {$name} ({$id})");
+  $result = $dockerClient->recreateContainer($id);
+  if ($result['success']) {
+    logUpdate("RECREATE OK {$name} -> new ID {$result['newId']}");
+  } else {
+    $result['error'] = $result['error'] ?? 'Unknown error';
+    logUpdate("RECREATE FAIL {$name}: {$result['error']}");
+  }
+  return $result;
+}
+
+/**
+ * Record a pulled image as current, so the next check does not flag it.
+ *
+ * Stores the remote digest the pull brought in. The update check compares a
+ * later remote digest with this one, which hides the false positive from a
+ * multi-arch image, whose local RepoDigest differs from the distribution
+ * digest. An upsert that names only the columns a pull changes, so the
+ * release-notes columns survive.
+ *
+ * @param DockerClient $dockerClient Docker API client
+ * @param Database $db Database instance
+ * @param string $image Image reference, as the update check keys it
+ */
+function recordImagePulled($dockerClient, $db, $image)
+{
+  $remoteDigest = $dockerClient->getRemoteImageDigest($image);
+  $localDigest = $dockerClient->getImageDigest($image);
+
+  $db->query(
+    'INSERT INTO image_update_checks (image, local_digest, remote_digest, update_available, checked_at, error)
+     VALUES (:image, :local, :remote, 0, :now, NULL)
+     ON CONFLICT(image) DO UPDATE SET
+       local_digest = excluded.local_digest,
+       remote_digest = excluded.remote_digest,
+       update_available = 0,
+       checked_at = excluded.checked_at,
+       error = NULL',
+    [':image' => $image, ':local' => $localDigest, ':remote' => $remoteDigest, ':now' => time()]
+  );
+  logUpdate("PULL DB updated {$image}: local={$localDigest}, remote={$remoteDigest}");
 }
 
 /**
@@ -457,6 +575,57 @@ function buildScheduleFailureNotification(array $schedule, $message)
   return [
     'subject' => 'Schedule failed: ' . ($name !== '' ? $name : 'unnamed schedule'),
     'description' => $description,
+  ];
+}
+
+/**
+ * Render a lateness in whole minutes and hours, e.g. "6h 40m".
+ *
+ * Both the skipped-run history message and the notification read this, and
+ * tests assert on the exact text, so keep one formatter.
+ *
+ * @param int $seconds How late the run was
+ * @return string
+ */
+function formatRunLateness($seconds)
+{
+  $seconds = max(0, (int) $seconds);
+  $minutes = intdiv($seconds, 60);
+  $hours = intdiv($minutes, 60);
+  $minutes = $minutes % 60;
+
+  if ($hours > 0) {
+    return "{$hours}h {$minutes}m";
+  }
+  if ($minutes > 0) {
+    return "{$minutes}m";
+  }
+  return "{$seconds}s";
+}
+
+/**
+ * Build the notification for a run that was skipped because it was overdue.
+ *
+ * A skip is news, not a failure: nothing broke, an action was deliberately not
+ * taken. The runner sends this at 'normal' importance, not 'warning'.
+ *
+ * @param array $schedule Row-shaped array carrying at least name,
+ *   target_type, target_id and action
+ * @param int $lateBySeconds How far past the scheduled time the runner found it
+ * @return array{subject: string, description: string}
+ */
+function buildScheduleSkipNotification(array $schedule, $lateBySeconds)
+{
+  $name = trim((string) ($schedule['name'] ?? ''));
+  $late = formatRunLateness($lateBySeconds);
+  $action = (string) ($schedule['action'] ?? '');
+  $kind = ($schedule['target_type'] ?? '') === 'stack' ? 'stack' : 'container';
+  $target = (string) ($schedule['target_id'] ?? '');
+
+  return [
+    'subject' => 'Schedule skipped: ' . ($name !== '' ? $name : 'unnamed schedule'),
+    'description' => "Did not {$action} {$kind} {$target}: the run was {$late} past its scheduled time."
+      . ' The schedule runner was not active when it came due.',
   ];
 }
 
@@ -574,14 +743,17 @@ function refreshReleaseNotes(array &$results, $db, callable $log, $full, $now = 
       'published_at' => $release['published_at'] ?? null,
       'url' => $release['url'] ?? null,
       'summary' => $release['summary'] ?? null,
-      'etag' => null,
       'status' => in_array($status, ['ok', 'not_found'], true) ? $status : 'error',
       'fetched_at' => $now,
     ];
 
+    // release_notes.etag is left out. It was a placeholder for conditional
+    // requests that were never built, and PHP only ever wrote NULL into it,
+    // which REPLACE also leaves there. The column stays, because the Unraid
+    // API plugin writes the same table and still names it.
     $db->query(
-      'INSERT OR REPLACE INTO release_notes (repo, tag, name, published_at, url, summary, etag, status, fetched_at)
-       VALUES (:repo, :tag, :name, :published_at, :url, :summary, :etag, :status, :fetched_at)',
+      'INSERT OR REPLACE INTO release_notes (repo, tag, name, published_at, url, summary, status, fetched_at)
+       VALUES (:repo, :tag, :name, :published_at, :url, :summary, :status, :fetched_at)',
       [
         ':repo' => $row['repo'],
         ':tag' => $row['tag'],
@@ -589,7 +761,6 @@ function refreshReleaseNotes(array &$results, $db, callable $log, $full, $now = 
         ':published_at' => $row['published_at'],
         ':url' => $row['url'],
         ':summary' => $row['summary'],
-        ':etag' => $row['etag'],
         ':status' => $row['status'],
         ':fetched_at' => $row['fetched_at'],
       ]
@@ -645,6 +816,414 @@ function dfmAssetVersion($absolutePath)
 {
   $mtime = @filemtime($absolutePath);
   return $mtime !== false ? (string) $mtime : PLUGIN_VERSION;
+}
+
+/**
+ * Which backend the Vue app should talk to: 'php' or 'graphql'.
+ *
+ * The selector lives here rather than in the GraphQL backend on purpose. PHP
+ * is always present, so the setting is always readable; storing it in the
+ * backend being selected would be circular.
+ *
+ * Fails to 'php' on any error. A database that is missing, locked, or holding
+ * a value we do not recognise must not leave the frontend without a
+ * transport. The page files pass the result to the iframe as a query param,
+ * because a global set here belongs to the parent document.
+ */
+/**
+ * Reduce a stored or submitted backend mode to one we can serve.
+ *
+ * Both readers need this: `dfmBackendMode()` for pages that have not loaded
+ * settings, and `DockerFolders.page`, which already has them in an array.
+ */
+function dfmNormalizeBackendMode($mode)
+{
+  return in_array($mode, BACKEND_MODES, true) ? $mode : 'php';
+}
+
+/**
+ * The stored backend mode, or null when it could not be read.
+ *
+ * Distinct from dfmBackendMode() because one caller must not treat "could not
+ * read" as "php". The busy timeout matters: while the plugin writes the same
+ * database, a read without one fails at once, and the schedule runner took
+ * that failure for PHP mode and fired a backup the plugin was already
+ * running. Seen on the target server, at the first five-minute slot after the
+ * handover.
+ */
+function dfmReadBackendMode()
+{
+  if (!is_file(DB_PATH)) {
+    return 'php';
+  }
+  try {
+    // A read-only handle, not the Database singleton. The singleton opens for
+    // writing and sets the foreign-key and WAL pragmas, which a page render
+    // that only reads one string does not need.
+    $db = new SQLite3(DB_PATH, SQLITE3_OPEN_READONLY);
+    $db->busyTimeout(5000);
+    $stmt = $db->prepare('SELECT value FROM settings WHERE key = ?');
+    if ($stmt === false) {
+      $db->close();
+      return null;
+    }
+    $stmt->bindValue(1, 'backend_mode', SQLITE3_TEXT);
+    $result = $stmt->execute();
+    if ($result === false) {
+      $db->close();
+      return null;
+    }
+    $row = $result->fetchArray(SQLITE3_ASSOC);
+    $db->close();
+    return dfmNormalizeBackendMode(is_array($row) ? $row['value'] : null);
+  } catch (Throwable $e) {
+    return null;
+  }
+}
+
+function dfmBackendMode()
+{
+  $mode = dfmReadBackendMode();
+  return $mode === null ? 'php' : $mode;
+}
+
+/**
+ * Insert or replace one settings row. $key must be a fixed string or come
+ * from settings.php's allowlist: it is bound, but the table is keyed on it.
+ *
+ * @param Database $db
+ */
+function dfmUpsertSetting($db, $key, $value)
+{
+  $db->query(
+    'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)'
+      . ' ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+    [$key, $value, time()]
+  );
+}
+
+/**
+ * Store backend_mode, then heal the schedule-runner cron line. The plugin
+ * never writes root's crontab, so schedules created in GraphQL mode do not
+ * add the line PHP needs; without this, switching back to PHP, or PHP taking
+ * over while the API is down, would leave nothing running them.
+ *
+ * @param Database $db
+ */
+function dfmWriteBackendMode($db, $mode)
+{
+  dfmUpsertSetting($db, 'backend_mode', dfmNormalizeBackendMode($mode));
+  require_once PLUGIN_DIR . '/classes/CronManager.php';
+  CronManager::ensureSchedulerCron($db);
+}
+
+/**
+ * scripts/api-plugin.sh installs and removes the GraphQL backend. Both take
+ * the Unraid API down for a restart, so web requests start it detached and
+ * poll DFM_API_PLUGIN_STATE_FILE instead of waiting.
+ */
+define('DFM_API_PLUGIN_SCRIPT', PLUGIN_DIR . '/scripts/api-plugin.sh');
+define('DFM_API_PLUGIN_STATE_FILE', '/var/run/' . PLUGIN_NAME . '.api-plugin.state');
+// Written by the watchdog when it switches back to PHP. On /boot so the
+// reason survives a reboot, and so a rollback that restarted the API cannot
+// repeat until the user picks GraphQL again, which deletes it.
+define('DFM_BACKEND_ROLLBACK_MARKER', CONFIG_DIR . '/backend-rollback.json');
+
+/**
+ * Start `api-plugin.sh install --activate`, `remove`, or `remove
+ * --no-restart` (verb 'remove-no-restart'), detached. $runId tags the
+ * state file so the settings page can find its own run.
+ */
+function dfmLaunchApiPlugin($verb, $runId = '')
+{
+  $args = [
+    'install' => ['install', '--activate'],
+    'remove' => ['remove'],
+    'remove-no-restart' => ['remove', '--no-restart'],
+  ][$verb] ?? null;
+  if ($args === null) {
+    return false;
+  }
+  if (preg_match('/^[0-9a-f]{1,32}$/', $runId)) {
+    array_push($args, '--run', $runId);
+  }
+  $cmd = '/usr/bin/setsid /usr/bin/nohup /bin/bash ' . escapeshellarg(DFM_API_PLUGIN_SCRIPT);
+  foreach ($args as $arg) {
+    $cmd .= ' ' . escapeshellarg($arg);
+  }
+  exec($cmd . ' </dev/null >/dev/null 2>&1 &');
+  return true;
+}
+
+define('DFM_SCHEDULE_RUN_SCRIPT', PLUGIN_DIR . '/scripts/run-schedule.php');
+
+/**
+ * Run one schedule in its own process, detached from the caller.
+ *
+ * For an update, whose pull can take minutes. Inline, it would hold the
+ * minute runner's lock, and every schedule that came due meanwhile would run
+ * late or be skipped. A "Run now" request would hold the web request open.
+ */
+function dfmLaunchScheduleRun($id)
+{
+  exec('/usr/bin/setsid /usr/bin/nohup /usr/bin/php ' . escapeshellarg(DFM_SCHEDULE_RUN_SCRIPT)
+    . ' ' . escapeshellarg((string) (int) $id) . ' </dev/null >/dev/null 2>&1 &');
+}
+
+/**
+ * Tell the user about a run that nobody watched: a skip or a failure.
+ *
+ * @param array $result executeSchedule()'s or skipSchedule()'s result
+ */
+function notifyScheduleResult(array $result)
+{
+  $status = $result['status'] ?? '';
+  // A manual "Run now" of this schedule was already running, and it
+  // reports its own result in the UI.
+  if ($status === 'busy' || $status === 'started') {
+    return;
+  }
+  // A skip succeeded at doing nothing, so it has to be tested before the
+  // success check below or it would never be reported at all.
+  if ($status === 'skipped') {
+    $notification = buildScheduleSkipNotification($result, $result['late_by'] ?? 0);
+    sendUnraidNotification($notification['subject'], $notification['description'], 'normal');
+    error_log('Schedule skipped: ' . $notification['subject'] . ' (' . $notification['description'] . ')');
+    return;
+  }
+  if (!empty($result['success'])) {
+    return;
+  }
+  $notification = buildScheduleFailureNotification($result, $result['message'] ?? '');
+  sendUnraidNotification($notification['subject'], $notification['description'], 'warning');
+  error_log('Schedule failed: ' . $notification['subject'] . ' (' . $notification['description'] . ')');
+}
+
+/** Decode a small JSON file this plugin wrote, or null. */
+function dfmReadJsonFile($path)
+{
+  $raw = @file_get_contents($path);
+  if ($raw === false) {
+    return null;
+  }
+  $data = json_decode($raw, true);
+  return is_array($data) ? $data : null;
+}
+
+/**
+ * Whether the Unraid API plugin that serves the GraphQL backend is usable.
+ *
+ * Returns 'ready', or a reason it is not: 'no-api', 'not-installed',
+ * 'load-failed' or 'offline'. The settings page uses this to say
+ * why the GraphQL option is unavailable instead of offering a switch that
+ * would only fall back.
+ *
+ * The answer comes from asking the API, not from inspecting where it keeps
+ * its files. `dockerFoldersInfo` is a field this project defines, so its
+ * presence in the schema is the fact we actually care about, and it stays
+ * true regardless of how upstream arranges its install directory or config.
+ *
+ * The probe sends no credentials, which is enough. A field that is absent
+ * answers GRAPHQL_VALIDATION_FAILED, and a field that is present but
+ * unauthorized answers UNAUTHENTICATED, so the two are distinguishable
+ * without a session. What this cannot see is whether the plugin can read its
+ * database, because that needs the browser's session cookie. The frontend
+ * probe in `backends/graphql.ts` checks that and shows a notice when it fails.
+ */
+function dfmGraphqlPluginState()
+{
+  if (!file_exists(UNRAID_API_SOCKET)) {
+    return 'no-api';
+  }
+
+  $ch = curl_init('http://localhost/graphql');
+  curl_setopt_array($ch, [
+    CURLOPT_UNIX_SOCKET_PATH => UNRAID_API_SOCKET,
+    CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => json_encode(['query' => 'query { dockerFoldersInfo { version } }']),
+    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+    CURLOPT_RETURNTRANSFER => true,
+    // A settings page must not hang on a wedged API.
+    CURLOPT_CONNECTTIMEOUT => 1,
+    CURLOPT_TIMEOUT => 2,
+  ]);
+  $body = curl_exec($ch);
+  $failed = curl_errno($ch) !== 0;
+  curl_close($ch);
+
+  if ($failed || !is_string($body)) {
+    return 'no-api';
+  }
+  return dfmClassifyGraphqlProbe($body, 'dfmGraphqlPluginInstalled');
+}
+
+/**
+ * Read the probe's answer. A positive match on the field: an unauthenticated
+ * answer names it in its error path. A missing field fails validation. Any
+ * other answer, such as "Graphql is offline", means the API process runs but
+ * its GraphQL service does not work, which the watchdog must tell apart from
+ * a working backend.
+ *
+ * @param callable $installed Only called for a missing field.
+ */
+function dfmClassifyGraphqlProbe($body, callable $installed)
+{
+  if (preg_match('/"path":\["dockerFoldersInfo"\]|"dockerFoldersInfo":\{/', $body)) {
+    return 'ready';
+  }
+  if (strpos($body, 'GRAPHQL_VALIDATION_FAILED') !== false) {
+    return $installed() ? 'load-failed' : 'not-installed';
+  }
+  return 'offline';
+}
+
+/**
+ * Whether the package is on disk, which separates "never installed" from
+ * "installed but the API did not load it". The second case points at the API
+ * log, where an invalid export shape is reported.
+ *
+ * This reads upstream's install layout, which is not a contract we own, so it
+ * decides nothing on its own. It only picks which explanation to show once
+ * the probe above has already established that the field is missing. A stale
+ * answer here costs a wrong sentence, not a wrong switch.
+ */
+function dfmGraphqlPluginInstalled()
+{
+  return is_dir(UNRAID_API_DIR . '/node_modules/' . GRAPHQL_PLUGIN_NAME);
+}
+
+/**
+ * The Unraid API versions the GraphQL backend is tested on. The API gives
+ * third-party plugins no stable contract, and Unraid Connect can upgrade the
+ * API ahead of the OS, so the OS version says nothing about it. Widen the
+ * range only after scripts/verify-graphql-backend.sh passes on the new API.
+ */
+define('DFM_API_COMPAT_FILE', __DIR__ . '/api-compat.json');
+
+/**
+ * The running Unraid API's version from its package.json, without build
+ * metadata ("4.35.1+a9625ae2" gives "4.35.1"). Null when unreadable.
+ */
+function dfmUnraidApiVersion($packageJson = null)
+{
+  $data = dfmReadJsonFile($packageJson ?? UNRAID_API_DIR . '/package.json');
+  $version = is_array($data) ? ($data['version'] ?? null) : null;
+  if (!is_string($version) || !preg_match('/^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+.*)?$/', $version, $m)) {
+    return null;
+  }
+  return $m[1];
+}
+
+/**
+ * @return array{min: string, maxExclusive: string, testedOn: string}|null
+ */
+function dfmApiCompatRange($compatFile = null)
+{
+  $range = dfmReadJsonFile($compatFile ?? DFM_API_COMPAT_FILE);
+  if (!is_array($range) || !is_string($range['min'] ?? null) || !is_string($range['maxExclusive'] ?? null)) {
+    return null;
+  }
+  return [
+    'min' => $range['min'],
+    'maxExclusive' => $range['maxExclusive'],
+    'testedOn' => (string) ($range['testedOn'] ?? ''),
+  ];
+}
+
+/**
+ * Whether the GraphQL backend may run on this API version. An unknown
+ * version, or a missing range file, is not supported. Prereleases are
+ * refused at both ends: "4.35.0-beta.1" sorts below a min of 4.35.0, and
+ * the upper bound compares the base version, because "4.36.0-beta.1" would
+ * otherwise sort below a maxExclusive of 4.36.0 and pass.
+ */
+function dfmApiVersionSupported($version, $range)
+{
+  if (!is_string($version) || !is_array($range)) {
+    return false;
+  }
+  $base = preg_replace('/-.*$/', '', $version);
+  return version_compare($version, $range['min'], '>=')
+    && version_compare($base, $range['maxExclusive'], '<');
+}
+
+/**
+ * Why the version is refused, for the settings page and the install state.
+ * Empty when it is supported.
+ */
+function dfmApiVersionReason($version, $range)
+{
+  if (dfmApiVersionSupported($version, $range)) {
+    return '';
+  }
+  if (!is_array($range)) {
+    return 'The tested Unraid API range is missing from this build, so the GraphQL backend is off.';
+  }
+  $tested = "The GraphQL backend is tested on Unraid API {$range['min']} up to, but not including, {$range['maxExclusive']}.";
+  if (!is_string($version)) {
+    return 'The Unraid API version could not be read. ' . $tested;
+  }
+  return "The Unraid API is {$version}. " . $tested;
+}
+
+/**
+ * Whether this PHP runner should fire due schedules this minute.
+ *
+ * Exactly one backend may. Both read `schedules.next_run_at`, so two runners
+ * in the same minute start, stop or back up a container twice. The flock in
+ * run-schedules.php cannot prevent that: it is a BSD advisory lock, which the
+ * Unraid API's Node process has no way to take, so it only ever kept PHP from
+ * racing itself.
+ *
+ * In GraphQL mode the plugin's runner owns schedules while its heartbeat file
+ * is fresh. It touches that file every minute, and only when this function
+ * exists, so the two halves can only ever be on together. If the API is
+ * stopped, crashed, in safe mode or without the plugin, the file goes stale
+ * within DFM_RUNNER_ALIVE_STALE_SECONDS and PHP takes the work back. That is
+ * inside the runner's five-minute grace for a late run, so nothing is skipped.
+ *
+ * A file rather than a GraphQL probe: cron has no session, so every probe
+ * logged two authentication errors in the API log, once a minute.
+ */
+define('DFM_RUNNER_ALIVE_FILE', '/var/run/' . PLUGIN_NAME . '.graphql-runner');
+define('DFM_RUNNER_ALIVE_STALE_SECONDS', 150);
+
+function dfmPhpOwnsSchedules()
+{
+  return !dfmPluginRunnerOwns('schedules');
+}
+
+/** The same arbitration for the image update check. See dfmPluginRunnerOwns(). */
+function dfmPhpOwnsUpdateChecks()
+{
+  return !dfmPluginRunnerOwns('update-checks');
+}
+
+/**
+ * Whether the plugin's runner owns one kind of background work this minute.
+ *
+ * The heartbeat file lists what that runner can do, one word per job, and is
+ * rewritten every minute. PHP stands down for a job only when the file is
+ * fresh and names it, so a plugin build that predates a job never makes PHP
+ * stop doing that job.
+ */
+function dfmPluginRunnerOwns($job)
+{
+  clearstatcache(true, DFM_RUNNER_ALIVE_FILE);
+  $alive = @filemtime(DFM_RUNNER_ALIVE_FILE);
+  if ($alive === false || (time() - $alive) > DFM_RUNNER_ALIVE_STALE_SECONDS) {
+    return false;
+  }
+  $jobs = preg_split('/\s+/', trim((string) @file_get_contents(DFM_RUNNER_ALIVE_FILE)));
+  if (!in_array($job, $jobs, true)) {
+    return false;
+  }
+
+  $mode = dfmReadBackendMode();
+  // Unreadable, even after waiting, with the runner alive and able: stand
+  // down. It reads the mode itself and acts only in GraphQL mode, so the worst
+  // case is one missed minute instead of the same job run twice.
+  return $mode === null || $mode === 'graphql';
 }
 
 // JSON response helper

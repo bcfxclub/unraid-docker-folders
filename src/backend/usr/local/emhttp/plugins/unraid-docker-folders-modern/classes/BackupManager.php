@@ -3,9 +3,35 @@
 require_once dirname(__DIR__) . '/include/config.php';
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/DockerClient.php';
+require_once __DIR__ . '/PostgresBackup.php';
 
 class BackupManager
 {
+  // What happens to the container while its files are archived.
+  const QUIESCE_NONE = 'none';
+  const QUIESCE_PAUSE = 'pause';
+  const QUIESCE_STOP = 'stop';
+
+  // Docker's own default stop timeout is 10 seconds, which is not enough for a
+  // database to checkpoint and close. The SIGKILL that follows would leave the
+  // files in the same crash state that stopping was meant to avoid.
+  const QUIESCE_STOP_TIMEOUT = 30;
+
+  // The first 16 bytes of every SQLite database file.
+  const SQLITE_MAGIC = "SQLite format 3\0";
+
+  // The timestamp generateArchiveName() writes, date('Y-m-d_His'). Every rule
+  // that decides whether a file is one of our archives matches this shape.
+  const ARCHIVE_STAMP_PATTERN = '\d{4}-\d{2}-\d{2}_\d{6}';
+
+  // Scopes for archivesFor().
+  const ARCHIVES_EXACT = 'exact';
+  const ARCHIVES_STACK = 'stack';
+
+  // Containers this process paused or stopped and has not restored yet.
+  private static $pendingRestore = [];
+  private static $shutdownRegistered = false;
+
   private $db;
   private $dockerClient;
 
@@ -15,7 +41,101 @@ class BackupManager
     $this->dockerClient = new DockerClient();
   }
 
-  public function backupContainer($containerName, $patterns, $destination = null, $retention = null)
+  public function backupContainer(
+    $containerName,
+    $patterns,
+    $destination = null,
+    $retention = null,
+    $quiesce = self::QUIESCE_NONE
+  ) {
+    $destination = $this->resolveDestination($destination);
+    $retention = $this->resolveRetention($retention);
+    $quiesce = self::quiesceModeFor($quiesce);
+
+    if (!$this->ensureDirectory($destination)) {
+      return ['success' => false, 'message' => "Cannot create backup directory: {$destination}"];
+    }
+
+    // The container itself, not just its paths: withQuiesce() needs the id.
+    $container = $this->findContainer($containerName);
+    if (!$container) {
+      return ['success' => false, 'message' => "Container '{$containerName}' not found"];
+    }
+
+    $hostPaths = $this->resolveHostPathsForContainer($container['id'], $patterns);
+    if (empty($hostPaths)) {
+      return ['success' => false, 'message' => "No matching paths found for container '{$containerName}'"];
+    }
+
+    $archiveName = $this->generateArchiveName($containerName);
+    $archivePath = rtrim($destination, '/') . '/' . $archiveName;
+
+    $job = $this->runArchiveJob($container['id'], $quiesce, $archivePath, $hostPaths);
+
+    if (!$job['success']) {
+      $message = $job['failure'] === 'quiesce'
+        ? $job['detail']
+        : "Failed to create archive: {$archiveName}{$job['detail']}";
+      if ($job['restore_error'] !== '') {
+        $message .= '. ' . $job['restore_error'];
+      }
+      return ['success' => false, 'message' => $message];
+    }
+
+    $size = file_exists($archivePath) ? filesize($archivePath) : 0;
+    $pruned = $this->pruneOldBackups($destination, $containerName, $retention);
+    $message = "Backup created: {$archiveName}" . $job['note']
+      . ($pruned ? ", pruned {$pruned} old backup(s)" : '');
+
+    // A container left frozen is worse than a missing backup, so this reports
+    // as a failure even though the archive is on disk. The runner turns a
+    // failure into a warning notification.
+    if ($job['restore_error'] !== '') {
+      return [
+        'success' => false,
+        'message' => $message . '. ' . $job['restore_error'],
+        'backup_file' => $archivePath,
+        'backup_size' => $size,
+      ];
+    }
+
+    return [
+      'success' => true,
+      'message' => $message,
+      'backup_file' => $archivePath,
+      'backup_size' => $size,
+    ];
+  }
+
+  /**
+   * Back up a Postgres container with pg_dump, one archive per database.
+   *
+   * Each database gets "<prefix>.<file name>.<stamp>.tar.gz", holding
+   * "<file name>.dump" and a manifest.json, where the file name is the
+   * sanitized database name. Keep counts per database, because each database
+   * is its own archive series, and a file-mode backup of the same container
+   * keeps its own count too.
+   *
+   * The dumps land in a staging directory inside the destination, not in
+   * /tmp, because /tmp is RAM on Unraid and a large dump would fill it. The
+   * container is never paused or stopped: pg_dump reads a consistent
+   * snapshot of a running database.
+   *
+   * A stack runs the dump in the container of postgres.service, and uses
+   * "<project>.<service>" as the prefix, as backupStack() does, so the
+   * stack's backup list shows the archives.
+   *
+   * A database that fails does not stop the others. The run fails when any
+   * database failed.
+   *
+   * @param string $targetType 'container' or 'stack'
+   * @param string $targetId A container name, or a compose project
+   * @param array $pg The postgres block of a backup_config
+   * @param string|null $destination
+   * @param int|null $retention
+   * @return array
+   */
+  public function backupPostgres($targetType, $targetId, array $pg, $destination = null, $retention = null)
   {
     $destination = $this->resolveDestination($destination);
     $retention = $this->resolveRetention($retention);
@@ -24,33 +144,131 @@ class BackupManager
       return ['success' => false, 'message' => "Cannot create backup directory: {$destination}"];
     }
 
-    $hostPaths = $this->resolveHostPaths($containerName, $patterns);
-    if (empty($hostPaths)) {
-      return ['success' => false, 'message' => "No matching paths found for container '{$containerName}'"];
+    $postgres = new PostgresBackup($this->dockerClient);
+    $service = isset($pg['service']) ? $pg['service'] : null;
+    $target = $postgres->resolveTarget($targetType, $targetId, $service);
+    if (!$target) {
+      return [
+        'success' => false,
+        'message' => $targetType === 'stack'
+          ? "Service '{$service}' not found in stack '{$targetId}'"
+          : "Container '{$targetId}' not found",
+      ];
     }
 
-    $archiveName = $this->generateArchiveName($containerName);
-    $archivePath = rtrim($destination, '/') . '/' . $archiveName;
-
-    if (!$this->createArchive($archivePath, $hostPaths)) {
-      return ['success' => false, 'message' => "Failed to create archive: {$archivePath}"];
+    $prepared = $postgres->prepareDump($target['id'], $pg);
+    if (!$prepared['success']) {
+      return ['success' => false, 'message' => 'Postgres backup failed: ' . $prepared['message']];
     }
 
-    $size = file_exists($archivePath) ? filesize($archivePath) : 0;
-    $pruned = $this->pruneOldBackups($destination, $containerName, $retention);
+    $created = [];
+    $failed = [];
+    $firstArchive = null;
+    $totalSize = 0;
+    $pruned = 0;
+    $n = 0;
+
+    foreach ($pg['databases'] as $database) {
+      $n++;
+      $file = PostgresBackup::fileNameOf($database);
+      if ($file === null) {
+        $failed[] = "{$database}: no file name";
+        continue;
+      }
+
+      $staging = rtrim($destination, '/') . '/.dfm-staging-' . getmypid() . '-' . time() . '-' . $n;
+      if (!mkdir($staging, 0700)) {
+        $failed[] = "{$database}: cannot create a staging directory in {$destination}";
+        continue;
+      }
+
+      // Known clash, left as is on purpose: this "<container>.<database>"
+      // series has the same names as the file backups of service <database>
+      // in a stack named <container>. If both share a destination, each
+      // prunes the other. See archivesFor().
+      $prefix = $target['prefix'] . '.' . $file;
+      $archiveName = $this->generateArchiveName($prefix);
+      $archivePath = rtrim($destination, '/') . '/' . $archiveName;
+
+      try {
+        $dump = $postgres->dumpOne($target['id'], $prepared, $database, $staging);
+        if (!$dump['success']) {
+          $failed[] = "{$database}: {$dump['message']}";
+          continue;
+        }
+
+        $archive = $this->createArchiveFromDir($archivePath, $staging);
+        if (!$archive['success']) {
+          $failed[] = "{$database}: failed to create {$archiveName}"
+            . ($archive['output'] !== '' ? ': ' . $archive['output'] : '');
+          continue;
+        }
+      } finally {
+        self::removeStaging($staging);
+      }
+
+      $created[] = $archiveName;
+      $firstArchive = $firstArchive === null ? $archivePath : $firstArchive;
+      $totalSize += file_exists($archivePath) ? filesize($archivePath) : 0;
+      $pruned += $this->pruneOldBackups($destination, $prefix, $retention);
+    }
 
     return [
-      'success' => true,
-      'message' => "Backup created: {$archiveName}" . ($pruned ? ", pruned {$pruned} old backup(s)" : ''),
-      'backup_file' => $archivePath,
-      'backup_size' => $size,
+      'success' => empty($failed),
+      'message' => self::postgresRunMessage($created, $failed, $pruned),
+      'backup_file' => $firstArchive,
+      'backup_size' => $totalSize,
     ];
   }
 
-  public function backupStack($projectName, $serviceConfigs, $destination = null, $retention = null)
+  /**
+   * "Backup created: a, b" when every database worked, otherwise
+   * "Postgres backup failed for 1 of 3 databases: c: <reason>. Created: a, b".
+   * The prune count follows either one.
+   */
+  private static function postgresRunMessage(array $created, array $failed, $pruned)
   {
+    $total = count($created) + count($failed);
+    $message = empty($failed)
+      ? 'Backup created: ' . implode(', ', $created)
+      : 'Postgres backup failed for ' . count($failed) . ' of ' . $total . ' database'
+        . ($total === 1 ? '' : 's') . ': ' . implode('; ', $failed)
+        . (empty($created) ? '' : '. Created: ' . implode(', ', $created));
+
+    return $message . ($pruned ? ", pruned {$pruned} old backup(s)" : '');
+  }
+
+  /**
+   * Remove a staging directory and the flat files in it. It holds only the
+   * dump and manifest.json that dumpOne() wrote, so no recursion.
+   */
+  private static function removeStaging($dir)
+  {
+    if (!is_dir($dir) || is_link($dir)) {
+      return;
+    }
+    foreach (scandir($dir) ?: [] as $name) {
+      if ($name === '.' || $name === '..') {
+        continue;
+      }
+      $path = $dir . '/' . $name;
+      if (is_file($path) || is_link($path)) {
+        @unlink($path);
+      }
+    }
+    @rmdir($dir);
+  }
+
+  public function backupStack(
+    $projectName,
+    $serviceConfigs,
+    $destination = null,
+    $retention = null,
+    $quiesce = self::QUIESCE_NONE
+  ) {
     $destination = $this->resolveDestination($destination);
     $retention = $this->resolveRetention($retention);
+    $quiesce = self::quiesceModeFor($quiesce);
 
     if (!$this->ensureDirectory($destination)) {
       return ['success' => false, 'message' => "Cannot create backup directory: {$destination}"];
@@ -72,12 +290,19 @@ class BackupManager
 
     $results = [];
     $allSuccess = true;
+    $archived = 0;
+    $lastArchive = '';
 
-    foreach ($serviceConfigs as $config) {
+    // Every path that archives nothing is a failure, the same as in
+    // backupContainer(). Before, a malformed entry was skipped in silence, so
+    // a config where no entry was valid reported success.
+    foreach ((array) $serviceConfigs as $config) {
       $service = $config['service'] ?? null;
       $patterns = $config['patterns'] ?? [];
 
       if (!$service || empty($patterns)) {
+        $results[] = 'Skipped a service entry with no service name or no paths';
+        $allSuccess = false;
         continue;
       }
 
@@ -92,6 +317,7 @@ class BackupManager
 
       if (empty($hostPaths)) {
         $results[] = "No matching paths for service '{$service}'";
+        $allSuccess = false;
         continue;
       }
 
@@ -99,26 +325,43 @@ class BackupManager
       $archiveName = $this->generateArchiveName($prefix);
       $archivePath = rtrim($destination, '/') . '/' . $archiveName;
 
-      if (!$this->createArchive($archivePath, $hostPaths)) {
-        $results[] = "Failed to create archive for service '{$service}'";
+      // Quiet each service around its own archive, not the whole stack around
+      // all of them. One service at a time is far less downtime.
+      $job = $this->runArchiveJob($container['id'], $quiesce, $archivePath, $hostPaths);
+
+      if (!$job['success']) {
+        $results[] = $job['failure'] === 'quiesce'
+          ? "Service '{$service}': " . $job['detail']
+          : "Failed to create archive for service '{$service}'{$job['detail']}";
+        if ($job['restore_error'] !== '') {
+          $results[] = "Service '{$service}': " . $job['restore_error'];
+        }
         $allSuccess = false;
         continue;
       }
 
+      if ($job['restore_error'] !== '') {
+        $results[] = "Service '{$service}': " . $job['restore_error'];
+        $allSuccess = false;
+      }
+
       $this->pruneOldBackups($destination, $prefix, $retention);
-      $results[] = "Backed up service '{$service}': {$archiveName}";
+      $results[] = "Backed up service '{$service}': {$archiveName}" . $job['note'];
+      $archived++;
+      $lastArchive = $archivePath;
     }
 
-    $size = 0;
-    $lastArchive = '';
-    $safeProject = sanitizeArchivePrefix($projectName);
-    $files = $safeProject === null
-      ? []
-      : glob(rtrim($destination, '/') . "/{$safeProject}.*.tar.gz");
-    if ($files) {
-      $lastArchive = end($files);
-      $size = filesize($lastArchive);
+    if ($archived === 0) {
+      $allSuccess = false;
+      if (empty($results)) {
+        $results[] = "No services configured for stack '{$projectName}'";
+      }
     }
+
+    // The last archive this run wrote, not the newest one in the directory. A
+    // scan reported an old archive for a run that wrote none, and its stack
+    // pattern also matched another stack, such as "blog.v2" for "blog".
+    $size = $lastArchive !== '' && is_file($lastArchive) ? filesize($lastArchive) : 0;
 
     return [
       'success' => $allSuccess,
@@ -128,33 +371,34 @@ class BackupManager
     ];
   }
 
-  public function listBackups($targetType, $targetId)
+  /**
+   * @param string $targetType
+   * @param string $targetId
+   * @param string[] $extraPrefixes More exact prefixes to list, such as the
+   *   "<container>.<database>" series of a Postgres schedule. A container's
+   *   own scope cannot match those without also matching a stack of the same
+   *   name. See PostgresBackup::archivePrefixesFor().
+   */
+  public function listBackups($targetType, $targetId, array $extraPrefixes = [])
   {
     $destination = $this->resolveDestination(null);
     if (!is_dir($destination)) {
       return [];
     }
 
-    // $targetId reaches here straight from the request. Unsanitized it would be
-    // injected into a glob pattern, where both ../ and the glob metacharacters
-    // turn this listing into a directory oracle over the whole filesystem.
-    // Must match generateArchiveName's sanitizer, or this stops finding the
-    // archives that were actually written.
-    $prefix = sanitizeArchivePrefix($targetId);
-    if ($prefix === null) {
-      return [];
+    // $targetId reaches here straight from the request. archivesFor()
+    // sanitizes it and matches whole names only, so neither ../ nor a glob
+    // metacharacter in it can list anything else. A stack lists every one of
+    // its services. A container lists only its own archives, not those of a
+    // stack with the same name.
+    $scope = $targetType === 'stack' ? self::ARCHIVES_STACK : self::ARCHIVES_EXACT;
+    $files = self::archivesFor($destination, $targetId, $scope);
+    if (!empty($extraPrefixes)) {
+      foreach ($extraPrefixes as $prefix) {
+        $files = array_merge($files, self::archivesFor($destination, $prefix, self::ARCHIVES_EXACT));
+      }
+      $files = self::newestFirst(array_values(array_unique($files)));
     }
-
-    $pattern = rtrim($destination, '/') . '/' . $prefix . '.*.tar.gz';
-    $files = glob($pattern);
-
-    if (!$files) {
-      return [];
-    }
-
-    usort($files, function ($a, $b) {
-      return filemtime($b) - filemtime($a);
-    });
 
     $backups = [];
     foreach ($files as $file) {
@@ -175,18 +419,44 @@ class BackupManager
     $realDest = realpath($destination);
     $realFile = realpath($filePath);
 
-    // Only allow deleting files within the backup destination.
-    // pathIsWithin() anchors on a trailing separator; a bare strpos() prefix
-    // test would accept a sibling directory such as "<dest>-evil".
-    if (!$realFile || !$realDest || !pathIsWithin($realFile, $realDest)) {
+    if (!$realFile || !$realDest) {
       return false;
     }
 
-    if (file_exists($filePath) && is_file($filePath)) {
-      return unlink($filePath);
+    // Only an archive this plugin wrote, directly in the destination.
+    // Containment alone is not enough. The destination can be an allowed root
+    // itself, such as /mnt, or a broad one such as /mnt/user, and then "inside
+    // the destination" means every file on the array.
+    // pathIsWithin() also fails closed on a weak destination such as "/".
+    if (!pathIsWithin($realFile, $realDest)
+      || dirname($realFile) !== $realDest
+      || !self::isArchiveName(basename($realFile))) {
+      return false;
     }
 
-    return false;
+    if (!is_file($realFile)) {
+      return false;
+    }
+
+    return unlink($realFile);
+  }
+
+  /**
+   * Is $basename shaped like a file generateArchiveName() writes?
+   *
+   * @param string $basename A file name with no directory part
+   * @return bool
+   */
+  public static function isArchiveName($basename)
+  {
+    if (!is_string($basename)) {
+      return false;
+    }
+
+    return preg_match(
+      '/^[A-Za-z0-9][A-Za-z0-9._-]*\.' . self::ARCHIVE_STAMP_PATTERN . '\.tar\.gz$/',
+      $basename
+    ) === 1;
   }
 
   private function resolveDestination($override)
@@ -227,13 +497,145 @@ class BackupManager
 
   public function resolveHostPaths($containerName, $patterns)
   {
-    $containers = $this->dockerClient->listContainers(true);
-    foreach ($containers as $c) {
+    $container = $this->findContainer($containerName);
+    return $container ? $this->resolveHostPathsForContainer($container['id'], $patterns) : [];
+  }
+
+  private function findContainer($containerName)
+  {
+    foreach ($this->dockerClient->listContainers(true) as $c) {
       if ($c['name'] === $containerName) {
-        return $this->resolveHostPathsForContainer($c['id'], $patterns);
+        return $c;
       }
     }
-    return [];
+    return null;
+  }
+
+  /**
+   * Map a path inside a container onto its path on the host.
+   *
+   * Picks the longest matching mount Destination, so a nested mount wins over
+   * the parent that also covers the path. Returns null when no mount covers
+   * it, or when the part below the mount climbs back out with "..".
+   *
+   * Pure and static so both the backup runner and api/paths.php can use it,
+   * and so the suite can test it without a Docker socket.
+   *
+   * @param string $containerPath A path as the container sees it
+   * @param array $mounts Docker mount entries, with Source and Destination
+   * @return array|null
+   */
+  public static function mapContainerPath($containerPath, array $mounts)
+  {
+    $best = null;
+    $bestLength = -1;
+
+    foreach ($mounts as $mount) {
+      $dest = rtrim(isset($mount['Destination']) ? $mount['Destination'] : '', '/');
+      $src = rtrim(isset($mount['Source']) ? $mount['Source'] : '', '/');
+
+      if ($dest === '' || $src === '' || strlen($dest) <= $bestLength) {
+        continue;
+      }
+
+      if ($containerPath === $dest || $containerPath === $dest . '/') {
+        $relative = '';
+      } elseif (strpos($containerPath, $dest . '/') === 0) {
+        $relative = substr($containerPath, strlen($dest) + 1);
+      } else {
+        continue;
+      }
+
+      // The relative part is user supplied and would otherwise walk out of the
+      // mount source. It is never normalized on its own, only rejected.
+      if ($relative !== '' && in_array('..', explode('/', $relative), true)) {
+        continue;
+      }
+
+      $bestLength = strlen($dest);
+      $best = [
+        'mount_destination' => $dest,
+        'mount_source' => $src,
+        'relative' => $relative,
+        'host_path' => $relative === '' ? $src : $src . '/' . $relative,
+      ];
+    }
+
+    return $best;
+  }
+
+  /**
+   * True when the file starts with the SQLite header.
+   */
+  public static function isSqliteFile($path)
+  {
+    if (!is_file($path)) {
+      return false;
+    }
+
+    $handle = @fopen($path, 'rb');
+    if (!$handle) {
+      return false;
+    }
+
+    $header = fread($handle, 16);
+    fclose($handle);
+
+    return $header === self::SQLITE_MAGIC;
+  }
+
+  /**
+   * The write-ahead log and journal files that sit beside a database file.
+   */
+  public static function sidecarsFor($path)
+  {
+    $found = [];
+    foreach (['-wal', '-shm', '-journal'] as $suffix) {
+      if (is_file($path . $suffix)) {
+        $found[] = $path . $suffix;
+      }
+    }
+    return $found;
+  }
+
+  /**
+   * Add the sidecar files of every database file in the list.
+   *
+   * A directory is archived whole, so tar already walks its sidecars. A single
+   * file is not: a pattern such as /config/*.db matches app.db and leaves
+   * app.db-wal behind. That copy is missing every committed transaction still
+   * in the write-ahead log, which is the usual way a restored database turns
+   * out broken.
+   */
+  private static function withSidecars(array $paths)
+  {
+    $expanded = [];
+
+    foreach ($paths as $path) {
+      $expanded[] = $path;
+
+      if (is_dir($path) || !self::isSqliteFile($path)) {
+        continue;
+      }
+
+      foreach (self::sidecarsFor($path) as $sidecar) {
+        $expanded[] = $sidecar;
+      }
+    }
+
+    return array_values(array_unique($expanded));
+  }
+
+  /**
+   * Coerce a stored quiesce value to one of the three known modes.
+   */
+  public static function quiesceModeFor($value)
+  {
+    $mode = is_string($value) ? strtolower(trim($value)) : '';
+
+    return in_array($mode, [self::QUIESCE_PAUSE, self::QUIESCE_STOP], true)
+      ? $mode
+      : self::QUIESCE_NONE;
   }
 
   private function resolveHostPathsForContainer($containerId, $patterns)
@@ -247,98 +649,340 @@ class BackupManager
     $hostPaths = [];
 
     foreach ($patterns as $pattern) {
-      foreach ($mounts as $mount) {
-        $dest = rtrim($mount['Destination'], '/');
-        $src = rtrim($mount['Source'], '/');
+      $mapped = self::mapContainerPath($pattern, $mounts);
+      if ($mapped === null) {
+        continue;
+      }
 
-        if ($pattern === $dest || $pattern === $dest . '/') {
-          // Exact mount match
-          $hostPaths[] = $src;
-          break;
-        }
+      $src = $mapped['mount_source'];
+      $hostPath = $mapped['host_path'];
 
-        // Pattern is a subpath of a mount destination
-        if (strpos($pattern, $dest . '/') === 0) {
-          $relative = substr($pattern, strlen($dest) + 1);
+      // The whole mount. tar walks it, so there is nothing more to resolve.
+      if ($mapped['relative'] === '') {
+        $hostPaths[] = $src;
+        continue;
+      }
 
-          // $relative comes from user-supplied backup_config.paths and could
-          // otherwise climb back out of the mount source with "..".
-          if (in_array('..', explode('/', $relative), true)) {
-            break;
-          }
-
-          $hostPath = $src . '/' . $relative;
-
-          // Support glob patterns
-          if (strpos($relative, '*') !== false || strpos($relative, '?') !== false) {
-            $globbed = glob($hostPath);
-            if ($globbed) {
-              foreach ($globbed as $match) {
-                if (pathIsWithin($match, $src)) {
-                  $hostPaths[] = $match;
-                }
-              }
+      if (strpos($mapped['relative'], '*') !== false || strpos($mapped['relative'], '?') !== false) {
+        $globbed = glob($hostPath);
+        if ($globbed) {
+          foreach ($globbed as $match) {
+            if (pathIsWithin($match, $src)) {
+              $hostPaths[] = $match;
             }
-          } elseif (pathIsWithin($hostPath, $src) && (file_exists($hostPath) || is_dir($hostPath))) {
-            $hostPaths[] = $hostPath;
           }
-          break;
         }
+        continue;
+      }
+
+      if (pathIsWithin($hostPath, $src) && file_exists($hostPath)) {
+        $hostPaths[] = $hostPath;
       }
     }
 
-    return array_unique($hostPaths);
+    return self::withSidecars(array_unique($hostPaths));
+  }
+
+  /**
+   * Write one archive with the container quieted, and say what happened.
+   *
+   * 'success' means the archive reached disk. On a failure, 'failure' names
+   * the step that failed, either 'quiesce' or 'archive', and 'detail' holds
+   * the words that step produced. The caller words the message itself,
+   * because a single container and one service of a stack name themselves
+   * differently. 'note' and 'restore_error' come straight from withQuiesce().
+   */
+  private function runArchiveJob($containerId, $quiesce, $archivePath, $hostPaths)
+  {
+    $run = $this->withQuiesce($containerId, $quiesce, function () use ($archivePath, $hostPaths) {
+      return $this->createArchive($archivePath, $hostPaths);
+    });
+
+    if (!$run['ok']) {
+      return ['success' => false, 'failure' => 'quiesce', 'detail' => $run['message'],
+        'note' => '', 'restore_error' => ''];
+    }
+
+    // The archive can fail and the restore can fail in the same run. Both are
+    // reported, because the second one means the container is still stopped
+    // or paused.
+    $archive = $run['result'];
+    if (!$archive['success']) {
+      return ['success' => false, 'failure' => 'archive',
+        'detail' => $archive['output'] !== '' ? ': ' . $archive['output'] : '',
+        'note' => '', 'restore_error' => $run['restore_error']];
+    }
+
+    return ['success' => true, 'failure' => '', 'detail' => '',
+      'note' => $run['note'], 'restore_error' => $run['restore_error']];
+  }
+
+  /**
+   * Run $work with the container paused or stopped, then put it back.
+   *
+   * Returns ['ok' => false, 'message' => ...] when the container could not be
+   * quieted, and $work never runs. Otherwise 'result' holds what $work
+   * returned, 'note' is text for the success message, and 'restore_error' is
+   * non-empty when the container could not be started or resumed afterward.
+   */
+  private function withQuiesce($containerId, $mode, callable $work)
+  {
+    $quiet = ['ok' => true, 'note' => '', 'restore_error' => '', 'result' => null];
+
+    if ($mode !== self::QUIESCE_PAUSE && $mode !== self::QUIESCE_STOP) {
+      $quiet['result'] = $work();
+      return $quiet;
+    }
+
+    $state = $this->containerRunState($containerId);
+
+    // A stopped container is already as quiet as it gets, and starting it
+    // afterward would be a state change nobody asked for. A container someone
+    // else paused is left paused for the same reason.
+    if ($state === 'exited' || $state === 'paused') {
+      $quiet['result'] = $work();
+      return $quiet;
+    }
+
+    // Inspect failed, so the state is unknown. Running the archive anyway is
+    // the silent downgrade this mode exists to prevent.
+    if ($state !== 'running') {
+      return self::quiesceFailure('Could not read the container state before the backup');
+    }
+
+    $quieted = $mode === self::QUIESCE_PAUSE
+      ? $this->dockerClient->pauseContainer($containerId)
+      : $this->dockerClient->stopContainer($containerId, self::QUIESCE_STOP_TIMEOUT);
+
+    // Never fall back to an unquiet backup. The user picked this mode to
+    // protect a database, and a silent downgrade hands them an archive they
+    // believe is safe.
+    if (!$quieted) {
+      return self::quiesceFailure("Could not {$mode} the container before the backup");
+    }
+
+    self::markPending($containerId, $mode);
+
+    try {
+      $quiet['result'] = $work();
+    } finally {
+      $restored = $this->restoreContainer($containerId, $mode);
+    }
+
+    if (!$restored) {
+      $verb = $mode === self::QUIESCE_PAUSE ? 'resumed' : 'started';
+      $quiet['restore_error'] = "The container could not be {$verb} again after the backup";
+      return $quiet;
+    }
+
+    $quiet['note'] = $mode === self::QUIESCE_PAUSE
+      ? ' (container paused during backup)'
+      : ' (container stopped during backup)';
+
+    return $quiet;
+  }
+
+  /** The shape withQuiesce() returns when the work never ran. */
+  private static function quiesceFailure($message)
+  {
+    return [
+      'ok' => false,
+      'note' => '',
+      'restore_error' => '',
+      'result' => null,
+      'message' => $message,
+    ];
+  }
+
+  private function containerRunState($containerId)
+  {
+    $raw = $this->dockerClient->inspectContainerRaw($containerId);
+    if (!$raw || empty($raw['State'])) {
+      return 'unknown';
+    }
+    if (!empty($raw['State']['Paused'])) {
+      return 'paused';
+    }
+
+    return !empty($raw['State']['Running']) ? 'running' : 'exited';
+  }
+
+  private function restoreContainer($containerId, $mode)
+  {
+    // startContainer() already unpauses a paused container, so both modes are
+    // safe to call whatever state the container ended up in.
+    $ok = $mode === self::QUIESCE_PAUSE
+      ? $this->dockerClient->unpauseContainer($containerId)
+      : $this->dockerClient->startContainer($containerId);
+
+    if ($ok) {
+      unset(self::$pendingRestore[$containerId]);
+    }
+
+    return $ok;
+  }
+
+  private static function markPending($containerId, $mode)
+  {
+    self::$pendingRestore[$containerId] = $mode;
+
+    if (self::$shutdownRegistered) {
+      return;
+    }
+    self::$shutdownRegistered = true;
+
+    // A PHP fatal between the pause and the unpause would otherwise leave the
+    // container frozen until somebody noticed. This does not cover SIGKILL or
+    // a power cut. A container paused that way stays paused until the next
+    // reboot, and the reboot clears it.
+    register_shutdown_function(function () {
+      if (empty(self::$pendingRestore)) {
+        return;
+      }
+
+      $docker = new DockerClient();
+      foreach (self::$pendingRestore as $id => $mode) {
+        if ($mode === self::QUIESCE_PAUSE) {
+          $docker->unpauseContainer($id);
+        } else {
+          $docker->startContainer($id);
+        }
+        error_log("BackupManager: restored container {$id} after an unclean exit");
+      }
+
+      self::$pendingRestore = [];
+    });
   }
 
   private function createArchive($archivePath, $hostPaths)
   {
-    $pathArgs = [];
-    foreach ($hostPaths as $p) {
-      $pathArgs[] = escapeshellarg($p);
-    }
+    return $this->runTar($archivePath, implode(' ', array_map('escapeshellarg', $hostPaths)));
+  }
 
-    $cmd = 'tar czf ' . escapeshellarg($archivePath) . ' ' . implode(' ', $pathArgs) . ' 2>&1';
+  /**
+   * Write one archive with tar, and delete it again if tar fails.
+   *
+   * @param string $archivePath
+   * @param string $sources The tar arguments after the archive, already escaped
+   * @return array ['success' => bool, 'output' => string]
+   */
+  private function runTar($archivePath, $sources)
+  {
+    $cmd = 'tar czf ' . escapeshellarg($archivePath) . ' ' . $sources . ' 2>&1';
     exec($cmd, $output, $exitCode);
 
-    return $exitCode === 0;
+    // A failed archive is reported as a failure, so it must not stay on disk.
+    // It would be the newest file for this target, and retention keeps the
+    // newest, so each failed run would push out one good backup. tar exits 1
+    // on "file changed as we read it", which already counts as a failure here.
+    if ($exitCode !== 0 && is_file($archivePath)) {
+      @unlink($archivePath);
+    }
+
+    // tar's own words matter. "file changed as we read it" is what a backup of
+    // a running container looks like, and the caller used to report only
+    // "Failed to create archive".
+    return [
+      'success' => $exitCode === 0,
+      'output' => implode('; ', array_slice($output, -3)),
+    ];
   }
+
+
+  /**
+   * Archive the contents of $dir with paths relative to it, so the archive
+   * holds "./<file name>.dump" rather than the full host path of the staging dir.
+   */
+  private function createArchiveFromDir($archivePath, $dir)
+  {
+    return $this->runTar($archivePath, '-C ' . escapeshellarg($dir) . ' .');
+  }
+
 
   private function pruneOldBackups($destination, $prefix, $retention)
   {
-    // Same glob-injection surface as listBackups, but this one unlinks.
-    // Must match generateArchiveName's sanitizer so retention still prunes the
-    // archives this prefix actually produced.
-    $safePrefix = sanitizeArchivePrefix($prefix);
-    if ($safePrefix === null) {
+    // Exactly the archives this prefix wrote. A glob of "<prefix>.*.tar.gz"
+    // also matched other targets: a container named "blog" pruned the
+    // "blog.web.<stamp>" archives of a stack named "blog".
+    $files = self::archivesFor($destination, $prefix, self::ARCHIVES_EXACT);
+
+    if (count($files) <= $retention) {
       return 0;
     }
 
-    $pattern = rtrim($destination, '/') . '/' . $safePrefix . '.*.tar.gz';
-    $files = glob($pattern);
-
-    if (!$files || count($files) <= $retention) {
-      return 0;
-    }
-
-    usort($files, function ($a, $b) {
-      return filemtime($b) - filemtime($a);
-    });
-
-    $toDelete = array_slice($files, $retention);
     $deleted = 0;
-
-    foreach ($toDelete as $file) {
-      // Re-check containment per file. glob() can follow symlinks out of the
-      // destination even with a sanitized prefix.
-      if (!pathIsWithin($file, $destination)) {
-        continue;
-      }
+    foreach (array_slice($files, $retention) as $file) {
       if (unlink($file)) {
         $deleted++;
       }
     }
 
     return $deleted;
+  }
+
+  /**
+   * The archives in $dir that belong to one target, newest first.
+   *
+   * ARCHIVES_EXACT matches "<prefix>.<stamp>.tar.gz", which is one container,
+   * or one stack service when $prefix is "project.service". ARCHIVES_STACK
+   * matches "<prefix>.<service>.<stamp>.tar.gz", which is every service of the
+   * stack named $prefix.
+   *
+   * The directory is read with scandir(), not glob(), so a destination that
+   * contains a glob metacharacter cannot match a sibling directory.
+   *
+   * One collision remains that no name rule can separate. A container named
+   * "blog.web" and service "web" of a stack named "blog" write the same name.
+   * So does database "web" of a Postgres backup of container "blog". Nothing
+   * refuses these. They are rare, and the user named the targets.
+   *
+   * @param string $dir The backup destination
+   * @param string $prefix A container name, "project.service", or a project
+   * @param string $scope ARCHIVES_EXACT or ARCHIVES_STACK
+   * @return string[] Full paths, newest first
+   */
+  public static function archivesFor($dir, $prefix, $scope = self::ARCHIVES_EXACT)
+  {
+    // Must match generateArchiveName's sanitizer, or this stops finding the
+    // archives that were actually written.
+    $safePrefix = sanitizeArchivePrefix($prefix);
+    if ($safePrefix === null || !is_dir($dir)) {
+      return [];
+    }
+
+    $service = $scope === self::ARCHIVES_STACK ? '\.[A-Za-z0-9][A-Za-z0-9._-]*' : '';
+    $regex = '/^' . preg_quote($safePrefix, '/') . $service . '\.'
+      . self::ARCHIVE_STAMP_PATTERN . '\.tar\.gz$/';
+
+    $dir = rtrim($dir, '/');
+    $files = [];
+    foreach (scandir($dir) ?: [] as $name) {
+      if (preg_match($regex, $name) !== 1) {
+        continue;
+      }
+      $path = $dir . '/' . $name;
+      if (is_file($path) && !is_link($path)) {
+        $files[] = $path;
+      }
+    }
+
+    return self::newestFirst($files);
+  }
+
+  /**
+   * Sort archive paths newest first. The name breaks a tie, since its stamp
+   * sorts in time order.
+   *
+   * @param string[] $files
+   * @return string[]
+   */
+  private static function newestFirst(array $files)
+  {
+    usort($files, function ($a, $b) {
+      return (filemtime($b) - filemtime($a)) ?: strcmp(basename($b), basename($a));
+    });
+
+    return $files;
   }
 
   private function generateArchiveName($prefix)

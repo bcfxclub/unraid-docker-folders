@@ -19,7 +19,30 @@
       >&times;</button>
     </div>
 
-    <p v-if="isLoading" class="text-xs text-text-secondary py-1">Loading...</p>
+    <div v-if="prefs.showStats && runningIds.length > 0" class="widget-total pb-2 mb-1 border-b border-border" :title="totalTitle">
+      <div class="flex items-center justify-between px-2 mb-1 text-xs">
+        <span class="font-semibold">All running</span>
+        <span class="text-text-secondary">{{ runningIds.length }} {{ runningIds.length === 1 ? 'container' : 'containers' }}</span>
+      </div>
+      <div class="grid grid-cols-2 gap-3 px-2">
+        <WidgetArcGauge label="CPU" :percent="runningTotal?.cpuPercent" :detail="cpuDetail" />
+        <WidgetArcGauge label="Memory" :percent="runningTotal?.memPercent" :detail="memoryDetail" />
+      </div>
+    </div>
+
+    <!-- Placeholder rows shaped like WidgetContainerRow while the first load runs. -->
+    <div v-if="isLoading" role="status" aria-busy="true" class="flex flex-col">
+      <span class="sr-only">Loading...</span>
+      <div v-for="width in SKELETON_NAME_WIDTHS" :key="width" class="flex items-center gap-2 py-1 pl-2 pr-1">
+        <span class="skeleton size-6 shrink-0 rounded-full!" />
+        <span class="skeleton h-3" :style="{ width }" />
+        <span class="flex-1" />
+        <template v-if="prefs.showStats">
+          <span class="skeleton h-3 w-10" />
+          <span class="skeleton h-3 w-10" />
+        </template>
+      </div>
+    </div>
     <p v-else-if="error" class="text-xs text-error py-1">Error: {{ error }}</p>
     <p v-else-if="groups.length === 0" class="text-xs text-text-secondary py-1">
       {{ query ? 'No containers match.' : prefs.hideStopped ? 'No running containers.' : 'No containers.' }}
@@ -91,26 +114,32 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import ChevronIcon from '@/components/common/ChevronIcon.vue';
 import WidgetContainerRow from './WidgetContainerRow.vue';
+import WidgetArcGauge from './WidgetArcGauge.vue';
 import WidgetSettingsPanel from './WidgetSettings.vue';
 import { loadWidgetSettings, saveWidgetSettings } from './widgetSettings';
 import { useDockerStore, type Container } from '@/stores/docker';
 import { useFolderStore } from '@/stores/folders';
 import { useSettingsStore } from '@/stores/settings';
-import { useStatsStore } from '@/stores/stats';
+import { useStatsStore, type ContainerStats } from '@/stores/stats';
 import { useUpdatesStore } from '@/stores/updates';
 import { useScheduleStore } from '@/stores/schedules';
 import type { Schedule } from '@/types/schedule';
-import { initWebSocket } from '@/composables/useWebSocket';
+import { initLiveUpdates } from '@/composables/useLiveUpdates';
 import { containerMatchesSearch } from '@/utils/search';
 import { isAliveContainer } from '@/utils/containerDisplay';
 import { composeProjectOf } from '@/utils/updateUnits';
 import { effectiveSortMode, sortByMode } from '@/utils/sortMode';
 import { reportHeightToParent } from '@/utils/iframeHost';
 import { safeLocalStorageGetJson, safeLocalStorageSet } from '@/utils/safeStorage';
+import { aggregateStats } from '@/utils/aggregateStats';
+import { formatBytes, formatPercent } from '@/utils/format';
 
 /** Slower than the Folders page: the dashboard is often left open for hours. */
 const WIDGET_POLL_INTERVAL = 60000;
-/** Stats poll slower than the Folders page (5s) for the same reason. */
+/**
+ * Stats poll slower than the Folders page (5s) for the same reason. PHP mode
+ * only: in GraphQL mode the server pushes stats every 2s, as on the Folders page.
+ */
 const WIDGET_STATS_INTERVAL = 15000;
 const NO_SCHEDULES: Schedule[] = [];
 const COLLAPSE_KEY = 'docker-folders-widget-collapsed';
@@ -142,6 +171,8 @@ statsStore.setPollInterval(WIDGET_STATS_INTERVAL);
 const query = ref('');
 const isSearching = computed(() => query.value.trim().length > 0);
 const isLoading = computed(() => dockerStore.loading || folderStore.loading);
+/** Name bar widths for the loading rows, varied so they do not look stamped. */
+const SKELETON_NAME_WIDTHS = ['45%', '30%', '55%', '38%'];
 const error = computed(() => dockerStore.error || folderStore.error);
 
 // Enabled schedules whose last run failed, by container name. A stack schedule
@@ -207,12 +238,75 @@ const settingsOpen = ref(false);
 // Its own computed, so changing another setting does not rerun the group filter.
 const hideStopped = computed(() => prefs.value.hideStopped);
 
+// True while the dashboard tile is folded shut. The page tells the frame, and
+// the frame keeps measuring stats then, for the summary in the tile header.
+const tileCollapsed = ref(false);
+/** Whether stats are measured: shown in the widget, or summed for the folded tile's header. */
+const trackStats = computed(() => prefs.value.showStats || tileCollapsed.value);
+
+// Every running container is registered for stats here, not by its row. The
+// all-running total needs them all, including those in a collapsed folder, whose
+// rows are unmounted. The stats store keeps a plain set of ids, so a row that
+// unregistered on unmount would also drop the id from the total.
+const runningIds = computed(() => dockerStore.containers.filter((c) => c.state === 'running').map((c) => c.id));
+let registeredIds: string[] = [];
+function syncRegistered(ids: string[]) {
+  const next = new Set(ids);
+  for (const id of registeredIds) if (!next.has(id)) statsStore.unregisterVisible(id);
+  const prev = new Set(registeredIds);
+  for (const id of ids) if (!prev.has(id)) statsStore.registerVisible(id);
+  registeredIds = ids;
+}
+watch(
+  () => (trackStats.value ? runningIds.value : []),
+  syncRegistered,
+  { immediate: true },
+);
+
+/** Every running container together, as a share of the host. Null until any stats arrive. */
+const runningTotal = computed(() => {
+  if (!trackStats.value) return null;
+  const list = runningIds.value.map((id) => statsStore.getStats(id)).filter((s): s is ContainerStats => !!s);
+  return aggregateStats(list);
+});
+const cpuDetail = computed(() => {
+  const t = runningTotal.value;
+  if (!t) return '';
+  return t.hostCpus === 1 ? 'of 1 core' : `of ${t.hostCpus} cores`;
+});
+const memoryDetail = computed(() => {
+  const t = runningTotal.value;
+  return t ? `${formatBytes(t.memoryUsage)} / ${formatBytes(t.hostMemory)}` : '';
+});
+const totalTitle = computed(() => {
+  const t = runningTotal.value;
+  if (!t) return 'Loading stats';
+  const cores = t.hostCpus === 1 ? '1 core' : `${t.hostCpus} cores`;
+  return `CPU ${formatPercent(t.cpuPercent)} of ${cores} · Memory ${formatBytes(t.memoryUsage)} / ${formatBytes(t.hostMemory)}`;
+});
+
 // The cog in the tile header lives in the dashboard page, outside this frame,
-// so it asks for the panel with a message.
+// so it asks for the panel with a message. The page also says when the tile
+// folds or opens.
 function onParentMessage(e: MessageEvent) {
   if (e.source !== window.parent || e.origin !== window.location.origin) return;
   if (e.data?.type === 'docker-folders-widget-settings') settingsOpen.value = !settingsOpen.value;
+  if (e.data?.type === 'docker-folders-tile-collapsed') tileCollapsed.value = e.data.collapsed === true;
 }
+
+// The folded tile shows only its header row, and the header lives in the
+// dashboard page. Send it the totals to draw there. Percents are null until
+// stats arrive.
+const tileSummary = computed(() => ({
+  type: 'docker-folders-summary',
+  running: runningIds.value.length,
+  total: dockerStore.containers.length,
+  cpu: runningTotal.value?.cpuPercent ?? null,
+  memory: runningTotal.value?.memPercent ?? null,
+}));
+watch(tileSummary, (summary) => {
+  if (window.parent !== window && !isLoading.value) window.parent.postMessage(summary, window.location.origin);
+}, { immediate: true });
 
 // The count in each header stays running/total over every member, so a folder
 // keeps showing how much of it is stopped while those rows are hidden.
@@ -260,13 +354,16 @@ function onMenuOpenChange(_open: boolean, bottom: number) {
 
 onMounted(async () => {
   window.addEventListener('message', onParentMessage);
+  // The app mounts after the backend check, so a fold message the page sent
+  // on frame load came too early. Ask for it again now that someone listens.
+  if (window.parent !== window) window.parent.postMessage({ type: 'docker-folders-widget-ready' }, window.location.origin);
   if (rootEl.value) resendHeight = reportHeightToParent(rootEl.value, () => menuBottom);
   // Tag data loads after the rows, and only when tags are on. Turning tags on
   // later loads it then (watch below).
   if (prefs.value.showTags) void scheduleStore.fetchSchedules();
   await Promise.all([dockerStore.fetchContainers(), folderStore.fetchFolders(), settingsStore.fetchSettings()]);
   loadUpdates();
-  initWebSocket({ pollInterval: WIDGET_POLL_INTERVAL });
+  initLiveUpdates({ pollInterval: WIDGET_POLL_INTERVAL });
 });
 
 // Same rule as the Folders page: no update tags unless update checks are on.
@@ -284,5 +381,8 @@ watch(
   },
 );
 
-onUnmounted(() => window.removeEventListener('message', onParentMessage));
+onUnmounted(() => {
+  window.removeEventListener('message', onParentMessage);
+  syncRegistered([]);
+});
 </script>

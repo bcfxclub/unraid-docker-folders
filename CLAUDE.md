@@ -97,6 +97,20 @@ refactor. Suppress a genuine false positive inline with
 6. Pushes to GitHub
 7. Outputs package to `archive/` directory
 
+**Release notes**: `build/release-notes.sh` writes them once per release, and
+`CHANGELOG.md`, the PLG `<CHANGES>`, the tag and the GitHub release all show
+the same notes. With the `ANTHROPIC_API_KEY` repository secret, Claude sorts
+the commits into New, Improved and Fixed, and puts work a user never sees on
+one "Internal fixes and performance improvements" line. Without the key, or
+when the call fails, `feat` commits go to New, `fix` commits to Fixed, and the
+rest to that internal line. A commit message that names a GitHub issue
+(`#123`) marks a fix as user reported, so it is always listed. Each item ends with the
+pull request and issue numbers its commits name, for example "(#18)". The
+script keeps only numbers that appear in the commit messages, so a squash
+merge subject or a "Fixes #12" line is what puts a number in the notes. To preview the
+notes, run `build/release-notes.sh generate "$(build/release-notes.sh range)" > /tmp/n.json`,
+then `build/release-notes.sh render changelog /tmp/n.json`.
+
 **Output**: `archive/unraid-docker-folders-modern-<version>.txz`
 
 **Important**: After release build, manually create GitHub release and upload the `.txz` file (gh CLI not authenticated).
@@ -113,7 +127,7 @@ This is a **split frontend/backend architecture** with an unusual build output l
 src/frontend/              # Vue 3 application
   ├── src/
   │   ├── components/      # Vue components (ConnectionStatus, ContainerCard, Folder*)
-  │   ├── composables/     # useWebSocket.ts
+  │   ├── composables/     # useLiveUpdates.ts (nchan or GraphQL subscription)
   │   ├── stores/          # Pinia state management (docker.ts, folders.ts, settings.ts, stats.ts)
   │   ├── types/           # TypeScript definitions (folder.ts, websocket.ts)
   │   └── utils/           # csrf.ts
@@ -419,7 +433,10 @@ Three rules that are easy to get wrong:
    collapse against on its own.
 2. **`pathIsWithin` fails closed on a weak base** — empty, relative, or `/`. Some
    bases (`working_dir`, a mount `Source`) are label-derived and attacker-influenced;
-   containment against `/` would pass for everything.
+   containment against `/` would pass for everything. It does **not** fail closed
+   on an allowed root itself. A backup destination of `/mnt` passes, and then
+   "inside the destination" is the whole array. Anything that deletes must also
+   check what the file is, as `BackupManager::isArchiveName()` does.
 3. **Never use `strpos($a, $b) === 0` for containment.** That was the original bug:
    `realpath()` never returns a trailing slash, so `/mnt/user/backups-evil` passed a
    `/mnt/user/backups` check.
@@ -444,10 +461,12 @@ Covered by `tests/php/PathSafetyTest.php`.
 
 Documented so they are not mistaken for intentional design:
 
-- **A GET handler mutates the database.** `containers.php:98-105` calls
-  `reconcileContainerIds()` and `syncComposeStacks()` on the list path, so it
-  writes to `container_folders`, `folders`, and `compose_stacks` with no CSRF
-  gate at any layer.
+- **A GET handler mutates the database.** The container-list path in
+  `containers.php` calls `reconcileContainerIds()` and `syncComposeStacks()`,
+  so it writes to `container_folders`, `folders`, and `compose_stacks` with no
+  CSRF gate at any layer. The writes happen only when something changed: an id
+  moved after a recreate, a new stack appeared, or a stack's paths changed.
+  `upsertStack()` no longer rewrites an unchanged row on every poll.
 - **No CORS, CSP, `X-Frame-Options`, or `X-Content-Type-Options` headers** are set
   anywhere. The `case 'OPTIONS'` branches are labelled "CORS preflight" but emit
   no `Access-Control-*` headers, so they are inert.
@@ -478,11 +497,17 @@ acceptable.
 - **Vite base path**: Must be `/plugins/unraid-docker-folders-modern/assets/` for Unraid integration
 - **File permissions**: .page files = 644, scripts = 755, handled by build script
 - **Node / yarn via proto**: `.prototools` at the repo root pins `node = "22.18.0"` and `yarn = "1.22.21"`. If `yarn` isn't on PATH, run `proto use` in the repo root to install and shim them. Shims live at `~/.proto/shims/`. (`npm = "bundled"` is pinned too, but see the package-manager note above — don't use it in `src/frontend`.)
-- **No local PHP**: Lint/validate PHP with the `php:8.2-cli` Docker image, e.g.:
+- **PHP runs in Docker**: On the maintainer's machine `php` is on PATH as a
+  whalebrew wrapper around the `php:8.4-cli` image, so `php -l file.php` works.
+  If `php` is not on PATH, run the image directly:
   ```bash
-  docker run --rm -v "$(pwd)":/app -w /app php:8.2-cli php -l path/to/file.php
+  docker run --rm -v "$(pwd)":/app -w /app php:8.4-cli php -l path/to/file.php
   ```
-  Never assume a local `php` binary is available.
+  Two things break a wrapped `php` in a script. It reads stdin, so give it
+  `</dev/null` when a heredoc or pipe feeds the same command. And Docker's file
+  share can lag a write by a moment, so a lint or test that runs straight after
+  an edit can read a half-written file and report a false parse error. Rerun
+  before you believe it.
 
 ---
 
@@ -490,8 +515,8 @@ acceptable.
 
 **Architecture**:
 1. PHP API endpoints publish events to nchan after each successful mutation
-2. `WebSocketPublisher.php` POSTs JSON to `NCHAN_PUB_URL` (fire-and-forget, 2s timeout)
-3. Frontend connects to `ws://<host>/sub/docker-modern` via `useWebSocket.ts` composable
+2. `WebSocketPublisher.php` POSTs JSON to `NCHAN_PUB_URL` over the Unix socket `NCHAN_SOCKET_PATH` (fire-and-forget, 2s timeout)
+3. Frontend connects to `ws://<host>/sub/docker-modern` via `useLiveUpdates.ts`. In GraphQL mode it subscribes to `dockerFoldersEvents` at `/graphql` instead, which also reports container changes made outside the plugin
 4. On event received, stores call `fetchContainers()` or `fetchFolders()` (full refetch, not patching)
 5. Exponential backoff reconnection (1s base, 30s max)
 6. 30s polling fallback (60s in the dashboard widget) catches external changes (CLI, Portainer, etc.). It pauses while the tab is hidden and refetches once the tab is visible again.
@@ -504,10 +529,86 @@ acceptable.
 
 ---
 
+## GraphQL Backend (Unraid API plugin)
+
+A second backend ships beside the PHP one. It is an Unraid API plugin, an npm
+package in `packages/unraid-api-plugin-docker-folders/`, which adds NestJS
+resolvers to the API's GraphQL server at `/graphql`. The `backend_mode` setting
+(`php` or `graphql`, default `php`) selects the backend. `Folders.page` reads
+it and passes it to the iframe as the `backend` query parameter. The frontend
+calls every backend through `src/frontend/src/backends/types.ts`, with
+`php.ts` and `graphql.ts` as the two implementations. If the plugin does not
+answer at boot, the frontend falls back to PHP and shows a notice.
+
+Both backends read and write the same `data.db`. `build.sh` packs the plugin
+into the `.txz`. It is installed into the Unraid API only while `backend_mode`
+is `graphql`, because the Unraid API gives third-party plugins no stable
+contract and a fault there can take all of Unraid's GraphQL offline.
+
+- `scripts/api-plugin.sh` (`install [--activate]`, `remove`, `rollback`,
+  `status`) is the only code that installs or removes it. The `.plg`, the
+  settings switch and the watchdog all call it. It takes a lock and writes
+  its state to `/var/run/unraid-docker-folders-modern.api-plugin.state`.
+- Choosing GraphQL on the settings page shows a warning dialog, then runs
+  `install --activate` detached. The script stores `graphql` only after the
+  backend answers, and removes the backend again if it does not. The page
+  passes a run id, and waits for the state line that carries it. Choosing PHP
+  stores `php` at once and runs `remove`. The plugin's own `settings.set`
+  refuses `backend_mode`.
+- `classes/BackendWatchdog.php` runs every minute from `run-schedules.php`.
+  When the plugin's heartbeat has been stale for 5 minutes, and the API has
+  run for 5 minutes, it switches to PHP, removes the backend and sends a
+  notification. Only when GraphQL itself is down does the removal restart
+  the API, and only once. It runs at the end of the runner, so its checks
+  never delay a schedule, and it repeats them at most every 5 minutes.
+  Cron's `PATH` has no `/usr/local`, so it and `api-plugin.sh` set their own. It records why in `backend-rollback.json` on `/boot`.
+  `php scripts/backend-watchdog.php --dry-run` prints its decision.
+  The schedule-runner cron line is kept in GraphQL mode for this reason.
+
+Rules that are easy to break:
+
+- **Every plugin GraphQL type name starts with `DockerFolders`.** A name the
+  Unraid API already uses fails the whole schema, and GraphQL goes offline for
+  the entire server. A new root field must carry `DockerFolders` in its name
+  too. `src/__tests__/schema-rules.spec.ts` checks this, `@UsePermissions` and
+  the class-validator decorators below. It freezes the types and root fields
+  that shipped with the singular `DockerFolder` or with no prefix. Do not add
+  to those lists.
+- **Every `@InputType` field needs a class-validator decorator.** The API's
+  global `ValidationPipe` rejects any property without one.
+- **Every resolver field needs `@UsePermissions`**, or the API refuses to load
+  the plugin.
+- **`unraid-api restart` does not reload plugins.** Run `unraid-api stop`, then
+  `unraid-api start`.
+- **Exactly one backend runs schedules and update checks.** In GraphQL mode the
+  plugin writes `/var/run/unraid-docker-folders-modern.graphql-runner` as a
+  heartbeat, and `run-schedules.php` and `check-updates.php` exit while it is
+  fresh (`dfmPluginRunnerOwns()` in `config.php`). Both runners also claim
+  each due slot with a compare-and-set on `next_run_at` before they run it.
+  Keep both halves.
+- **The backend runs only on tested API versions.** `include/api-compat.json`
+  holds the range (`min`, `maxExclusive`). The settings page, `settings.php`
+  and `api-plugin.sh install` refuse a version outside it, and the watchdog
+  rolls a GraphQL-mode server back to PHP when its API moves outside it.
+  Unraid Connect can update the API ahead of the OS, so the OS version says
+  nothing. Widen the range only after
+  `scripts/verify-graphql-backend.sh --api-key <key> --restart-check` passes on
+  the new API. The plugin README has the steps.
+- **Peer ranges must cover every API in that range.** npm installs the
+  backend into the API's own `node_modules`, so a peer range that misses the
+  API's version fails with ERESOLVE. API 4.37.5 moved `class-validator` from
+  0.14 to 0.15. `unraid-api plugins install` still exits 0 when npm fails, so
+  `api-plugin.sh` checks `node_modules` itself. Before you widen the range,
+  diff the API's `package.json` dependencies against the plugin's peers.
+- **A new PHP feature needs a plugin port**, or GraphQL mode loses it. Compare
+  the two backends' output on real data before you call a port done.
+
+---
+
 ## Testing Strategy
 
 ### Frontend (Vitest)
-190 tests across 12 files, colocated in `__tests__/` directories next to the code
+731 tests across 47 files, colocated in `__tests__/` directories next to the code
 they cover (stores, utils, and components). Run with `yarn test:run` in
 `src/frontend`.
 
@@ -516,9 +617,18 @@ still prints handled errors (e.g. "Error fetching logs: network failure") to the
 console. Read the summary line, not the noise.
 
 ### Backend (PHPUnit)
-Lives in `tests/php/` (`AuthTest.php`, `DockerClientStatsTest.php`,
-`UpdateCheckTest.php`). There is no local PHP binary — the suite runs in Docker
-via `tests/php/run.sh`, with `Dockerfile` and `phpunit.xml.dist` alongside it.
+Lives in `tests/php/`. The suite runs in Docker via `tests/php/run.sh`, with
+`Dockerfile` and `phpunit.xml.dist` alongside it.
+
+`phpunit.xml.dist` lists every test file by name. **A new test file must be
+added there, or it never runs.** PHPUnit gives no warning, and
+`--filter <Class>` reports "No tests executed".
+
+### GraphQL plugin (Vitest)
+Lives in `packages/unraid-api-plugin-docker-folders`. Run `npx vitest run` and
+`npx tsc --noEmit -p .` in that directory. Several suites check the plugin
+against PHP's own output: the fixtures under `src/schedules/__tests__/` come
+from PHP methods, run by the scripts in `scripts/*-oracle.php`.
 
 ### Not covered by automated tests
 Anything that needs a real Unraid box: the nchan WebSocket channel, CSRF/session
@@ -584,7 +694,7 @@ Page URLs are `/<menu section>/<filename without .page>`. They come from the
 - `PLUGIN_NAME`: `unraid-docker-folders-modern`
 - `DB_PATH`: `/boot/config/plugins/unraid-docker-folders-modern/data.db`
 - `DOCKER_SOCKET`: `/var/run/docker.sock`
-- `NCHAN_PUB_URL`: `http://localhost:4433/pub/docker-modern`
+- `NCHAN_PUB_URL`: `http://localhost/pub/docker-modern?buffer_length=1`, sent over the Unix socket `NCHAN_SOCKET_PATH` (`/var/run/nginx.socket`). Nothing listens on port 4433.
 
 ### API Endpoints
 - `GET /api/containers.php` - List containers (includes ports, mounts, networkSettings)
@@ -603,7 +713,49 @@ Page URLs are `/<menu section>/<filename without .page>`. They come from the
 - `POST /api/pull.php` - Pull updated images (supports batches)
 - `GET|POST /api/compose.php` - Read and apply Compose files
 - `GET /api/compose-stream.php` - Stream Compose command output
-- `GET|POST /api/schedules.php` - Container action schedules
+- `GET|POST /api/schedules.php` - Container action schedules. The list GET also
+  returns `runner` (`last_tick`, `stale_after`, `cron_installed`, `repaired`).
+  A stale heartbeat makes that GET rewrite the cron file and rebuild root's
+  crontab, at most once per stale window, and `repaired` reports it.
+  A backup's `backup_config.quiesce` is `none`, `pause` or `stop`, and anything
+  but `none` makes a late run skip like a state change.
+  The `update` action is for containers only. It checks the image, pulls it
+  when the registry has a newer build, and recreates the container when the
+  tag names a different image than the one it runs. It ignores
+  `post_pull_action`. A pull can take minutes, so the runner and "Run now"
+  start it in its own process. In PHP that is `scripts/run-schedule.php`, and
+  in the plugin an unawaited promise. That run records itself and sends its
+  own notice.
+- `POST /api/schedules.php?action=postgres_info` and `?action=postgres_databases`
+  - Postgres backup mode. Both take `{target_type, target_id, service?}`, where
+  `service` names the compose service of a stack. `postgres_databases` also
+  takes `{credentials, user?, password?, schedule_id?}`. A backup whose
+  `backup_config.mode` is `postgres` runs `pg_dump -Fc` inside that container
+  through Docker's exec API (`DockerClient::execRun`, no shell). Each database
+  gets its own archive, `<prefix>.<file name>.<stamp>.tar.gz`, that holds
+  `<file name>.dump` and `manifest.json`. The prefix is `<container>` or
+  `<project>.<service>`, and the file name is the database name through
+  `sanitizeArchivePrefix()`. A config with two databases that give the same
+  file name is refused. Keep counts per database. A failed database does not
+  stop the others, but the run fails. The backup list of a container adds
+  these series by the prefixes its Postgres schedules name
+  (`PostgresBackup::archivePrefixesFor`). Two behaviors are deliberate.
+  When a database leaves a schedule, or the schedule is deleted, its old
+  archives stay on disk, unlisted and unpruned: the plugin does not guess
+  that the user wants them gone. And the series of database `D` in
+  container `X` has the same names as the file backups of service `D` in a
+  stack `X`. Nothing refuses that, and if both use one destination, each
+  prunes the other. `postgres.credentials` is
+  `env` by default: every run reads `POSTGRES_USER` and `POSTGRES_PASSWORD`
+  from the container, and nothing is stored. `custom` stores a user and
+  password. `backup_config.postgres.password` is write-only:
+  `formatSchedule()` (and `redactConfigJson()` in the plugin) replace it with
+  `password_set`, and an update that sends it empty keeps the saved one.
+  Never return it.
+- `GET /api/paths.php?scope=host|container&path=<partial>&container=<name>` -
+  Lists directories for the backup form's path suggestions. Read only. A host
+  listing stays inside `BACKUP_ALLOWED_ROOTS`. A container listing stays inside
+  that container's own mount sources.
 
 ---
 

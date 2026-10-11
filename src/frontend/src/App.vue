@@ -132,10 +132,9 @@
     </header>
 
     <main class="min-h-[200px]">
+      <BackendNotice />
       <ComposeSetupBanner />
-      <div v-if="isLoading" class="text-center py-8 px-6 text-text-secondary">
-        <p>Loading...</p>
-      </div>
+      <LoadingSkeleton v-if="isLoading" :view="viewMode" />
 
       <div v-else-if="error" class="text-center py-8 px-6 text-error">
         <p>Error: {{ error }}</p>
@@ -305,15 +304,17 @@ import { useUpdatesStore } from '@/stores/updates';
 import { useComposeStore } from '@/stores/compose';
 import { useSecurityStore } from '@/stores/security';
 import { useScheduleStore } from '@/stores/schedules';
-import { initWebSocket } from '@/composables/useWebSocket';
+import { initLiveUpdates } from '@/composables/useLiveUpdates';
 import FolderContainer from '@/components/folders/FolderContainer.vue';
 import FolderEditModal from '@/components/folders/FolderEditModal.vue';
 import ComposeSetupBanner from '@/components/compose/ComposeSetupBanner.vue';
+import BackendNotice from '@/components/BackendNotice.vue';
 import ComposeFileEditor from '@/components/compose/ComposeFileEditor.vue';
 import ComposeProgressModal from '@/components/compose/ComposeProgressModal.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContainerCard from '@/components/docker/ContainerCard.vue';
 import ChevronIcon from '@/components/common/ChevronIcon.vue';
+import LoadingSkeleton from '@/components/common/LoadingSkeleton.vue';
 import CreateMenu from '@/components/CreateMenu.vue';
 import SortMenu from '@/components/SortMenu.vue';
 import PullProgressModal from '@/components/docker/PullProgressModal.vue';
@@ -534,7 +535,7 @@ const dragAutoScroll = useDragAutoScroll();
 onMounted(async () => {
   await loadData();
   initializeDragAndDrop();
-  initWebSocket();
+  initLiveUpdates();
 });
 
 // Re-initialize drag-and-drop whenever folders, containers, search, or sort mode change.

@@ -21,28 +21,148 @@
         <option value="resume">Resume</option>
         <option value="restart">Restart</option>
         <option value="backup">Backup</option>
+        <option v-if="targetType === 'container'" value="update">Update</option>
       </select>
+      <div v-if="form.action === 'update'" class="text-xs text-text-secondary">
+        Checks for a newer image. If one exists, pulls it and recreates the container. A run more than
+        5 minutes late is skipped.
+      </div>
     </div>
 
-    <CronInput v-model="form.cron_expression" />
+    <CronInput :model-value="form.cron_expression" @update:model-value="onCronInput" />
 
     <!-- Backup config -->
     <template v-if="form.action === 'backup'">
       <div class="flex flex-col gap-3 p-3 rounded border border-border bg-bg-card">
         <h4 class="text-sm font-semibold text-text m-0">Backup Configuration</h4>
 
-        <template v-if="targetType === 'container'">
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center gap-2">
+            <input
+              :id="`${uid}-pg-mode`"
+              v-model="pgMode"
+              type="checkbox"
+              class="cursor-pointer"
+              @change="pgModeTouched = true"
+            />
+            <label :for="`${uid}-pg-mode`" class="text-sm text-text cursor-pointer">Postgres backup mode</label>
+            <span v-if="pgDetected" class="text-xs text-text-secondary">Postgres detected</span>
+          </div>
+          <div class="text-xs text-text-secondary">
+            Dumps each database with pg_dump while the container runs. Use this instead of copying the
+            data folder, which can give a backup that does not restore.
+          </div>
+        </div>
+
+        <template v-if="pgMode">
+          <div v-if="targetType === 'stack'" class="flex flex-col gap-1">
+            <label :for="`${uid}-pg-service`" class="text-xs text-text-secondary">Service</label>
+            <select :id="`${uid}-pg-service`" v-model="pgService" class="form-input compact">
+              <option v-if="!stackServices.length" value="" disabled>No running services found</option>
+              <option v-for="svc in stackServices" :key="svc.service" :value="svc.service">
+                {{ svc.service }} ({{ svc.image }})
+              </option>
+            </select>
+          </div>
+
+          <div class="flex flex-col gap-1">
+            <label :for="`${uid}-pg-credentials`" class="text-xs text-text-secondary">Login</label>
+            <select :id="`${uid}-pg-credentials`" v-model="pgCredentials" class="form-input compact">
+              <option value="env">From the container's environment</option>
+              <option value="custom">Custom user and password</option>
+            </select>
+            <div v-if="pgCredentials === 'env'" class="text-xs text-text-secondary">
+              Every run reads POSTGRES_USER<template v-if="pgInfo"> ({{ pgInfo.env_user }})</template> and
+              POSTGRES_PASSWORD from the container. Nothing is saved.
+              <template v-if="pgInfo && !pgInfo.has_env_password">
+                This container sets no POSTGRES_PASSWORD, so the dump connects without one. That works when
+                the image trusts connections from inside the container, as the official image does.
+              </template>
+            </div>
+          </div>
+
+          <div v-if="pgCredentials === 'custom'" class="flex flex-col gap-1">
+            <div class="flex gap-3">
+              <div class="flex-1 flex flex-col gap-1">
+                <label :for="`${uid}-pg-user`" class="text-xs text-text-secondary">User</label>
+                <input
+                  :id="`${uid}-pg-user`"
+                  v-model="pgUser"
+                  class="form-input compact"
+                  autocomplete="off"
+                  placeholder="postgres"
+                />
+              </div>
+              <div class="flex-1 flex flex-col gap-1">
+                <label :for="`${uid}-pg-password`" class="text-xs text-text-secondary">Password</label>
+                <input
+                  :id="`${uid}-pg-password`"
+                  v-model="pgPassword"
+                  type="password"
+                  class="form-input compact"
+                  autocomplete="new-password"
+                  :placeholder="pgPasswordSet ? 'Saved. Leave empty to keep it.' : ''"
+                />
+              </div>
+            </div>
+            <div class="text-xs text-text-secondary">
+              The password is saved in the plugin database on the flash drive, and is never shown again.
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-text-secondary">Databases</label>
+              <button
+                class="nav-btn"
+                :class="{ 'opacity-50 cursor-not-allowed': !pgCanLoad }"
+                :disabled="!pgCanLoad"
+                @click="loadDatabases"
+              >
+                {{ pgLoading ? 'Loading...' : 'Load databases' }}
+              </button>
+              <button v-if="pgDatabaseOptions.length > 1" class="nav-btn" @click="toggleAllDatabases">
+                {{ pgAllSelected ? 'Select none' : 'Select all' }}
+              </button>
+            </div>
+            <div v-if="pgLoadError" class="text-xs text-error">{{ pgLoadError }}</div>
+            <div v-else-if="pgLoaded" class="text-xs text-text-secondary">
+              Connected. Found {{ pgDatabaseOptions.length }} database{{ pgDatabaseOptions.length === 1 ? '' : 's' }}.
+            </div>
+            <div v-if="pgDatabaseOptions.length" class="flex flex-col gap-1 p-2 rounded border border-border">
+              <div v-for="db in pgDatabaseOptions" :key="db" class="flex items-center gap-2">
+                <input
+                  :id="`${uid}-pg-db-${db}`"
+                  v-model="pgDatabases"
+                  type="checkbox"
+                  class="cursor-pointer"
+                  :value="db"
+                />
+                <label :for="`${uid}-pg-db-${db}`" class="text-sm text-text cursor-pointer">{{ db }}</label>
+              </div>
+            </div>
+            <div v-else-if="!pgLoaded && !pgLoadError" class="text-xs text-text-secondary">
+              Load the list to pick databases. The container must be running.
+            </div>
+          </div>
+        </template>
+
+        <template v-else-if="targetType === 'container'">
           <div class="flex flex-col gap-2">
             <label class="text-xs text-text-secondary">Paths to back up (container paths)</label>
             <div v-if="containerMounts.length" class="text-xs text-text-secondary">
               Available mounts: {{ containerMounts.map(m => m.Destination).join(', ') }}
             </div>
-            <div v-for="(path, idx) in backupPaths" :key="idx" class="flex items-center gap-2">
-              <input
-                :value="path"
-                class="form-input compact mono"
+            <div v-for="(path, idx) in backupPaths" :key="idx" class="flex items-start gap-2">
+              <PathSuggestInput
+                class="flex-1 min-w-0"
+                :model-value="path"
+                scope="container"
+                :container="targetId"
+                :seed="mountPaths"
                 placeholder="/config"
-                @input="backupPaths[idx] = ($event.target as HTMLInputElement).value"
+                @update:model-value="backupPaths[idx] = $event"
+                @sqlite="onSqlite"
               />
               <button
                 class="icon-btn shrink-0 text-text-secondary hover:text-error"
@@ -72,12 +192,20 @@
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
             </div>
-            <div v-for="(p, pi) in svc.patterns" :key="pi" class="flex items-center gap-2 ml-4">
-              <input
-                :value="p"
-                class="form-input compact mono"
+            <div v-for="(p, pi) in svc.patterns" :key="pi" class="flex items-start gap-2 ml-4">
+              <!-- The frontend holds no mount data for a stack, so there is no
+                   seed here. The endpoint reads the service's own mounts, and
+                   it needs the project because a compose container is named
+                   "<project>-<service>-1". -->
+              <PathSuggestInput
+                class="flex-1 min-w-0"
+                :model-value="p"
+                scope="container"
+                :container="svc.service"
+                :project="targetId"
                 placeholder="/data"
-                @input="svc.patterns[pi] = ($event.target as HTMLInputElement).value"
+                @update:model-value="svc.patterns[pi] = $event"
+                @sqlite="onSqlite"
               />
               <button
                 class="icon-btn shrink-0 text-text-secondary hover:text-error"
@@ -99,13 +227,34 @@
           </div>
         </template>
 
+        <div v-if="!pgMode" class="flex flex-col gap-1">
+          <label :for="`${uid}-quiesce`" class="text-xs text-text-secondary">While the backup runs</label>
+          <select
+            :id="`${uid}-quiesce`"
+            v-model="backupQuiesce"
+            class="form-input compact"
+            @change="quiesceTouched = true"
+          >
+            <option v-for="mode in QUIESCE_MODES" :key="mode" :value="mode">{{ QUIESCE_LABELS[mode] }}</option>
+          </select>
+          <div class="text-xs text-text-secondary">{{ QUIESCE_HELP[backupQuiesce] }}</div>
+          <div v-if="autoPaused" class="text-xs text-text-secondary">
+            A database file sits in one of these folders, so this was set to Pause. Change it back if
+            the container does not write to that database.
+          </div>
+          <div v-if="sqliteWarning" class="text-xs text-warning">
+            A database file sits in one of these folders. Copying it while the container writes to it
+            can produce a backup that does not restore.
+          </div>
+        </div>
+
         <div class="flex gap-3">
           <div class="flex-1 flex flex-col gap-1">
             <label :for="`${uid}-destination`" class="text-xs text-text-secondary">Destination (optional)</label>
-            <input
-              :id="`${uid}-destination`"
+            <PathSuggestInput
               v-model="backupDestination"
-              class="form-input compact mono"
+              scope="host"
+              :input-id="`${uid}-destination`"
               :placeholder="settingsStore.backupDestination"
             />
           </div>
@@ -135,8 +284,8 @@
       <button class="nav-btn" @click="$emit('cancel')">Cancel</button>
       <button
         class="nav-btn active"
-        :class="{ 'opacity-50 cursor-not-allowed': saving }"
-        :disabled="saving"
+        :class="{ 'opacity-50 cursor-not-allowed': saving || saveBlocked }"
+        :disabled="saving || saveBlocked"
         @click="save"
       >
         {{ saving ? 'Saving...' : (editId ? 'Update' : 'Create') }}
@@ -146,13 +295,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, useId } from 'vue';
+import { ref, reactive, computed, watch, onMounted, useId } from 'vue';
 import CronInput from './CronInput.vue';
+import PathSuggestInput from '@/components/PathSuggestInput.vue';
 import { useScheduleStore } from '@/stores/schedules';
 import { useSettingsStore } from '@/stores/settings';
 import { useDockerStore } from '@/stores/docker';
-import type { ScheduleAction, BackupServiceConfig, TargetType } from '@/types/schedule';
-import { SCHEDULE_ACTION_LABELS } from '@/types/schedule';
+import { useBackend } from '@/backends';
+import { isPostgresImage } from '@/utils/postgres';
+import { composeProjectOf } from '@/utils/updateUnits';
+import type {
+  ScheduleAction,
+  BackupServiceConfig,
+  TargetType,
+  QuiesceMode,
+  PostgresInfo,
+  PostgresCredentials,
+  PostgresTarget,
+} from '@/types/schedule';
+import { SCHEDULE_ACTION_LABELS, QUIESCE_MODES, QUIESCE_LABELS, QUIESCE_HELP, CRON_PRESETS } from '@/types/schedule';
 import type { ContainerMount } from '@/stores/docker';
 
 interface Props {
@@ -189,6 +350,213 @@ const backupServices = ref<{ service: string; patterns: string[] }[]>([{ service
 const backupDestination = ref('');
 const backupRetention = ref<number | null>(null);
 
+// Nothing is paused without a reason, so a new schedule starts on 'none'. It
+// moves itself to 'pause' the first time a chosen folder turns out to hold a
+// database, and says so. A saved schedule is never moved.
+const backupQuiesce = ref<QuiesceMode>('none');
+const quiesceTouched = ref(false);
+const sqliteSeen = ref(false);
+
+// Set only by a genuine edit — CronInput re-detects its preset from a
+// programmatic change to `modelValue` without re-emitting, so this stays
+// false when the 'update' watcher below sets the hourly default itself.
+const cronTouched = ref(false);
+
+function onCronInput(value: string) {
+  cronTouched.value = true;
+  form.cron_expression = value;
+}
+
+// A new schedule defaults to a daily backup time, which makes no sense for an
+// hourly update check. Picking 'update' moves it to the hourly preset, and
+// leaving 'update' puts the earlier time back, so a backup chosen after a look
+// at Update does not save as hourly. Only while the user has not set their own
+// cron, and never on a saved schedule being edited (seed() set its cron).
+let cronBeforeUpdate: string | null = null;
+watch(() => form.action, (action, previous) => {
+  if (props.editId || cronTouched.value) return;
+  const hourly = CRON_PRESETS.every_hour.expression;
+  if (action === 'update' && hourly) {
+    cronBeforeUpdate = form.cron_expression;
+    form.cron_expression = hourly;
+  } else if (previous === 'update' && cronBeforeUpdate !== null) {
+    form.cron_expression = cronBeforeUpdate;
+    cronBeforeUpdate = null;
+  }
+});
+
+// Postgres mode. The image name is a quick hint; the server's answer, from
+// the container's env, replaces it once it arrives.
+const pgMode = ref(false);
+const pgModeTouched = ref(false);
+const pgInfo = ref<PostgresInfo | null>(null);
+const pgService = ref('');
+const pgCredentials = ref<PostgresCredentials>('env');
+const pgUser = ref('');
+const pgPassword = ref('');
+const pgPasswordSet = ref(false);
+const pgDatabases = ref<string[]>([]);
+const pgLoadedDatabases = ref<string[]>([]);
+const pgLoading = ref(false);
+const pgLoaded = ref(false);
+const pgLoadError = ref('');
+
+/** The services of this stack, from the compose labels on its containers. */
+const stackServices = computed(() => {
+  if (props.targetType !== 'stack') return [];
+  const seen = new Map<string, string>();
+  for (const c of dockerStore.containers) {
+    const labels = c.labels ?? {};
+    const service = labels['com.docker.compose.service'];
+    if (composeProjectOf(c) === props.targetId && service && !seen.has(service)) {
+      seen.set(service, c.image);
+    }
+  }
+  return [...seen].map(([service, image]) => ({ service, image })).sort((a, b) => a.service.localeCompare(b.service));
+});
+
+const pgImage = computed(() => {
+  if (props.targetType === 'stack') return stackServices.value.find(s => s.service === pgService.value)?.image;
+  return dockerStore.containers.find(c => c.name === props.targetId)?.image;
+});
+
+const pgTarget = computed<PostgresTarget>(() => ({
+  target_type: props.targetType,
+  target_id: props.targetId,
+  ...(props.targetType === 'stack' ? { service: pgService.value } : {}),
+}));
+
+const pgDetected = computed(() => (pgInfo.value ? pgInfo.value.is_postgres : isPostgresImage(pgImage.value)));
+const pgCanLoad = computed(
+  () =>
+    !pgLoading.value &&
+    (props.targetType === 'container' || pgService.value !== '') &&
+    (pgCredentials.value === 'env' || pgUser.value.trim() !== ''),
+);
+// Saved choices stay listed before the live list loads, and after it if a
+// database was dropped, so unticking one is always possible.
+const pgDatabaseOptions = computed(() => {
+  const all = [...pgLoadedDatabases.value];
+  for (const db of pgDatabases.value) if (!all.includes(db)) all.push(db);
+  return all;
+});
+const pgAllSelected = computed(
+  () => pgDatabaseOptions.value.length > 0 && pgDatabaseOptions.value.every(db => pgDatabases.value.includes(db)),
+);
+const saveBlocked = computed(() => form.action === 'backup' && pgMode.value && pgDatabases.value.length === 0);
+
+function toggleAllDatabases() {
+  pgDatabases.value = pgAllSelected.value ? [] : [...pgDatabaseOptions.value];
+}
+
+async function loadDatabases() {
+  pgLoading.value = true;
+  pgLoadError.value = '';
+  pgLoaded.value = false;
+  try {
+    const custom = pgCredentials.value === 'custom';
+    const { ok, data, error } = await useBackend().schedules.postgresDatabases({
+      ...pgTarget.value,
+      credentials: pgCredentials.value,
+      ...(custom ? { user: pgUser.value.trim(), password: pgPassword.value } : {}),
+      schedule_id: props.editId ?? undefined,
+    });
+    if (!ok || !data.success) {
+      pgLoadError.value =
+        data.message || (typeof data.error === 'string' ? data.error : '') || error || 'Could not list the databases';
+      return;
+    }
+    pgLoadedDatabases.value = data.databases ?? [];
+    pgLoaded.value = true;
+    // A new schedule with nothing picked yet starts with every database.
+    if (!props.editId && pgDatabases.value.length === 0) {
+      pgDatabases.value = [...pgLoadedDatabases.value];
+    }
+  } finally {
+    pgLoading.value = false;
+  }
+}
+
+/** Only a new schedule takes a default. A saved one already says what it wants. */
+function applyDefaultMode(detected: boolean) {
+  if (!props.editId && !pgModeTouched.value) pgMode.value = detected;
+}
+
+async function fetchPostgresInfo() {
+  pgInfo.value = null;
+  // The question costs the server a container lookup, and only a backup uses the answer.
+  if (form.action !== 'backup') return;
+  if (props.targetType === 'stack' && !pgService.value) return;
+  const target = pgTarget.value;
+  try {
+    const { ok, data } = await useBackend().schedules.postgresInfo(target);
+    // A later service pick may have replaced this request.
+    if (!ok || typeof data.is_postgres !== 'boolean' || target.service !== pgTarget.value.service) return;
+    pgInfo.value = data as PostgresInfo;
+  } catch {
+    return;
+  }
+  // Only a new schedule takes the default. A saved one already says what it wants.
+  applyDefaultMode(pgInfo.value.is_postgres);
+}
+
+// A different service is a different database server: its list and its
+// detection start over.
+/** A new stack schedule starts on the service whose image looks like Postgres. */
+function pickDefaultService() {
+  if (pgService.value || !stackServices.value.length) return;
+  const likely = stackServices.value.find(s => isPostgresImage(s.image)) ?? stackServices.value[0];
+  pgService.value = likely.service;
+}
+
+// The container list can arrive after the form opens. Pick then, and detect.
+watch(stackServices, () => {
+  if (pgService.value) return;
+  pickDefaultService();
+  if (!pgService.value) return;
+  applyDefaultMode(isPostgresImage(pgImage.value));
+  fetchPostgresInfo();
+});
+
+// A form opened on another action asks once it turns into a backup.
+watch(() => form.action, (action) => {
+  if (action === 'backup' && !pgInfo.value) fetchPostgresInfo();
+});
+
+// The first value, from seed() or the default pick, is not a change.
+watch(pgService, (service, previous) => {
+  if (previous === '' || service === previous) return;
+  pgLoadedDatabases.value = [];
+  pgLoaded.value = false;
+  pgLoadError.value = '';
+  pgDatabases.value = [];
+  fetchPostgresInfo();
+});
+
+const mountPaths = computed(() => containerMounts.value.map(m => m.Destination));
+const sqliteWarning = computed(() => sqliteSeen.value && backupQuiesce.value === 'none');
+
+// The state onSqlite() left behind, not a second copy of it. Picking a mode by
+// hand clears the line, because the mode is then the user's and not ours.
+const autoPaused = computed(
+  () => sqliteSeen.value && !quiesceTouched.value && backupQuiesce.value === 'pause',
+);
+
+function onSqlite(present: boolean) {
+  if (!present) return;
+
+  // Sticky: the listing that found the database is usually not the one on
+  // screen when the user reads the message.
+  sqliteSeen.value = true;
+
+  // Only ever a suggestion, and only once. Choosing 'none' by hand with a
+  // database present is a decision, not an oversight, so it is left alone and
+  // the warning below carries the risk instead.
+  if (quiesceTouched.value || backupQuiesce.value !== 'none') return;
+
+  backupQuiesce.value = 'pause';
+}
+
 function seed() {
   if (!props.editId) return;
 
@@ -203,8 +571,20 @@ function seed() {
   if (!schedule.backup_config) return;
 
   const config = schedule.backup_config;
+  if (config.mode === 'postgres' && config.postgres) {
+    pgMode.value = true;
+    pgModeTouched.value = true;
+    pgService.value = config.postgres.service ?? '';
+    pgCredentials.value = config.postgres.credentials === 'custom' ? 'custom' : 'env';
+    pgUser.value = config.postgres.user ?? '';
+    pgPasswordSet.value = Boolean(config.postgres.password_set);
+    pgDatabases.value = [...config.postgres.databases];
+  }
   backupDestination.value = config.destination || '';
   backupRetention.value = config.retention_count || null;
+  backupQuiesce.value = config.quiesce || 'none';
+  // A saved schedule already states what it wants, including 'none'.
+  quiesceTouched.value = true;
 
   if (props.targetType === 'container' && Array.isArray(config.paths)) {
     backupPaths.value = (config.paths as string[]).length ? [...config.paths as string[]] : [''];
@@ -236,7 +616,36 @@ async function save() {
   if (form.action === 'backup') {
     const config: Record<string, unknown> = {};
 
-    if (props.targetType === 'container') {
+    if (pgMode.value) {
+      if (props.targetType === 'stack' && !pgService.value) {
+        formError.value = 'Pick the service that runs Postgres';
+        return;
+      }
+      const custom = pgCredentials.value === 'custom';
+      const user = pgUser.value.trim();
+      if (custom && !user) {
+        formError.value = 'Postgres user is required';
+        return;
+      }
+      if (custom && !pgPassword.value && !pgPasswordSet.value) {
+        formError.value = 'Postgres password is required';
+        return;
+      }
+      if (!pgDatabases.value.length) {
+        formError.value = 'Pick at least one database';
+        return;
+      }
+      config.mode = 'postgres';
+      config.paths = [];
+      config.postgres = {
+        ...(props.targetType === 'stack' ? { service: pgService.value } : {}),
+        credentials: pgCredentials.value,
+        // Empty on an edit keeps the saved password.
+        ...(custom ? { user, password: pgPassword.value } : {}),
+        // In the order the server listed them, so dump files number the same way each run.
+        databases: pgDatabaseOptions.value.filter(db => pgDatabases.value.includes(db)),
+      };
+    } else if (props.targetType === 'container') {
       const paths = backupPaths.value.filter(p => p.trim());
       if (!paths.length) {
         formError.value = 'At least one backup path is required';
@@ -260,6 +669,7 @@ async function save() {
     if (backupRetention.value && backupRetention.value > 0) {
       config.retention_count = backupRetention.value;
     }
+    if (!pgMode.value) config.quiesce = backupQuiesce.value;
 
     data.backup_config = config;
   }
@@ -291,7 +701,12 @@ onMounted(() => {
   if (props.targetType === 'container') {
     const container = dockerStore.containers.find(c => c.name === props.targetId);
     containerMounts.value = container?.mounts || [];
+  } else {
+    pickDefaultService();
   }
+
+  applyDefaultMode(isPostgresImage(pgImage.value));
+  fetchPostgresInfo();
 
   if (!settingsStore.loaded) {
     settingsStore.fetchSettings();
