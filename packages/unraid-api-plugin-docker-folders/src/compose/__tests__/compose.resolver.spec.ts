@@ -100,6 +100,7 @@ const testPaths: ComposePathsConfig = {
     binaryPath: '/usr/lib/docker/cli-plugins/docker-compose',
     binaryVersion: '2.32.4',
     binarySha256: 'deadbeef',
+    cachePath: '/boot/config/plugins/unraid-docker-folders-modern/docker-compose',
 };
 
 describe('ComposeResolver', () => {
