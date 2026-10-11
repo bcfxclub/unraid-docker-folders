@@ -150,7 +150,6 @@ if (file_exists($changelogPath)) {
 
 .info-box {
   background: color-mix(in srgb, var(--text-color, #1a1a1a) 5%, transparent);
-  border-left: 4px solid #4caf50;
   padding: 15px;
   margin-bottom: 20px;
   border-radius: 4px;
@@ -190,7 +189,6 @@ if (file_exists($changelogPath)) {
 
 .settings-section {
   background: color-mix(in srgb, var(--text-color, #1a1a1a) 5%, transparent);
-  border-left: 4px solid #4caf50;
   padding: 15px;
   margin-bottom: 20px;
   border-radius: 4px;
@@ -203,12 +201,6 @@ if (file_exists($changelogPath)) {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-/* The backend section carries a warning, so it drops the green accent bar
-   that marks the other sections. */
-.settings-section.backend-section {
-  border-left: none;
 }
 
 .unstable-tag {
@@ -938,7 +930,7 @@ if (file_exists($changelogPath)) {
   <!-- Which backend the Vue app talks to. PHP is the default and always works;
        GraphQL needs the companion Unraid API plugin, and is marked unstable
        while it is tested. -->
-  <div class="settings-section backend-section">
+  <div class="settings-section">
     <h3>Backend <span class="unstable-tag">Unstable</span></h3>
 
     <div class="setting-row">
