@@ -14,6 +14,7 @@ describe('aggregateStats', () => {
   it('sums CPU and divides by the host core count, not the member count', () => {
     const r = aggregateStats([stats({ cpuPercent: 200 }), stats({ cpuPercent: 0 }), stats({ cpuPercent: 0 })]);
     expect(r?.cpuPercent).toBe(50);
+    expect(r?.cpuSum).toBe(200);
     expect(r?.count).toBe(3);
   });
 

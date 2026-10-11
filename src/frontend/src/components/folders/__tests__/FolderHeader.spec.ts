@@ -305,7 +305,7 @@ describe('FolderHeader', () => {
     const entry = (cpuPercent: number, memoryUsage: number) =>
       makeContainerStats({ cpuPercent, memoryUsage, memoryLimit: 32 * GB, hostCpus: 8, hostMemory: 32 * GB });
 
-    it('shows the members as a share of the host, not their average', () => {
+    it('adds up the members instead of averaging them', () => {
       const docker = useDockerStore();
       docker.containers = [makeContainer({ id: 'a', name: 'a' }), makeContainer({ id: 'b', name: 'b' })];
       useStatsStore().stats = { a: entry(400, 4 * GB), b: entry(0, 4 * GB) };
@@ -315,12 +315,13 @@ describe('FolderHeader', () => {
         containers: [{ container_name: 'a' }, { container_name: 'b' }] as unknown as Folder['containers'],
       });
 
-      // CPU: 400% of one core over 8 cores. Memory: 8 GB of 32 GB. An average
-      // would have shown 200% CPU and 12.5% memory.
+      // CPU: 400% + 0%, on the rows' one-core scale, not 400% over 8 host
+      // cores. Memory: 8 GB of 32 GB. An average would have shown 200% CPU.
       const text = wrapper.text();
-      expect(text).toContain('50.0%');
+      expect(text).toContain('400.0%');
       expect(text).toContain('25.0%');
       expect(text).not.toContain('200.0%');
+      expect(text).not.toContain('50.0%');
     });
   });
 });

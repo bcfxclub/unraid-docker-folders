@@ -431,8 +431,10 @@ const containerIcons = computed(() => {
   return icons;
 });
 
-// Measured against the host, not averaged over members: an average hides one
-// busy container among idle ones. See aggregateStats.
+// The members added up, not averaged: an average hides one busy container
+// among idle ones. CPU is on the container rows' scale, 100% per core, so a
+// container at 100% never shrinks to a sliver of the host here. See
+// aggregateStats.
 const folderStats = computed(() => {
   const list: ContainerStats[] = [];
   for (const assoc of props.folder.containers) {
@@ -442,6 +444,6 @@ const folderStats = computed(() => {
     if (s) list.push(s);
   }
   const total = aggregateStats(list);
-  return total && { cpuPercent: total.cpuPercent, memPercent: total.memPercent };
+  return total && { cpuPercent: total.cpuSum, memPercent: total.memPercent };
 });
 </script>
