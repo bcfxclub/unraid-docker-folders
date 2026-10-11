@@ -16,7 +16,12 @@
 # line. Without ANTHROPIC_API_KEY, or when the call fails, it sorts by the
 # conventional commit prefix instead, so a release never fails on the notes.
 #
-# JSON shape: {"new": [..], "improved": [..], "fixed": [..], "internal": N}
+# Each item carries the pull request and issue numbers its commits name, and
+# the notes print them after the item: "... (#18)". Only numbers that appear
+# in the commit messages are kept, so the model cannot add one.
+#
+# JSON shape: {"new": [Item], "improved": [Item], "fixed": [Item], "internal": N}
+#   Item: {"text": "One sentence.", "refs": [18, 7]}
 
 set -euo pipefail
 
@@ -55,7 +60,14 @@ commit_log() {
   done
 }
 
+# Every "#123" in the commit messages, as a JSON array of numbers. A ref the
+# model returns that is not in this list is dropped.
+known_refs() {
+  { grep -oE '#[0-9]+' <<<"$1" || true; } | tr -d '#' | sort -un | jq -s -c '.'
+}
+
 # Sort by the conventional commit prefix. Used when Claude is not available.
+# A "(#18)" in a subject becomes the item's ref.
 fallback_notes() {
   local range="$1"
   git log "$range" --no-merges --format='%s' \
@@ -64,10 +76,14 @@ fallback_notes() {
         split("\n") | map(select(length > 0)) as $subjects
         | def strip: sub("^[a-z]+(\\([^)]*\\))?!?: *"; "")
                      | (.[0:1] | ascii_upcase) + .[1:];
+          def item: {
+            text: (strip | gsub(" *\\(#[0-9]+\\)"; "")),
+            refs: ([scan("#([0-9]+)")[0] | tonumber] | unique)
+          };
         {
-          new:      [$subjects[] | select(test("^feat(\\(|!|:)")) | strip],
+          new:      [$subjects[] | select(test("^feat(\\(|!|:)")) | item],
           improved: [],
-          fixed:    [$subjects[] | select(test("^fix(\\(|!|:)")) | strip],
+          fixed:    [$subjects[] | select(test("^fix(\\(|!|:)")) | item],
           internal: ([$subjects[] | select(test("^(feat|fix)(\\(|!|:)") | not)] | length)
         }'
 }
@@ -99,8 +115,11 @@ Rules:
 - Write each item as one short sentence in plain English, in the present
   tense, from the user's side: "Backup schedules can dump each Postgres
   database to its own archive." Name the screen or setting where it helps.
-- Say only what the commits say. Do not invent details, numbers or issue
-  numbers.
+- Say only what the commits say. Do not invent details or numbers.
+- refs: the pull request and issue numbers that the commits behind an item
+  name, such as "(#18)" in a squash merge subject, "Merge pull request #5",
+  "Fixes #12" or "from #18". Give the number only. Use an empty list when the
+  commits name none. Never put a number in text, only in refs.
 - No code identifiers, file paths, commit prefixes or hashes, unless the user
   types or sees that text (a setting name, a command).
 - An empty list is fine. Do not move an internal change into a list to fill it.
@@ -120,7 +139,16 @@ cmd_generate() {
     return
   fi
 
-  request=$(jq -n --arg model "$MODEL" --arg system "$SYSTEM_PROMPT" --arg log "$log" '{
+  request=$(jq -n --arg model "$MODEL" --arg system "$SYSTEM_PROMPT" --arg log "$log" '
+  {
+    type: "object",
+    properties: {
+      text: {type: "string"},
+      refs: {type: "array", items: {type: "integer"}}
+    },
+    required: ["text", "refs"],
+    additionalProperties: false
+  } as $item | {
     model: $model,
     max_tokens: 16000,
     fallbacks: "default",
@@ -131,9 +159,9 @@ cmd_generate() {
         schema: {
           type: "object",
           properties: {
-            new:      {type: "array", items: {type: "string"}},
-            improved: {type: "array", items: {type: "string"}},
-            fixed:    {type: "array", items: {type: "string"}},
+            new:      {type: "array", items: $item},
+            improved: {type: "array", items: $item},
+            fixed:    {type: "array", items: $item},
             internal: {type: "integer"}
           },
           required: ["new", "improved", "fixed", "internal"],
@@ -159,8 +187,10 @@ cmd_generate() {
         -d "$request") \
      && [ "$(jq -r '.stop_reason' <<<"$response")" = "end_turn" ] \
      && notes=$(jq -r '[.content[] | select(.type == "text") | .text] | join("")' <<<"$response" \
-                | jq -c 'select((.new|type) == "array" and (.improved|type) == "array"
-                                and (.fixed|type) == "array" and (.internal|type) == "number")') \
+                | jq -c --argjson known "$(known_refs "$log")" '
+                    select((.new|type) == "array" and (.improved|type) == "array"
+                           and (.fixed|type) == "array" and (.internal|type) == "number")
+                    | (.new, .improved, .fixed) |= map(.refs |= (map(select(IN($known[]))) | unique))') \
      && [ -n "$notes" ]; then
     echo "$notes"
   else
@@ -173,7 +203,11 @@ cmd_generate() {
 cmd_render() {
   local format="$1" file="$2"
   jq -r --arg format "$format" '
-    def items($prefix): .[] | "- " + $prefix + .;
+    # A ref the text already names ("from #18") is not repeated.
+    def with_refs: .text as $t
+      | [.refs[] | "#" + tostring | . as $ref | select(($t | test($ref + "(?![0-9])")) | not)] as $r
+      | $t + (if ($r | length) > 0 then " (" + ($r | join(", ")) + ")" else "" end);
+    def items($prefix): .[] | "- " + $prefix + with_refs;
     def internal_line: if .internal > 0 then "- Internal fixes and performance improvements." else empty end;
     def section($title; $list): if ($list | length) > 0 then "### " + $title, ($list | items("")), "" else empty end;
     if $format == "changelog" or $format == "github" then

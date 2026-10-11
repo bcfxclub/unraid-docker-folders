@@ -104,7 +104,10 @@ the commits into New, Improved and Fixed, and puts work a user never sees on
 one "Internal fixes and performance improvements" line. Without the key, or
 when the call fails, `feat` commits go to New, `fix` commits to Fixed, and the
 rest to that internal line. A commit message that names a GitHub issue
-(`#123`) marks a fix as user reported, so it is always listed. To preview the
+(`#123`) marks a fix as user reported, so it is always listed. Each item ends with the
+pull request and issue numbers its commits name, for example "(#18)". The
+script keeps only numbers that appear in the commit messages, so a squash
+merge subject or a "Fixes #12" line is what puts a number in the notes. To preview the
 notes, run `build/release-notes.sh generate "$(build/release-notes.sh range)" > /tmp/n.json`,
 then `build/release-notes.sh render changelog /tmp/n.json`.
 
