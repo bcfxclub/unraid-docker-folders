@@ -21,7 +21,18 @@ $log('Starting compose autostart check');
 try {
   $manager = new ComposeManager();
 
-  if (!$manager->isComposeAvailable()) {
+  // Docker's CLI plugin directory is RAM, so after a reboot compose is gone.
+  // With the "reinstall after reboot" option on, restore it before starting stacks.
+  $ensured = $manager->ensureComposeBinary();
+  if ($ensured['action'] === 'restored') {
+    $log('docker compose restored from the flash copy');
+  } elseif ($ensured['action'] === 'installed') {
+    $log('docker compose downloaded and installed');
+  } elseif ($ensured['action'] === 'failed') {
+    $log('docker compose install failed: ' . $ensured['error']);
+  }
+
+  if (!$ensured['available']) {
     $log('docker compose not available, skipping');
     exit(0);
   }

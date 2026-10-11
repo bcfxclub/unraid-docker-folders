@@ -11,6 +11,7 @@ require_once dirname(__DIR__) . '/include/config.php';
 require_once dirname(__DIR__) . '/include/auth.php';
 require_once dirname(__DIR__) . '/classes/Database.php';
 require_once dirname(__DIR__) . '/classes/CronManager.php';
+require_once dirname(__DIR__) . '/classes/ComposeManager.php';
 
 header('Content-Type: application/json');
 
@@ -107,6 +108,7 @@ function handlePost()
     'log_refresh_interval',
     'stats_refresh_interval',
     'compose_export_dir',
+    'compose_auto_install',
     'backup_destination',
     'default_retention_count',
     'sort_mode', 'sort_folders',
@@ -196,6 +198,18 @@ function handlePost()
   }
 
   dfmUpsertSetting($db, $key, $value);
+
+  // Keep the flash copy of the compose binary in step with the option: take a
+  // copy when it is switched on and compose is already installed, drop it
+  // when it is switched off.
+  if ($key === 'compose_auto_install') {
+    $composeManager = new ComposeManager();
+    if ($value === '1') {
+      $composeManager->cacheComposeBinary();
+    } else {
+      $composeManager->removeCachedComposeBinary();
+    }
+  }
 
   // When update_check_schedule changes, update or remove the cron file
   if ($key === 'update_check_schedule') {

@@ -17,6 +17,12 @@ class ComposeManager
   /** Where docker compose CLI plugin binary lives */
   const COMPOSE_BINARY_PATH = '/usr/lib/docker/cli-plugins/docker-compose';
 
+  /**
+   * Flash copy of the verified binary. /usr/lib is RAM, so the binary is gone
+   * after every reboot; this copy lets boot restore it without a download.
+   */
+  const COMPOSE_CACHE_PATH = CONFIG_DIR . '/docker-compose';
+
   /** Version of Docker Compose to install when missing */
   const COMPOSE_VERSION = '2.32.4';
 
@@ -150,7 +156,111 @@ class ComposeManager
     @chmod(self::COMPOSE_BINARY_PATH, 0755);
     $this->composeAvailable = null;
 
+    if ($this->isAutoInstallEnabled()) {
+      $this->cacheComposeBinary();
+    }
+
     return ['success' => true, 'error' => null];
+  }
+
+  // ─── Reinstall after reboot ────────────────────────────────────────
+
+  /**
+   * Whether the user asked for compose to be put back whenever Docker starts
+   */
+  public function isAutoInstallEnabled()
+  {
+    $row = $this->db->fetchOne("SELECT value FROM settings WHERE key = 'compose_auto_install'");
+    return $row && $row['value'] === '1';
+  }
+
+  /**
+   * Copy a verified binary to flash so a reboot can restore it offline.
+   * The copy is only made when it matches the pinned SHA256.
+   *
+   * @return bool true when the flash copy is in place
+   */
+  public function cacheComposeBinary($source = self::COMPOSE_BINARY_PATH, $dest = self::COMPOSE_CACHE_PATH, $sha = self::COMPOSE_SHA256)
+  {
+    if (!is_file($source) || hash_file('sha256', $source) !== $sha) {
+      return false;
+    }
+    if (is_file($dest) && hash_file('sha256', $dest) === $sha) {
+      return true;
+    }
+    $tmp = $dest . '.tmp';
+    if (!@copy($source, $tmp)) {
+      @unlink($tmp);
+      return false;
+    }
+    @chmod($tmp, 0755);
+    if (!@rename($tmp, $dest)) {
+      @unlink($tmp);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Remove the flash copy (used when the option is switched off)
+   */
+  public function removeCachedComposeBinary($dest = self::COMPOSE_CACHE_PATH)
+  {
+    if (is_file($dest)) {
+      @unlink($dest);
+    }
+  }
+
+  /**
+   * Put the compose binary back in place from the flash copy.
+   *
+   * @return bool true when the binary was restored
+   */
+  public function restoreComposeBinary($source = self::COMPOSE_CACHE_PATH, $dest = self::COMPOSE_BINARY_PATH, $sha = self::COMPOSE_SHA256)
+  {
+    if (!is_file($source) || hash_file('sha256', $source) !== $sha) {
+      return false;
+    }
+    $dir = dirname($dest);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+      return false;
+    }
+    $tmp = $dest . '.tmp';
+    if (!@copy($source, $tmp)) {
+      @unlink($tmp);
+      return false;
+    }
+    @chmod($tmp, 0755);
+    if (!@rename($tmp, $dest)) {
+      @unlink($tmp);
+      return false;
+    }
+    $this->composeAvailable = null;
+    return true;
+  }
+
+  /**
+   * Make sure docker compose is usable, for the boot hook. Does nothing
+   * unless the compose_auto_install setting is on.
+   *
+   * @return array ['available' => bool, 'action' => present|restored|installed|disabled|failed, 'error' => string|null]
+   */
+  public function ensureComposeBinary()
+  {
+    if ($this->isComposeAvailable()) {
+      return ['available' => true, 'action' => 'present', 'error' => null];
+    }
+    if (!$this->isAutoInstallEnabled()) {
+      return ['available' => false, 'action' => 'disabled', 'error' => null];
+    }
+    if ($this->restoreComposeBinary() && $this->isComposeAvailable()) {
+      return ['available' => true, 'action' => 'restored', 'error' => null];
+    }
+    $result = $this->installComposeBinary();
+    if (!$result['success']) {
+      return ['available' => false, 'action' => 'failed', 'error' => $result['error']];
+    }
+    return ['available' => $this->isComposeAvailable(), 'action' => 'installed', 'error' => null];
   }
 
   // ─── Conflict Detection ────────────────────────────────────────────

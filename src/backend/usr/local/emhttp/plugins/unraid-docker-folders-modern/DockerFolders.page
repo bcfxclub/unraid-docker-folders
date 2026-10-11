@@ -22,6 +22,7 @@ $showLegacyButtons = ($settings['show_legacy_buttons'] ?? '0') === '1';
 $showFolderPorts = ($settings['show_folder_ports'] ?? '1') === '1';
 $showInlineLogs = ($settings['show_inline_logs'] ?? '0') === '1';
 $enableAdopt = ($settings['enable_adopt'] ?? '1') === '1';
+$composeAutoInstall = ($settings['compose_auto_install'] ?? '0') === '1';
 $enableSecurityAdvisor = ($settings['enable_security_advisor'] ?? '1') === '1';
 $logRefreshInterval = $settings['log_refresh_interval'] ?? '10';
 $statsRefreshInterval = $settings['stats_refresh_interval'] ?? '2';
@@ -858,6 +859,22 @@ if (file_exists($changelogPath)) {
         <div id="log-viewer" class="log-viewer">
           <div id="log-content" class="log-content"><?php if ($updateLog): ?><?= htmlspecialchars($updateLog) ?><?php else: ?><span class="log-empty">No log entries yet. Logs appear after the first scheduled or manual update check.</span><?php endif; ?></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compose Runtime -->
+  <div class="settings-section">
+    <h3>Docker Compose</h3>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <label for="compose-auto-install">Reinstall Docker Compose after a reboot</label>
+        <div class="description">Unraid keeps the Docker CLI plugins in RAM, so <code>docker compose</code> disappears at every reboot and compose stacks cannot autostart. When enabled, a verified copy of the Compose binary is kept on the flash drive (about 65 MB) and put back each time Docker starts, before stacks autostart. If no copy exists yet, it is downloaded once. <strong>Default: Off</strong></div>
+      </div>
+      <div class="setting-control">
+        <input type="checkbox" id="compose-auto-install" <?= $composeAutoInstall ? 'checked' : '' ?> onchange="saveSetting('compose_auto_install', this.checked ? '1' : '0')" />
+        <span id="save-status-compose-auto-install" class="save-status">Saved</span>
       </div>
     </div>
   </div>
