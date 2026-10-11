@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.10.11-dev3
+### Fixed
+- The option to reinstall Docker Compose after a reboot now works fully: the settings page shows the server's error when the copy to flash fails instead of always saying "Saved", and the flash copy is removed when the option is off or the plugin is uninstalled.
+
+### Internal
+- Internal fixes and performance improvements.
+
 ## 2026.10.11-dev2
 ### New
 - A new setting can reinstall Docker Compose automatically after a reboot, keeping a verified copy on the flash drive so compose stacks can autostart again.
