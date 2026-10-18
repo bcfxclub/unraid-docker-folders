@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.10.18-dev4
+### Fixed
+- Containers outside folders no longer reshuffle after loading, because every part of the plugin now sorts their names the same way.
+- Loading the container list at the same time from several places no longer fails while the starting order for unfoldered containers is saved.
+
 ## 2026.10.18-dev3
 ### Fixed
 - Containers outside any folder now keep their place in the list instead of jumping around when they start or stop.
