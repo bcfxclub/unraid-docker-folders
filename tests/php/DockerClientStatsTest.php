@@ -287,6 +287,18 @@ final class DockerClientStatsTest extends TestCase
     }
 
     #[Test]
+    public function memoryStats_docker_mode_falls_back_to_inactive_file_when_v1_key_is_not_smaller(): void
+    {
+        $stats = ['memory_stats' => ['usage' => 1000, 'limit' => 2000, 'stats' => [
+            'total_inactive_file' => 1000,
+            'inactive_file' => 100,
+        ]]];
+
+        $result = $this->invoke('calculateMemoryStats', [$stats]);
+        $this->assertSame(900, $result['usage']);
+    }
+
+    #[Test]
     public function memoryStats_docker_mode_keeps_usage_when_cache_is_not_smaller(): void
     {
         $stats = ['memory_stats' => ['usage' => 1000, 'limit' => 2000, 'stats' => ['inactive_file' => 1000]]];

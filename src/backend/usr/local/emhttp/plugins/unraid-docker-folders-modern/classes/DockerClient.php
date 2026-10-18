@@ -28,6 +28,10 @@ class DockerClient
   const SLOW_CACHE_PATH = '/tmp/unraid-docker-slow-stats.json';
   const CPU_SAMPLES_PATH = '/tmp/unraid-docker-stats-cpu.json';
   const SLOW_CACHE_TTL = 60;
+  // The memory_calculation setting, cached so a stats poll does not open
+  // data.db on the flash drive. settings.php deletes it on save.
+  const MEMORY_MODE_CACHE_PATH = '/tmp/unraid-docker-memory-mode';
+  const MEMORY_MODE_CACHE_TTL = 60;
   // Port bindings, privileged, CapAdd and ExposedPorts are all immutable for a
   // given container ID (`docker update` cannot change them; a recreate yields a
   // new ID), so this cache has no TTL — entries are added once on first sight
@@ -68,17 +72,24 @@ class DockerClient
 
   /**
    * The memory_calculation setting, read once per instance so no caller has
-   * to pass it. Anything but 'raw', or a failed read, means 'docker'.
+   * to pass it, and from data.db at most once per MEMORY_MODE_CACHE_TTL.
+   * Anything but 'raw', or a failed read, means 'docker'.
    */
   private function memoryMode()
   {
     if ($this->memoryMode === null) {
-      $mode = null;
-      try {
-        require_once __DIR__ . '/Database.php';
-        $mode = Database::getInstance()->fetchValue('SELECT value FROM settings WHERE key = ?', ['memory_calculation']);
-      } catch (Throwable $e) {
-        // Fall through to the default.
+      $cachedAt = @filemtime(self::MEMORY_MODE_CACHE_PATH);
+      if ($cachedAt !== false && time() - $cachedAt < self::MEMORY_MODE_CACHE_TTL) {
+        $mode = trim((string) @file_get_contents(self::MEMORY_MODE_CACHE_PATH));
+      } else {
+        $mode = null;
+        try {
+          require_once __DIR__ . '/Database.php';
+          $mode = Database::getInstance()->fetchValue('SELECT value FROM settings WHERE key = ?', ['memory_calculation']);
+        } catch (Throwable $e) {
+          // Fall through to the default.
+        }
+        @file_put_contents(self::MEMORY_MODE_CACHE_PATH, $mode === 'raw' ? 'raw' : 'docker');
       }
       $this->memoryMode = $mode === 'raw' ? 'raw' : 'docker';
     }
@@ -2007,9 +2018,10 @@ class DockerClient
     $limit = $memStats['limit'] ?? 1;
 
     if ($this->memoryMode() === 'docker') {
-      // v1 key first, as the CLI checks it.
+      // The v1 key when it is smaller than usage, else the v2 key, as the CLI checks them.
       $counters = $memStats['stats'] ?? [];
-      $inactiveFile = $counters['total_inactive_file'] ?? $counters['inactive_file'] ?? 0;
+      $v1 = $counters['total_inactive_file'] ?? null;
+      $inactiveFile = ($v1 !== null && $v1 < $usage) ? $v1 : ($counters['inactive_file'] ?? 0);
       $usage = self::dockerMemoryUsage($usage, $inactiveFile);
     }
     $percent = $limit > 0 ? round(($usage / $limit) * 100, 2) : 0;

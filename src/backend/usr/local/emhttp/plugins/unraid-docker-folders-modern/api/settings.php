@@ -12,6 +12,7 @@ require_once dirname(__DIR__) . '/include/auth.php';
 require_once dirname(__DIR__) . '/classes/Database.php';
 require_once dirname(__DIR__) . '/classes/CronManager.php';
 require_once dirname(__DIR__) . '/classes/ComposeManager.php';
+require_once dirname(__DIR__) . '/classes/DockerClient.php';
 
 header('Content-Type: application/json');
 
@@ -210,6 +211,11 @@ function handlePost()
   }
 
   dfmUpsertSetting($db, $key, $value);
+
+  // DockerClient caches this one in /tmp. Drop the copy so it applies now.
+  if ($key === 'memory_calculation') {
+    @unlink(DockerClient::MEMORY_MODE_CACHE_PATH);
+  }
 
   // Keep the flash copy of the compose binary in step with the option: take a
   // copy when it is switched on and compose is already installed, drop it

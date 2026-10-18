@@ -702,7 +702,7 @@ if (file_exists($changelogPath)) {
     <div class="setting-row">
       <div class="setting-info">
         <label for="memory-calculation">Memory usage</label>
-        <div class="description">How container memory is counted. Docker CLI subtracts inactive page cache, so it matches <code>docker stats</code>. Raw cgroup counts the page cache too, so it reads higher. Applies to both backends. <strong>Default: Docker CLI</strong></div>
+        <div class="description">How container memory is counted. Docker CLI subtracts inactive page cache, so it matches <code>docker stats</code>. Raw cgroup counts the page cache too, so it reads higher. Applies to both backends; in GraphQL mode a change takes up to a minute. <strong>Default: Docker CLI</strong></div>
       </div>
       <div class="setting-control">
         <select id="memory-calculation" onchange="saveSetting('memory_calculation', this.value)">

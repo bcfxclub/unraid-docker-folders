@@ -135,7 +135,7 @@ describe('calculateMemoryStats', () => {
     });
 
     it('docker mode subtracts v2 inactive_file', () => {
-        const result = calculateMemoryStats({ memory_stats: { usage: 1000, limit: 2000, stats: { inactive_file: 400 } } });
+        const result = calculateMemoryStats({ memory_stats: { usage: 1000, limit: 2000, stats: { inactive_file: 400 } } }, 'docker');
 
         expect(result.usage).toBe(600);
         expect(result.percent).toBe(30.0);
@@ -144,17 +144,23 @@ describe('calculateMemoryStats', () => {
     it('docker mode prefers v1 total_inactive_file', () => {
         const stats = { memory_stats: { usage: 1000, limit: 2000, stats: { total_inactive_file: 300, inactive_file: 100 } } };
 
-        expect(calculateMemoryStats(stats).usage).toBe(700);
+        expect(calculateMemoryStats(stats, 'docker').usage).toBe(700);
+    });
+
+    it('docker mode falls back to inactive_file when the v1 key is not smaller', () => {
+        const stats = { memory_stats: { usage: 1000, limit: 2000, stats: { total_inactive_file: 1000, inactive_file: 100 } } };
+
+        expect(calculateMemoryStats(stats, 'docker').usage).toBe(900);
     });
 
     it('docker mode keeps usage when cache is not smaller', () => {
         const stats = { memory_stats: { usage: 1000, limit: 2000, stats: { inactive_file: 1000 } } };
 
-        expect(calculateMemoryStats(stats).usage).toBe(1000);
+        expect(calculateMemoryStats(stats, 'docker').usage).toBe(1000);
     });
 
     it('docker mode without counters keeps usage', () => {
-        expect(calculateMemoryStats({ memory_stats: { usage: 1000, limit: 2000 } }).usage).toBe(1000);
+        expect(calculateMemoryStats({ memory_stats: { usage: 1000, limit: 2000 } }, 'docker').usage).toBe(1000);
     });
 });
 
@@ -285,7 +291,7 @@ describe('buildContainerStats', () => {
             State: { StartedAt: '2024-01-01T00:00:00Z' },
         };
 
-        const result = buildContainerStats(stats, inspect, 12345, 6789, 16000000000);
+        const result = buildContainerStats(stats, inspect, 12345, 6789, 16000000000, 'raw');
 
         expect(result).toEqual({
             cpuPercent: 80.0,
@@ -307,7 +313,7 @@ describe('buildContainerStats', () => {
     });
 
     it('defaults restartCount and startedAt when inspect is unavailable', () => {
-        const result = buildContainerStats({}, null, 0, 0, 0);
+        const result = buildContainerStats({}, null, 0, 0, 0, 'raw');
 
         expect(result.restartCount).toBe(0);
         expect(result.startedAt).toBe('');

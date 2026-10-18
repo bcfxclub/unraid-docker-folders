@@ -143,6 +143,19 @@ describe('ContainerStatsService (slow, Docker-API path)', () => {
         expect(Number.isNaN(entry?.hostMemory ?? NaN)).toBe(false);
     });
 
+    it('reads memory_calculation from the database once per minute, not on every call', async () => {
+        const read = vi.fn(() => ({ value: 'raw' }));
+        const service = new ContainerStatsService(
+            fakeDocker({ stats: async () => ({ pids_stats: { current: 1 } }) }),
+            { read } as unknown as DatabaseService
+        );
+
+        await service.getStats(['abc']);
+        await service.getStats(['abc']);
+
+        expect(read).toHaveBeenCalledTimes(1);
+    });
+
     it('fetches every id in parallel, independent of one another', async () => {
         const service = newService(
             fakeDocker({

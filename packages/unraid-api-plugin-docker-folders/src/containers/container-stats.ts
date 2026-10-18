@@ -99,7 +99,8 @@ export function dockerMemoryUsage(usage: number, inactiveFile: number): number {
  * `DockerClient::calculateMemoryStats`.
  *
  * `usage` over `limit`. In `docker` mode, `usage` first loses its inactive
- * page cache: the v1 key first, as the Docker CLI checks it.
+ * page cache: `total_inactive_file` (v1) when it is smaller than usage, else
+ * `inactive_file` (v2), as the Docker CLI checks them.
  *
  * `limit` defaults to 1, not 0, when missing — division-by-zero bait if it
  * defaulted to 0 the way `usage` does. An *explicit* 0 limit is left alone
@@ -108,7 +109,7 @@ export function dockerMemoryUsage(usage: number, inactiveFile: number): number {
  */
 export function calculateMemoryStats(
     stats: DockerFoldersRawStats,
-    mode: MemoryCalculationMode = 'docker'
+    mode: MemoryCalculationMode
 ): MemoryStatsResult {
     const memStats = stats.memory_stats ?? {};
     let usage = memStats.usage ?? 0;
@@ -116,7 +117,8 @@ export function calculateMemoryStats(
 
     if (mode === 'docker') {
         const counters = memStats.stats ?? {};
-        usage = dockerMemoryUsage(usage, counters.total_inactive_file ?? counters.inactive_file ?? 0);
+        const v1 = counters.total_inactive_file;
+        usage = dockerMemoryUsage(usage, v1 !== undefined && v1 < usage ? v1 : counters.inactive_file ?? 0);
     }
 
     return { usage, limit, percent: memoryPercent(usage, limit) };
@@ -224,7 +226,7 @@ export function buildContainerStats(
     imageSize: number,
     logSize: number,
     hostMemory: number,
-    memoryMode: MemoryCalculationMode = 'docker'
+    memoryMode: MemoryCalculationMode
 ): DockerFoldersContainerStatsResult {
     const cpu = calculateCpuPercent(stats);
     const mem = calculateMemoryStats(stats, memoryMode);

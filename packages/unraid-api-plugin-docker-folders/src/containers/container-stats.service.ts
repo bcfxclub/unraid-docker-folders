@@ -169,6 +169,11 @@ export class ContainerStatsService {
     /** `DockerClient::SLOW_CACHE_TTL` (60 seconds), in milliseconds. */
     private static readonly SLOW_CACHE_TTL_MS = 60_000;
 
+    /** The last `memory_calculation` read. See `readMemoryMode`. */
+    private memoryMode: { value: MemoryCalculationMode; readAt: number } | null = null;
+
+    private static readonly MEMORY_MODE_TTL_MS = 60_000;
+
     /** One shared reading loop per stream interval. See `statsStream`. */
     private readonly statsLoops = new Map<number, StatsLoop>();
 
@@ -198,8 +203,22 @@ export class ContainerStatsService {
         return this.getStatsFast(ids, layout, sources, cpuSamples, memoryMode);
     }
 
-    /** `memory_calculation`, read every call so a change shows at the next reading. */
+    /**
+     * `memory_calculation`, read from the database at most once per
+     * MEMORY_MODE_TTL_MS. A read on every stats tick would keep reopening the
+     * shared handle, and each idle close checkpoints the WAL on /boot.
+     */
     private readMemoryMode(): MemoryCalculationMode {
+        const now = Date.now();
+        if (this.memoryMode !== null && now - this.memoryMode.readAt < ContainerStatsService.MEMORY_MODE_TTL_MS) {
+            return this.memoryMode.value;
+        }
+        const value = this.queryMemoryMode();
+        this.memoryMode = { value, readAt: now };
+        return value;
+    }
+
+    private queryMemoryMode(): MemoryCalculationMode {
         try {
             const row = this.db.read(
                 (db) =>
