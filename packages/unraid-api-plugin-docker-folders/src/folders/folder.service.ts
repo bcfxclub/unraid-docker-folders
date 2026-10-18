@@ -305,7 +305,8 @@ export class FolderService implements OnModuleInit {
      * Replace the manual order of the containers that are in no folder.
      *
      * The client sends the whole list in display order, so a name that is
-     * absent loses its row and falls back to the state-first default. Empty
+     * absent loses its row and gets a new position at the end on the next
+     * container-list load (`primeUnfolderedOrder`). Empty
      * names and duplicates are skipped, because `container_name` is the
      * primary key, and positions stay contiguous from zero.
      */
@@ -491,7 +492,14 @@ export class FolderService implements OnModuleInit {
         const changed = this.db.write((db) => {
             reconcileIds(db, containers);
             const synced = syncComposeProjects(db, containers);
-            const primed = primeUnfolderedOrder(db, containers);
+            // Isolated like PHP's: a failed prime must not roll back the id
+            // reconcile and Compose sync, or fail the container list.
+            let primed = false;
+            try {
+                primed = primeUnfolderedOrder(db, containers);
+            } catch (error) {
+                this.logger.warn(`Could not prime the unfoldered order: ${String(error)}`);
+            }
             return synced || primed;
         });
 
@@ -688,15 +696,13 @@ function syncComposeProjects(db: DatabaseSync, containers: readonly SyncContaine
     return changed;
 }
 
-const nameCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
-
 /**
  * Give every unfoldered container with no saved position one. Ported from
  * `FolderManager::primeUnfolderedOrder`.
  *
  * Runs after the Compose sync, so a stack container already sits in its
- * folder. New names go after the saved order, sorted by name. Existing rows
- * are never moved: only a drag reorders them.
+ * folder. New names go after the saved order, in natural name order. Existing
+ * rows are never moved: only a drag reorders them.
  */
 function primeUnfolderedOrder(db: DatabaseSync, containers: readonly SyncContainer[]): boolean {
     const known = new Set(
@@ -713,11 +719,38 @@ function primeUnfolderedOrder(db: DatabaseSync, containers: readonly SyncContain
     if (missing.size === 0) return false;
 
     let position = nextPosition(db, 'SELECT MAX(position) AS value FROM unfoldered_order');
+    let added = 0;
     const insert = db.prepare('INSERT OR IGNORE INTO unfoldered_order (container_name, position) VALUES (?, ?)');
-    for (const name of [...missing].sort(nameCollator.compare)) {
-        insert.run(name, position++);
+    for (const name of [...missing].sort(naturalNameCompare)) {
+        added += Number(insert.run(name, position++).changes);
     }
-    return true;
+    return added > 0;
+}
+
+/**
+ * Case-insensitive natural order: digit runs compare by value, everything else
+ * by code unit. Ported from `FolderManager::naturalNameCompare`, so both
+ * backends prime the same order; `Intl.Collator` sorts punctuation
+ * differently.
+ */
+export function naturalNameCompare(a: string, b: string): number {
+    const ca = a.toLowerCase().match(/\d+|\D+/g) ?? [];
+    const cb = b.toLowerCase().match(/\d+|\D+/g) ?? [];
+    const byUnit = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+    for (let i = 0; i < Math.min(ca.length, cb.length); i++) {
+        let x = ca[i];
+        let y = cb[i];
+        let cmp: number;
+        if (/^\d/.test(x) && /^\d/.test(y)) {
+            x = x.replace(/^0+(?=\d)/, '');
+            y = y.replace(/^0+(?=\d)/, '');
+            cmp = x.length - y.length || byUnit(x, y);
+        } else {
+            cmp = byUnit(x, y);
+        }
+        if (cmp !== 0) return Math.sign(cmp);
+    }
+    return Math.sign(ca.length - cb.length) || byUnit(a, b);
 }
 
 /**

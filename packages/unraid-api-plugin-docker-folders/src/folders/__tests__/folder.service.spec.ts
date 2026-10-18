@@ -1,4 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DatabaseService } from '../../db/database.service.js';
@@ -289,6 +290,27 @@ describe('FolderService writes', () => {
 
             expect(service.syncWithContainers(containers)).toBe(false);
             expect(publish).not.toHaveBeenCalled();
+        });
+
+        it('sorts names exactly as PHP does, punctuation included', () => {
+            service.syncWithContainers(['app_db', 'app-db', 'app.db', 'appdb', 'app2', 'app10', 'App1', 'app01'].map((name) => container(name)));
+
+            // Same fixture as FolderManagerTest and the frontend store spec.
+            expect(service.getUnfolderedOrder()).toEqual(['App1', 'app01', 'app2', 'app10', 'app-db', 'app.db', 'app_db', 'appdb']);
+        });
+
+        it('keeps the id reconcile and Compose sync when priming fails', () => {
+            const handle = new DatabaseSync(temp.path);
+            handle.exec('DROP TABLE unfoldered_order');
+            handle.close();
+            const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+            expect(() =>
+                service.syncWithContainers([container('db', { 'com.docker.compose.project': 'app' })])
+            ).not.toThrow();
+            expect(temp.rows('SELECT container_name FROM container_folders')).toEqual([{ container_name: 'db' }]);
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('unfoldered order'));
+            warn.mockRestore();
         });
 
         it('skips folder members, including a stack the same sync just foldered', () => {

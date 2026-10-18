@@ -116,4 +116,12 @@ describe('docker store – unfolderedContainers with a saved order', () => {
     settingsStore.sortMode = 'manual';
     expect(names(store)).toEqual(['charlie', 'bravo', 'alpha']);
   });
+
+  it('orders unranked names the way both backends prime them', () => {
+    const store = useDockerStore();
+    store.containers = ['app_db', 'app-db', 'app.db', 'appdb', 'app2', 'app10', 'App1', 'app01'].map((name) => makeContainer({ id: name, name }));
+
+    // Same fixture as FolderManagerTest and folder.service.spec.
+    expect(names(store)).toEqual(['App1', 'app01', 'app2', 'app10', 'app-db', 'app.db', 'app_db', 'appdb']);
+  });
 });

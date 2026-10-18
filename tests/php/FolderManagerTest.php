@@ -270,6 +270,15 @@ final class FolderManagerTest extends TestCase
     }
 
     #[Test]
+    public function primeSortsNamesExactlyAsTheGraphqlPluginDoes(): void
+    {
+        $this->manager->primeUnfolderedOrder(array_map([self::class, 'container'], ['app_db', 'app-db', 'app.db', 'appdb', 'app2', 'app10', 'App1', 'app01']));
+
+        // Same fixture as folder.service.spec and the frontend store spec.
+        self::assertSame(['App1', 'app01', 'app2', 'app10', 'app-db', 'app.db', 'app_db', 'appdb'], $this->manager->getUnfolderedOrder());
+    }
+
+    #[Test]
     public function primeAppendsNewNamesAndNeverMovesSavedOnes(): void
     {
         $this->manager->setUnfolderedOrder(['zulu', 'alpha']);

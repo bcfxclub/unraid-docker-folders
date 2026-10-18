@@ -36,6 +36,33 @@ export function bestState(states: Array<string | undefined>): string | undefined
 
 const nameCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
 
+/**
+ * Case-insensitive natural order: digit runs compare by value, everything else
+ * by code unit. The same rule both backends use to give new unfoldered
+ * containers a position (FolderManager::naturalNameCompare), so the list does
+ * not reshuffle when the saved order arrives. `nameCollator` sorts
+ * punctuation differently.
+ */
+export function naturalNameCompare(a: string, b: string): number {
+  const ca = a.toLowerCase().match(/\d+|\D+/g) ?? [];
+  const cb = b.toLowerCase().match(/\d+|\D+/g) ?? [];
+  const byUnit = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  for (let i = 0; i < Math.min(ca.length, cb.length); i++) {
+    let x = ca[i];
+    let y = cb[i];
+    let cmp: number;
+    if (/^\d/.test(x) && /^\d/.test(y)) {
+      x = x.replace(/^0+(?=\d)/, '');
+      y = y.replace(/^0+(?=\d)/, '');
+      cmp = x.length - y.length || byUnit(x, y);
+    } else {
+      cmp = byUnit(x, y);
+    }
+    if (cmp !== 0) return Math.sign(cmp);
+  }
+  return Math.sign(ca.length - cb.length) || byUnit(a, b);
+}
+
 export interface SortableFields {
   /** Stored manual order. */
   position: number;

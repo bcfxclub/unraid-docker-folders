@@ -7,7 +7,7 @@ import { ref, computed } from 'vue';
 import { useFolderStore } from './folders';
 import { useSettingsStore } from './settings';
 import { useBackend } from '@/backends';
-import { sortByMode } from '@/utils/sortMode';
+import { naturalNameCompare, sortByMode } from '@/utils/sortMode';
 
 export interface ContainerPort {
   IP: string;
@@ -271,7 +271,7 @@ export const useDockerStore = defineStore('docker', () => {
     }
 
     // Manual: saved order first. The backend gives each unfoldered container a
-    // position on list load (primeUnfolderedOrder, same name order); until the
+    // position on list load (primeUnfolderedOrder, same naturalNameCompare); until the
     // next folder fetch the rest follow by name, so a start or stop never moves
     // them. A folder member is never listed even if its name is ranked.
     const rank = new Map<string, number>();
@@ -284,7 +284,7 @@ export const useDockerStore = defineStore('docker', () => {
       if (!assigned.has(c.name)) (rank.has(c.name) ? ranked : unranked).push(c);
     }
     ranked.sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
-    return [...ranked, ...sortByMode(unranked, 'name-asc', (c) => ({ position: 0, name: c.name }))];
+    return [...ranked, ...unranked.sort((a, b) => naturalNameCompare(a.name, b.name))];
   });
 
   // Actions
