@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.10.18-dev3
+### Fixed
+- Containers outside any folder now keep their place in the list instead of jumping around when they start or stop.
+
 ## 2026.10.18-dev2
 ### New
 - A new memory calculation setting under Settings > Docker Folders > Display lets you switch container memory usage back to the raw cgroup number. (#19)
