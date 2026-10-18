@@ -259,9 +259,9 @@ export const useDockerStore = defineStore('docker', () => {
     const folderStore = useFolderStore();
     const settingsStore = useSettingsStore();
     const assigned = folderStore.folderByContainerName;
-    const unfoldered = sortedContainers.value.filter((c) => !assigned.has(c.name));
 
     if (settingsStore.sortMode !== 'manual') {
+      const unfoldered = sortedContainers.value.filter((c) => !assigned.has(c.name));
       return sortByMode(unfoldered, settingsStore.sortMode, (c) => ({
         position: 0,
         name: c.name,
@@ -270,19 +270,21 @@ export const useDockerStore = defineStore('docker', () => {
       }));
     }
 
-    // Manual: saved order first; unplaced containers keep the state-first
-    // default after it. A folder member is never listed even if its name is ranked.
+    // Manual: saved order first. The backend gives each unfoldered container a
+    // position on list load (primeUnfolderedOrder, same name order); until the
+    // next folder fetch the rest follow by name, so a start or stop never moves
+    // them. A folder member is never listed even if its name is ranked.
     const rank = new Map<string, number>();
     folderStore.unfolderedOrder.forEach((name, i) => {
       if (!rank.has(name)) rank.set(name, i);
     });
-    if (rank.size === 0) return unfoldered;
-
-    const ranked = unfoldered
-      .filter((c) => rank.has(c.name))
-      .sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
-    const unranked = unfoldered.filter((c) => !rank.has(c.name));
-    return [...ranked, ...unranked];
+    const ranked: Container[] = [];
+    const unranked: Container[] = [];
+    for (const c of containers.value) {
+      if (!assigned.has(c.name)) (rank.has(c.name) ? ranked : unranked).push(c);
+    }
+    ranked.sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
+    return [...ranked, ...sortByMode(unranked, 'name-asc', (c) => ({ position: 0, name: c.name }))];
   });
 
   // Actions

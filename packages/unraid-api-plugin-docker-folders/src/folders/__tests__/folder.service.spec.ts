@@ -255,6 +255,56 @@ describe('FolderService writes', () => {
         });
     });
 
+    describe('syncWithContainers: unfoldered order', () => {
+        const container = (name: string, labels: Record<string, string> = {}) => ({
+            id: `id-${name}`,
+            name: `/${name}`,
+            labels,
+        });
+
+        it('gives a fresh install an order by name, the way PHP does', () => {
+            expect(
+                service.syncWithContainers([container('zulu'), container('Alpha'), container('app10'), container('app9')])
+            ).toBe(true);
+
+            expect(service.getUnfolderedOrder()).toEqual(['Alpha', 'app9', 'app10', 'zulu']);
+        });
+
+        it('appends new names and never moves saved ones', () => {
+            service.setUnfolderedOrder(['zulu', 'alpha']);
+
+            service.syncWithContainers([container('alpha'), container('mike'), container('zulu')]);
+
+            expect(temp.rows('SELECT container_name, position FROM unfoldered_order ORDER BY position')).toEqual([
+                { container_name: 'zulu', position: 0 },
+                { container_name: 'alpha', position: 1 },
+                { container_name: 'mike', position: 2 },
+            ]);
+        });
+
+        it('writes and announces nothing once every container has a position', () => {
+            const containers = [container('alpha'), container('bravo')];
+            service.syncWithContainers(containers);
+            publish.mockClear();
+
+            expect(service.syncWithContainers(containers)).toBe(false);
+            expect(publish).not.toHaveBeenCalled();
+        });
+
+        it('skips folder members, including a stack the same sync just foldered', () => {
+            const media = service.createFolder({ name: 'Media' });
+            service.addContainerToFolder(media.id, 'id-plex', 'plex');
+
+            service.syncWithContainers([
+                container('plex'),
+                container('db', { 'com.docker.compose.project': 'app' }),
+                container('alpha'),
+            ]);
+
+            expect(service.getUnfolderedOrder()).toEqual(['alpha']);
+        });
+    });
+
     describe('announcements', () => {
         it('names an action for every write, so no open tab is left stale', () => {
             const folder = service.createFolder({ name: 'Media' });

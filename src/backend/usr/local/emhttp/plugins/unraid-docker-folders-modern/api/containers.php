@@ -154,8 +154,10 @@ function handleGet($dockerClient)
     $folderManager = new FolderManager();
     $folderManager->reconcileContainerIds($containers);
 
-    // Auto-group Docker Compose stacks into folders
+    // Auto-group Docker Compose stacks into folders, then give every
+    // container left unfoldered a fixed position.
     $changed = $folderManager->syncComposeStacks($containers);
+    $changed = $folderManager->primeUnfolderedOrder($containers) || $changed;
     if ($changed) {
       WebSocketPublisher::publish('folder', 'updated');
     }

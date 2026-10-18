@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import { DatabaseService, type Row } from '../db/database.service.js';
 import { EventBusService } from '../events/event-bus.service.js';
+import { stripLeadingSlash } from '../updates/docker-refs.js';
 import { nowSeconds } from '../util/time.js';
 import {
     DockerFolder,
@@ -460,8 +461,9 @@ export class FolderService implements OnModuleInit {
      * Bring the folder tables in line with what Docker reports, the way
      * `containers.php` does on every container-list request.
      *
-     * Two jobs, ported from `FolderManager::reconcileContainerIds` and
-     * `syncComposeStacks`, and both are load-bearing rather than tidying:
+     * Three jobs, ported from `FolderManager::reconcileContainerIds`,
+     * `syncComposeStacks` and `primeUnfolderedOrder`, all load-bearing rather
+     * than tidying:
      *
      * - Unraid gives a container a new id every time it is recreated, which
      *   every image update does. Memberships are keyed by name, but drag and
@@ -470,14 +472,16 @@ export class FolderService implements OnModuleInit {
      * - A Compose project gets a folder of its own, created on first sight,
      *   and its unassigned containers are put into it. A container the user
      *   deliberately took out stays out, through `compose_sync_exclusions`.
+     * - Every container left unfoldered gets a saved position, so a fresh
+     *   install does not fall back to an order that moves on start and stop.
      *
      * One transaction where PHP uses several statements, so a crash part way
      * through cannot leave a stack folder with half its containers.
      *
-     * Announces only when a folder or a membership actually changed. The PHP
-     * publishes that as entity `folders`, which the frontend's dispatch table
-     * never matches, so another tab only caught up on its poll; this uses
-     * `folder`, which it does match. The `compose_stacks` bookkeeping is not
+     * Announces only when a folder, a membership or the unfoldered order
+     * actually changed. The PHP publishes that as entity `folders`, which the
+     * frontend's dispatch table never matches, so another tab only caught up
+     * on its poll; this uses `folder`, which it does match. The `compose_stacks` bookkeeping is not
      * announced, matching PHP, which never counted it as a change.
      *
      * Reconciling never deletes anything. With an empty list, which is what a
@@ -486,7 +490,9 @@ export class FolderService implements OnModuleInit {
     syncWithContainers(containers: readonly SyncContainer[]): boolean {
         const changed = this.db.write((db) => {
             reconcileIds(db, containers);
-            return syncComposeProjects(db, containers);
+            const synced = syncComposeProjects(db, containers);
+            const primed = primeUnfolderedOrder(db, containers);
+            return synced || primed;
         });
 
         if (changed) this.events.publish('folder', 'compose_sync');
@@ -680,6 +686,38 @@ function syncComposeProjects(db: DatabaseSync, containers: readonly SyncContaine
     }
 
     return changed;
+}
+
+const nameCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+
+/**
+ * Give every unfoldered container with no saved position one. Ported from
+ * `FolderManager::primeUnfolderedOrder`.
+ *
+ * Runs after the Compose sync, so a stack container already sits in its
+ * folder. New names go after the saved order, sorted by name. Existing rows
+ * are never moved: only a drag reorders them.
+ */
+function primeUnfolderedOrder(db: DatabaseSync, containers: readonly SyncContainer[]): boolean {
+    const known = new Set(
+        (db
+            .prepare('SELECT container_name FROM container_folders UNION SELECT container_name FROM unfoldered_order')
+            .all() as { container_name: string }[]).map((row) => row.container_name)
+    );
+
+    const missing = new Set<string>();
+    for (const container of containers) {
+        const name = stripLeadingSlash(container.name);
+        if (name !== '' && !known.has(name)) missing.add(name);
+    }
+    if (missing.size === 0) return false;
+
+    let position = nextPosition(db, 'SELECT MAX(position) AS value FROM unfoldered_order');
+    const insert = db.prepare('INSERT OR IGNORE INTO unfoldered_order (container_name, position) VALUES (?, ?)');
+    for (const name of [...missing].sort(nameCollator.compare)) {
+        insert.run(name, position++);
+    }
+    return true;
 }
 
 /**

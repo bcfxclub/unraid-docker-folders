@@ -589,6 +589,59 @@ class FolderManager
   }
 
   /**
+   * Give every unfoldered container that has no saved position one.
+   *
+   * Runs on each container-list load, after syncComposeStacks, so a stack
+   * container already sits in its folder. New names go after the saved order,
+   * sorted by name. Existing rows are never moved: only a drag reorders them.
+   * Without this, a fresh install has no rows and the list falls back to an
+   * order that changes whenever a container starts or stops.
+   *
+   * @param array $containers List of container data from DockerClient
+   * @return bool True if any rows were added
+   */
+  public function primeUnfolderedOrder($containers)
+  {
+    $known = [];
+    $rows = $this->db->fetchAll('SELECT container_name FROM container_folders UNION SELECT container_name FROM unfoldered_order');
+    foreach ($rows as $row) {
+      $known[$row['container_name']] = true;
+    }
+
+    $missing = [];
+    foreach ($containers as $container) {
+      $name = ltrim($container['name'] ?? '', '/');
+      if ($name !== '' && !isset($known[$name])) {
+        $missing[$name] = true;
+      }
+    }
+    if (empty($missing)) {
+      return false;
+    }
+
+    $names = array_keys($missing);
+    usort($names, 'strnatcasecmp');
+
+    $this->db->beginTransaction();
+    try {
+      $position = ($this->db->fetchValue('SELECT MAX(position) FROM unfoldered_order') ?? -1) + 1;
+      foreach ($names as $name) {
+        // OR IGNORE: a concurrent load may have added the same name first.
+        $this->db->query(
+          'INSERT OR IGNORE INTO unfoldered_order (container_name, position) VALUES (?, ?)',
+          [$name, $position++]
+        );
+      }
+      $this->db->commit();
+      return true;
+    } catch (Exception $e) {
+      $this->db->rollback();
+      error_log('Error priming unfoldered order: ' . $e->getMessage());
+      return false;
+    }
+  }
+
+  /**
    * Remove a container from all folders by name.
    * Called when a container is deleted from Docker.
    */
