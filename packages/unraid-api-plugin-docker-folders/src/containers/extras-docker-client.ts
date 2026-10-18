@@ -132,7 +132,7 @@ export interface DockerFoldersRawStats {
         cpu_usage?: { total_usage?: number };
         system_cpu_usage?: number;
     };
-    memory_stats?: { usage?: number; limit?: number };
+    memory_stats?: { usage?: number; limit?: number; stats?: Record<string, number> };
     blkio_stats?: { io_service_bytes_recursive?: { op?: string; value?: number }[] | null } | null;
     networks?: Record<string, { rx_bytes?: number; tx_bytes?: number }> | null;
     pids_stats?: { current?: number };

@@ -16,7 +16,15 @@ import {
     type CgroupLayout,
     type CgroupSources,
 } from './cgroup-stats.js';
-import { buildContainerStats, cpuPercentFromDelta, memoryPercent, type DockerFoldersContainerStatsResult } from './container-stats.js';
+import { DatabaseService } from '../db/database.service.js';
+import {
+    buildContainerStats,
+    cpuPercentFromDelta,
+    dockerMemoryUsage,
+    memoryPercent,
+    type DockerFoldersContainerStatsResult,
+    type MemoryCalculationMode,
+} from './container-stats.js';
 import {
     DOCKER_CLIENT_TOKEN,
     type DockerFoldersExtraDockerClient,
@@ -164,7 +172,10 @@ export class ContainerStatsService {
     /** One shared reading loop per stream interval. See `statsStream`. */
     private readonly statsLoops = new Map<number, StatsLoop>();
 
-    constructor(@Inject(DOCKER_CLIENT_TOKEN) private readonly docker: DockerFoldersExtraDockerClient) {}
+    constructor(
+        @Inject(DOCKER_CLIENT_TOKEN) private readonly docker: DockerFoldersExtraDockerClient,
+        private readonly db: DatabaseService
+    ) {}
 
     /**
      * `sources` overrides `/sys/fs/cgroup` and `/proc` for tests, the same
@@ -178,12 +189,28 @@ export class ContainerStatsService {
     ): Promise<Map<string, DockerFoldersContainerStatsResult | null>> {
         if (ids.length === 0) return new Map();
 
+        const memoryMode = this.readMemoryMode();
         const layout = this.detectLayout(ids[0], sources);
         if (layout === null) {
-            return this.getStatsSlow(ids);
+            return this.getStatsSlow(ids, memoryMode);
         }
 
-        return this.getStatsFast(ids, layout, sources, cpuSamples);
+        return this.getStatsFast(ids, layout, sources, cpuSamples, memoryMode);
+    }
+
+    /** `memory_calculation`, read every call so a change shows at the next reading. */
+    private readMemoryMode(): MemoryCalculationMode {
+        try {
+            const row = this.db.read(
+                (db) =>
+                    db.prepare('SELECT value FROM settings WHERE key = ?').get('memory_calculation') as
+                        | { value: string }
+                        | undefined
+            );
+            return row?.value === 'raw' ? 'raw' : 'docker';
+        } catch {
+            return 'docker';
+        }
     }
 
     /**
@@ -243,7 +270,8 @@ export class ContainerStatsService {
         ids: string[],
         layout: CgroupLayout,
         sources: CgroupSources,
-        cpuSamples: CpuSampleHolder
+        cpuSamples: CpuSampleHolder,
+        memoryMode: MemoryCalculationMode
     ): Promise<Map<string, DockerFoldersContainerStatsResult | null>> {
         const systemCpu = readSystemCpuInfo(sources);
 
@@ -291,12 +319,14 @@ export class ContainerStatsService {
                 : 0.0;
 
             const memoryLimit = cg.memoryLimit === MEMORY_UNLIMITED ? hostMemory : cg.memoryLimit;
+            const memoryUsage =
+                memoryMode === 'docker' ? dockerMemoryUsage(cg.memoryUsage, cg.memoryInactiveFile) : cg.memoryUsage;
 
             output.set(id, {
                 cpuPercent,
-                memoryUsage: cg.memoryUsage,
+                memoryUsage,
                 memoryLimit,
-                memoryPercent: memoryPercent(cg.memoryUsage, memoryLimit),
+                memoryPercent: memoryPercent(memoryUsage, memoryLimit),
                 blockRead: cg.ioRead,
                 blockWrite: cg.ioWrite,
                 netRx: net.rx,
@@ -315,7 +345,7 @@ export class ContainerStatsService {
         cpuSamples.samples = newSamples;
 
         if (fallbackIds.size > 0) {
-            const fallback = await this.getStatsSlow([...fallbackIds]);
+            const fallback = await this.getStatsSlow([...fallbackIds], memoryMode);
             for (const [id, stats] of fallback) output.set(id, stats);
         }
 
@@ -391,13 +421,20 @@ export class ContainerStatsService {
      * container (Docker samples CPU usage twice to compute a delta), so doing
      * this sequentially would make a 10-container fallback take 10 seconds.
      */
-    private async getStatsSlow(ids: string[]): Promise<Map<string, DockerFoldersContainerStatsResult | null>> {
+    private async getStatsSlow(
+        ids: string[],
+        memoryMode: MemoryCalculationMode
+    ): Promise<Map<string, DockerFoldersContainerStatsResult | null>> {
         const hostMemory = readSystemMemoryTotalBytes();
-        const entries = await Promise.all(ids.map((id) => this.getOneSlow(id, hostMemory)));
+        const entries = await Promise.all(ids.map((id) => this.getOneSlow(id, hostMemory, memoryMode)));
         return new Map(entries);
     }
 
-    private async getOneSlow(id: string, hostMemory: number): Promise<[string, DockerFoldersContainerStatsResult | null]> {
+    private async getOneSlow(
+        id: string,
+        hostMemory: number,
+        memoryMode: MemoryCalculationMode
+    ): Promise<[string, DockerFoldersContainerStatsResult | null]> {
         let stats;
         try {
             stats = await this.docker.getContainer(id).stats({ stream: false });
@@ -430,7 +467,7 @@ export class ContainerStatsService {
 
         const logSize = containerLogSize(stats.id, id);
 
-        return [id, buildContainerStats(stats, inspect, imageSize, logSize, hostMemory)];
+        return [id, buildContainerStats(stats, inspect, imageSize, logSize, hostMemory, memoryMode)];
     }
 }
 

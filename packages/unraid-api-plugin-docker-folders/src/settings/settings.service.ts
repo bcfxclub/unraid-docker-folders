@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { DatabaseService, type Row } from '../db/database.service.js';
+import { MEMORY_CALCULATION_MODES } from '../containers/container-stats.js';
 import { SORT_MODES } from '../folders/folder.model.js';
 import { normalizePath, pathIsWithinAny } from '../paths/paths.js';
 import { detectServerTimezone } from '../util/timezone.js';
@@ -108,6 +109,10 @@ export class SettingsService {
 
         if (key === 'sort_mode' && !(SORT_MODES as readonly string[]).includes(value)) {
             throw new BadRequestException('Invalid sort_mode');
+        }
+
+        if (key === 'memory_calculation' && !(MEMORY_CALCULATION_MODES as readonly string[]).includes(value)) {
+            throw new BadRequestException('Invalid memory_calculation');
         }
 
         // A checkbox: '0' or '1' only, as in settings.php.

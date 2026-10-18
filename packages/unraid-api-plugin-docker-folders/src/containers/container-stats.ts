@@ -86,24 +86,38 @@ export function calculateCpuPercent(stats: DockerFoldersRawStats): number {
     return cpuPercentFromDelta(cpuDelta, systemDelta, onlineCpus);
 }
 
+/** The `memory_calculation` setting. `MEMORY_CALCULATION_MODES` in config.php. */
+export const MEMORY_CALCULATION_MODES = ['docker', 'raw'] as const;
+export type MemoryCalculationMode = (typeof MEMORY_CALCULATION_MODES)[number];
+
+/** `DockerClient::dockerMemoryUsage`: usage less inactive file cache, as `docker stats` counts it. */
+export function dockerMemoryUsage(usage: number, inactiveFile: number): number {
+    return inactiveFile > 0 && inactiveFile < usage ? usage - inactiveFile : usage;
+}
+
 /**
  * `DockerClient::calculateMemoryStats`.
  *
- * Raw `usage` over `limit` — no cache subtraction. (Some Docker stats
- * consumers subtract page cache from `usage` for a "true" figure; this plugin
- * does not, and the PHP it is ported from does not either, confirmed against
- * `memoryStats_normal_usage`, which asserts the raw `usage` value passes
- * through unchanged.)
+ * `usage` over `limit`. In `docker` mode, `usage` first loses its inactive
+ * page cache: the v1 key first, as the Docker CLI checks it.
  *
  * `limit` defaults to 1, not 0, when missing — division-by-zero bait if it
  * defaulted to 0 the way `usage` does. An *explicit* 0 limit is left alone
  * (PHP's `??` and JS's `??` both only trigger on a missing/null value, never
  * on 0) and produces a 0 percent through the separate `limit > 0` guard.
  */
-export function calculateMemoryStats(stats: DockerFoldersRawStats): MemoryStatsResult {
+export function calculateMemoryStats(
+    stats: DockerFoldersRawStats,
+    mode: MemoryCalculationMode = 'docker'
+): MemoryStatsResult {
     const memStats = stats.memory_stats ?? {};
-    const usage = memStats.usage ?? 0;
+    let usage = memStats.usage ?? 0;
     const limit = memStats.limit ?? 1;
+
+    if (mode === 'docker') {
+        const counters = memStats.stats ?? {};
+        usage = dockerMemoryUsage(usage, counters.total_inactive_file ?? counters.inactive_file ?? 0);
+    }
 
     return { usage, limit, percent: memoryPercent(usage, limit) };
 }
@@ -209,10 +223,11 @@ export function buildContainerStats(
     inspect: DockerFoldersRawInspect | null,
     imageSize: number,
     logSize: number,
-    hostMemory: number
+    hostMemory: number,
+    memoryMode: MemoryCalculationMode = 'docker'
 ): DockerFoldersContainerStatsResult {
     const cpu = calculateCpuPercent(stats);
-    const mem = calculateMemoryStats(stats);
+    const mem = calculateMemoryStats(stats, memoryMode);
     const blockIO = calculateBlockIO(stats);
     const netIO = calculateNetworkIO(stats);
     const pids = calculatePids(stats);

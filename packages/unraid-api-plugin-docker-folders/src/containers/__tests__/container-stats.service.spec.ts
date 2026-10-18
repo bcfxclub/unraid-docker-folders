@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DatabaseService } from '../../db/database.service.js';
 import {
     clampStatsInterval,
     containerLogSize,
@@ -37,6 +38,12 @@ function fakeDocker(overrides: {
         }),
         getNetwork: () => ({ inspect: () => Promise.reject(new Error('not used here')) }),
     };
+}
+
+/** The db stands in for the settings table: only the memory_calculation read reaches it. */
+function newService(docker: DockerFoldersExtraDockerClient, memoryCalculation?: string): ContainerStatsService {
+    const row = memoryCalculation === undefined ? undefined : { value: memoryCalculation };
+    return new ContainerStatsService(docker, { read: () => row } as unknown as DatabaseService);
 }
 
 describe('containerLogSize', () => {
@@ -93,7 +100,7 @@ describe('containerLogSize', () => {
  */
 describe('ContainerStatsService (slow, Docker-API path)', () => {
     it('returns null for a container whose stats call fails', async () => {
-        const service = new ContainerStatsService(
+        const service = newService(
             fakeDocker({
                 stats: () => Promise.reject(new Error('not running')),
             })
@@ -111,7 +118,7 @@ describe('ContainerStatsService (slow, Docker-API path)', () => {
             pids_stats: { current: 3 },
             id: 'a'.repeat(64),
         };
-        const service = new ContainerStatsService(
+        const service = newService(
             fakeDocker({
                 stats: async () => stats,
                 inspect: async () => ({ RestartCount: 1, State: { StartedAt: 'now' }, Image: 'sha256:deadbeef' }),
@@ -137,7 +144,7 @@ describe('ContainerStatsService (slow, Docker-API path)', () => {
     });
 
     it('fetches every id in parallel, independent of one another', async () => {
-        const service = new ContainerStatsService(
+        const service = newService(
             fakeDocker({
                 stats: async (id) => {
                     if (id === 'bad') throw new Error('nope');
@@ -177,23 +184,53 @@ describe('ContainerStatsService (fast, cgroup path)', () => {
         rmSync(dir, { recursive: true, force: true });
     });
 
-    function writeContainerCgroup(id: string, opts: { cpuUsageUsec: number; memoryUsage: number }) {
+    function writeContainerCgroup(
+        id: string,
+        opts: { cpuUsageUsec: number; memoryUsage: number; inactiveFile?: number }
+    ) {
         const d = join(cgroupRoot, 'docker', id);
         mkdirSync(d, { recursive: true });
         writeFileSync(join(d, 'cpu.stat'), `usage_usec ${opts.cpuUsageUsec}\n`, 'utf8');
         writeFileSync(join(d, 'memory.current'), `${opts.memoryUsage}\n`, 'utf8');
         writeFileSync(join(d, 'memory.max'), 'max\n', 'utf8');
+        if (opts.inactiveFile !== undefined) {
+            writeFileSync(join(d, 'memory.stat'), `anon 100\ninactive_file ${opts.inactiveFile}\n`, 'utf8');
+        }
         writeFileSync(join(d, 'io.stat'), '8:0 rbytes=10 wbytes=20\n', 'utf8');
         writeFileSync(join(d, 'pids.current'), '2\n', 'utf8');
         writeFileSync(join(d, 'cgroup.procs'), '', 'utf8'); // no pid -> net stats default to 0, not exercised here
     }
 
-    function service(overrides: {
-        inspect?: (id: string) => Promise<DockerFoldersRawInspect>;
-        imageInspect?: (id: string) => Promise<DockerFoldersRawImageInspect>;
-    } = {}): ContainerStatsService {
-        return new ContainerStatsService(fakeDocker(overrides));
+    function service(
+        overrides: {
+            inspect?: (id: string) => Promise<DockerFoldersRawInspect>;
+            imageInspect?: (id: string) => Promise<DockerFoldersRawImageInspect>;
+        } = {},
+        memoryCalculation?: string
+    ): ContainerStatsService {
+        return newService(fakeDocker(overrides), memoryCalculation);
     }
+
+    it('subtracts inactive page cache from memory usage by default, as docker stats does', async () => {
+        writeContainerCgroup(ID_A, { cpuUsageUsec: 1_000_000, memoryUsage: 1024, inactiveFile: 256 });
+        writeFileSync(join(procRoot, 'meminfo'), 'MemTotal: 1 kB\n', 'utf8');
+
+        const entry = (await service({ inspect: async () => ({ Id: ID_A, Image: '' }) }).getStats([ID_A], sources)).get(ID_A);
+
+        expect(entry?.memoryUsage).toBe(768);
+        expect(entry?.memoryPercent).toBe(75);
+    });
+
+    it('keeps the page cache in memory usage when memory_calculation is raw', async () => {
+        writeContainerCgroup(ID_A, { cpuUsageUsec: 1_000_000, memoryUsage: 1024, inactiveFile: 256 });
+        writeFileSync(join(procRoot, 'meminfo'), 'MemTotal: 1 kB\n', 'utf8');
+
+        const svc = service({ inspect: async () => ({ Id: ID_A, Image: '' }) }, 'raw');
+        const entry = (await svc.getStats([ID_A], sources)).get(ID_A);
+
+        expect(entry?.memoryUsage).toBe(1024);
+        expect(entry?.memoryPercent).toBe(100);
+    });
 
     it('uses the fast path once a cgroup layout is found, with no previous sample the first time', async () => {
         writeContainerCgroup(ID_A, { cpuUsageUsec: 1_000_000, memoryUsage: 1024 });
@@ -348,7 +385,7 @@ describe('ContainerStatsService.statsStream', () => {
     });
 
     function serviceWithReadings(): { service: ContainerStatsService; getStats: ReturnType<typeof vi.fn> } {
-        const service = new ContainerStatsService(fakeDocker({}));
+        const service = newService(fakeDocker({}));
         const getStats = vi.fn(async (ids: string[]) => new Map(ids.map((id) => [id, null] as const)));
         (service as unknown as { getStats: typeof getStats }).getStats = getStats;
         return { service, getStats };
@@ -371,7 +408,7 @@ describe('ContainerStatsService.statsStream', () => {
     });
 
     it('waits for a slow reading instead of starting the next one on top of it', async () => {
-        const service = new ContainerStatsService(fakeDocker({}));
+        const service = newService(fakeDocker({}));
         let inFlight = 0;
         let maxInFlight = 0;
         (service as unknown as { getStats: () => Promise<Map<string, null>> }).getStats = async () => {
@@ -401,7 +438,7 @@ describe('ContainerStatsService.statsStream', () => {
     });
 
     it('keeps going after a failed reading', async () => {
-        const service = new ContainerStatsService(fakeDocker({}));
+        const service = newService(fakeDocker({}));
         let call = 0;
         (service as unknown as { getStats: () => Promise<Map<string, null>> }).getStats = async () => {
             call += 1;
@@ -418,7 +455,7 @@ describe('ContainerStatsService.statsStream', () => {
     });
 
     it('shares one reading between streams with the same interval, and sends each its own ids', async () => {
-        const service = new ContainerStatsService(fakeDocker({}));
+        const service = newService(fakeDocker({}));
         const calls: { ids: string[]; holder: CpuSampleHolder }[] = [];
         (service as unknown as {
             getStats: (ids: string[], sources: unknown, holder: CpuSampleHolder) => Promise<Map<string, null>>;

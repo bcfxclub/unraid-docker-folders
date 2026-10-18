@@ -17,6 +17,7 @@ import {
     parseFirstPid,
     parseMemInfoTotalBytes,
     parseMemoryCurrent,
+    parseMemoryStatValue,
     parseNetDevCounters,
     parseOnlineCpuCount,
     parsePidsCurrent,
@@ -72,6 +73,18 @@ describe('parseMemoryCurrent / parseCgroupV2MemoryMax', () => {
 
     it('parses a real limit', () => {
         expect(parseCgroupV2MemoryMax('1073741824\n')).toBe(1073741824);
+    });
+});
+
+describe('parseMemoryStatValue', () => {
+    it('reads the named counter and not one that ends with the same name', () => {
+        const v1 = 'cache 9000\ninactive_file 10\ntotal_inactive_file 7000\n';
+        expect(parseMemoryStatValue(v1, 'total_inactive_file')).toBe(7000);
+        expect(parseMemoryStatValue(v1, 'inactive_file')).toBe(10);
+    });
+
+    it('is 0 when the counter is missing', () => {
+        expect(parseMemoryStatValue('anon 5000\nactive_file 2000\n', 'inactive_file')).toBe(0);
     });
 });
 
@@ -239,6 +252,7 @@ describe('cgroup filesystem reads', () => {
             writeFileSync(join(d, 'cpu.stat'), 'usage_usec 2000000\n', 'utf8');
             writeFileSync(join(d, 'memory.current'), '104857600\n', 'utf8');
             writeFileSync(join(d, 'memory.max'), '1073741824\n', 'utf8');
+            writeFileSync(join(d, 'memory.stat'), 'anon 1000\nactive_file 500\ninactive_file 4096\n', 'utf8');
             writeFileSync(join(d, 'io.stat'), '8:0 rbytes=1024 wbytes=2048\n', 'utf8');
             writeFileSync(join(d, 'pids.current'), '5\n', 'utf8');
 
@@ -249,6 +263,7 @@ describe('cgroup filesystem reads', () => {
                 systemTime: 1000,
                 onlineCpus: 4,
                 memoryUsage: 104857600,
+                memoryInactiveFile: 4096,
                 memoryLimit: 1073741824,
                 ioRead: 1024,
                 ioWrite: 2048,
@@ -264,6 +279,7 @@ describe('cgroup filesystem reads', () => {
                 systemTime: 0,
                 onlineCpus: 1,
                 memoryUsage: 0,
+                memoryInactiveFile: 0,
                 memoryLimit: 0,
                 ioRead: 0,
                 ioWrite: 0,
@@ -302,6 +318,11 @@ describe('cgroup filesystem reads', () => {
                 'utf8'
             );
             writeFileSync(
+                join(cgroupRoot, 'memory', 'docker', FULL_ID, 'memory.stat'),
+                'cache 9000\ninactive_file 10\ntotal_inactive_file 8192\n',
+                'utf8'
+            );
+            writeFileSync(
                 join(cgroupRoot, 'memory', 'docker', FULL_ID, 'memory.limit_in_bytes'),
                 '9223372036854771712\n',
                 'utf8'
@@ -320,6 +341,7 @@ describe('cgroup filesystem reads', () => {
                 systemTime: 500,
                 onlineCpus: 2,
                 memoryUsage: 52428800,
+                memoryInactiveFile: 8192,
                 memoryLimit: MEMORY_UNLIMITED,
                 ioRead: 100,
                 ioWrite: 200,

@@ -101,7 +101,7 @@ describe('calculateMemoryStats', () => {
             memory_stats: { usage: 524288000, limit: 1073741824 },
         };
 
-        const result = calculateMemoryStats(stats);
+        const result = calculateMemoryStats(stats, 'raw');
 
         expect(result.usage).toBe(524288000);
         expect(result.limit).toBe(1073741824);
@@ -109,7 +109,7 @@ describe('calculateMemoryStats', () => {
     });
 
     it('missing fields', () => {
-        const result = calculateMemoryStats({});
+        const result = calculateMemoryStats({}, 'raw');
 
         expect(result.usage).toBe(0);
         expect(result.limit).toBe(1);
@@ -117,15 +117,44 @@ describe('calculateMemoryStats', () => {
     });
 
     it('zero limit returns zero percent', () => {
-        const result = calculateMemoryStats({ memory_stats: { usage: 100, limit: 0 } });
+        const result = calculateMemoryStats({ memory_stats: { usage: 100, limit: 0 } }, 'raw');
 
         expect(result.percent).toBe(0);
     });
 
     it('full usage', () => {
-        const result = calculateMemoryStats({ memory_stats: { usage: 1000, limit: 1000 } });
+        const result = calculateMemoryStats({ memory_stats: { usage: 1000, limit: 1000 } }, 'raw');
 
         expect(result.percent).toBe(100.0);
+    });
+
+    it('raw mode keeps page cache', () => {
+        const stats = { memory_stats: { usage: 1000, limit: 2000, stats: { inactive_file: 400 } } };
+
+        expect(calculateMemoryStats(stats, 'raw').usage).toBe(1000);
+    });
+
+    it('docker mode subtracts v2 inactive_file', () => {
+        const result = calculateMemoryStats({ memory_stats: { usage: 1000, limit: 2000, stats: { inactive_file: 400 } } });
+
+        expect(result.usage).toBe(600);
+        expect(result.percent).toBe(30.0);
+    });
+
+    it('docker mode prefers v1 total_inactive_file', () => {
+        const stats = { memory_stats: { usage: 1000, limit: 2000, stats: { total_inactive_file: 300, inactive_file: 100 } } };
+
+        expect(calculateMemoryStats(stats).usage).toBe(700);
+    });
+
+    it('docker mode keeps usage when cache is not smaller', () => {
+        const stats = { memory_stats: { usage: 1000, limit: 2000, stats: { inactive_file: 1000 } } };
+
+        expect(calculateMemoryStats(stats).usage).toBe(1000);
+    });
+
+    it('docker mode without counters keeps usage', () => {
+        expect(calculateMemoryStats({ memory_stats: { usage: 1000, limit: 2000 } }).usage).toBe(1000);
     });
 });
 

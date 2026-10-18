@@ -706,6 +706,7 @@ const settings: Record<string, string> = {
   theme: 'auto',
   distinguish_healthy: '1',
   enable_security_advisor: '1',
+  memory_calculation: 'docker',
   enable_update_checks: '1',
   update_check_schedule: 'disabled',
   notify_on_updates: '0',

@@ -19,6 +19,8 @@ class DockerClient
   private $imageInfoCache = [];
   /** Cached result of readHostMemoryTotal(), null until first read. */
   private $hostMemoryTotal = null;
+  /** The memory_calculation setting, null until first read. See memoryMode(). */
+  private $memoryMode = null;
 
   private static $cgroupLayout = null;
   private static $cgroupLayoutDetected = false;
@@ -62,6 +64,47 @@ class DockerClient
   public function getLastError()
   {
     return $this->lastError;
+  }
+
+  /**
+   * The memory_calculation setting, read once per instance so no caller has
+   * to pass it. Anything but 'raw', or a failed read, means 'docker'.
+   */
+  private function memoryMode()
+  {
+    if ($this->memoryMode === null) {
+      $mode = null;
+      try {
+        require_once __DIR__ . '/Database.php';
+        $mode = Database::getInstance()->fetchValue('SELECT value FROM settings WHERE key = ?', ['memory_calculation']);
+      } catch (Throwable $e) {
+        // Fall through to the default.
+      }
+      $this->memoryMode = $mode === 'raw' ? 'raw' : 'docker';
+    }
+    return $this->memoryMode;
+  }
+
+  /**
+   * Memory usage as `docker stats` counts it: usage less inactive file cache,
+   * when that cache is smaller than usage. The Docker CLI's
+   * calculateMemUsageUnixNoCache.
+   */
+  private static function dockerMemoryUsage($usage, $inactiveFile)
+  {
+    return ($inactiveFile > 0 && $inactiveFile < $usage) ? $usage - $inactiveFile : $usage;
+  }
+
+  /**
+   * One counter from a cgroup memory.stat file: `inactive_file` on v2,
+   * `total_inactive_file` on v1. 0 when the key is missing.
+   */
+  private static function parseMemoryStatValue($memoryStat, $key)
+  {
+    if (preg_match('/^' . preg_quote($key, '/') . '\s+(\d+)$/m', $memoryStat, $m)) {
+      return (int) $m[1];
+    }
+    return 0;
   }
 
   /**
@@ -889,6 +932,7 @@ class DockerClient
       'system_time' => $systemCpu['system_time'],
       'online_cpus' => $systemCpu['online_cpus'],
       'memory_usage' => 0,
+      'memory_inactive_file' => 0,
       'memory_limit' => 0,
       'io_read' => 0,
       'io_write' => 0,
@@ -911,6 +955,10 @@ class DockerClient
     $memCurrent = @file_get_contents($dir . '/memory.current');
     if ($memCurrent !== false) {
       $result['memory_usage'] = (int) trim($memCurrent);
+    }
+    $memStat = @file_get_contents($dir . '/memory.stat');
+    if ($memStat !== false) {
+      $result['memory_inactive_file'] = self::parseMemoryStatValue($memStat, 'inactive_file');
     }
     $memMax = @file_get_contents($dir . '/memory.max');
     if ($memMax !== false) {
@@ -950,6 +998,10 @@ class DockerClient
     $memUsage = @file_get_contents($memDir . '/memory.usage_in_bytes');
     if ($memUsage !== false) {
       $result['memory_usage'] = (int) trim($memUsage);
+    }
+    $memStat = @file_get_contents($memDir . '/memory.stat');
+    if ($memStat !== false) {
+      $result['memory_inactive_file'] = self::parseMemoryStatValue($memStat, 'total_inactive_file');
     }
     $memLimit = @file_get_contents($memDir . '/memory.limit_in_bytes');
     if ($memLimit !== false) {
@@ -1181,11 +1233,14 @@ class DockerClient
         $memLimit = $hostMemory;
       }
 
-      $memPercent = $memLimit > 0 ? round(($cg['memory_usage'] / $memLimit) * 100, 2) : 0;
+      $memUsage = $this->memoryMode() === 'docker'
+        ? self::dockerMemoryUsage($cg['memory_usage'], $cg['memory_inactive_file'])
+        : $cg['memory_usage'];
+      $memPercent = $memLimit > 0 ? round(($memUsage / $memLimit) * 100, 2) : 0;
 
       $output[$id] = [
         'cpuPercent' => $cpuPercent,
-        'memoryUsage' => $cg['memory_usage'],
+        'memoryUsage' => $memUsage,
         'memoryLimit' => $memLimit,
         'memoryPercent' => $memPercent,
         'blockRead' => $cg['io_read'],
@@ -1950,6 +2005,13 @@ class DockerClient
     $memStats = $stats['memory_stats'] ?? [];
     $usage = $memStats['usage'] ?? 0;
     $limit = $memStats['limit'] ?? 1;
+
+    if ($this->memoryMode() === 'docker') {
+      // v1 key first, as the CLI checks it.
+      $counters = $memStats['stats'] ?? [];
+      $inactiveFile = $counters['total_inactive_file'] ?? $counters['inactive_file'] ?? 0;
+      $usage = self::dockerMemoryUsage($usage, $inactiveFile);
+    }
     $percent = $limit > 0 ? round(($usage / $limit) * 100, 2) : 0;
 
     return ['usage' => $usage, 'limit' => $limit, 'percent' => $percent];
