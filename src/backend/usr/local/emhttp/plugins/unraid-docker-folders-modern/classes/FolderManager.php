@@ -334,7 +334,8 @@ class FolderManager
    *
    * Full-replace semantics: the client sends the whole unfoldered list in
    * display order, so any name absent from $containerNames loses its row and
-   * falls back to the state-first default. Non-strings, empty strings, and
+   * gets a new position at the end on the next container-list load
+   * (primeUnfolderedOrder). Non-strings, empty strings, and
    * duplicates are skipped; positions stay contiguous from 0.
    *
    * @param array $containerNames Container names in new order
@@ -586,6 +587,103 @@ class FolderManager
     }
 
     return $changed;
+  }
+
+  /**
+   * Give every unfoldered container that has no saved position one.
+   *
+   * Runs on each container-list load, after syncComposeStacks, so a stack
+   * container already sits in its folder. New names go after the saved order,
+   * sorted by name. Existing rows are never moved: only a drag reorders them.
+   * Without this, a fresh install has no rows and the list falls back to an
+   * order that changes whenever a container starts or stops.
+   *
+   * @param array $containers List of container data from DockerClient
+   * @return bool True if any rows were added
+   */
+  public function primeUnfolderedOrder($containers)
+  {
+    // Cheap check without the write lock, since this runs on every poll.
+    $missing = $this->unorderedNames($containers);
+    if (empty($missing)) {
+      return false;
+    }
+
+    // IMMEDIATE takes the write lock up front, so two loads priming at once
+    // queue instead of failing the read-to-write upgrade with SQLITE_BUSY.
+    $this->db->exec('BEGIN IMMEDIATE');
+    try {
+      // Again under the lock: another load may have primed them meanwhile.
+      $missing = $this->unorderedNames($containers);
+      $position = ($this->db->fetchValue('SELECT MAX(position) FROM unfoldered_order') ?? -1) + 1;
+      foreach ($missing as $name) {
+        $this->db->insert('unfoldered_order', ['container_name' => $name, 'position' => $position++]);
+      }
+      $this->db->commit();
+      return !empty($missing);
+    } catch (Exception $e) {
+      $this->db->rollback();
+      error_log('Error priming unfoldered order: ' . $e->getMessage());
+      return false;
+    }
+  }
+
+  /**
+   * Names of listed containers that are in no folder and have no saved
+   * position, in natural name order.
+   *
+   * @param array $containers List of container data from DockerClient
+   * @return string[]
+   */
+  private function unorderedNames($containers)
+  {
+    $known = [];
+    $rows = $this->db->fetchAll('SELECT container_name FROM container_folders UNION SELECT container_name FROM unfoldered_order');
+    foreach ($rows as $row) {
+      $known[$row['container_name']] = true;
+    }
+
+    $missing = [];
+    foreach ($containers as $container) {
+      $name = ltrim($container['name'] ?? '', '/');
+      if ($name !== '' && !isset($known[$name])) {
+        $missing[$name] = true;
+      }
+    }
+
+    $names = array_keys($missing);
+    usort($names, [self::class, 'naturalNameCompare']);
+    return $names;
+  }
+
+  /**
+   * Case-insensitive natural order: digit runs compare by value, everything
+   * else byte by byte. Spelled out instead of strnatcasecmp so the GraphQL
+   * plugin and the frontend (naturalNameCompare in each) give the same order
+   * for names that differ only by punctuation.
+   */
+  public static function naturalNameCompare($a, $b)
+  {
+    preg_match_all('/\d+|\D+/', strtolower($a), $ma);
+    preg_match_all('/\d+|\D+/', strtolower($b), $mb);
+    $ca = $ma[0];
+    $cb = $mb[0];
+    $n = min(count($ca), count($cb));
+    for ($i = 0; $i < $n; $i++) {
+      $x = $ca[$i];
+      $y = $cb[$i];
+      if (ctype_digit($x) && ctype_digit($y)) {
+        $x = ltrim($x, '0') ?: '0';
+        $y = ltrim($y, '0') ?: '0';
+        $cmp = strlen($x) <=> strlen($y) ?: strcmp($x, $y) <=> 0;
+      } else {
+        $cmp = strcmp($x, $y) <=> 0;
+      }
+      if ($cmp !== 0) {
+        return $cmp;
+      }
+    }
+    return count($ca) <=> count($cb) ?: strcmp($a, $b) <=> 0;
   }
 
   /**

@@ -20,15 +20,29 @@ describe('docker store – unfolderedContainers with a saved order', () => {
     setActivePinia(createPinia());
   });
 
-  it('falls back to state-first order when no order is saved', () => {
+  it('falls back to name order when no order is saved', () => {
     const store = useDockerStore();
     store.containers = [
-      makeContainer({ id: 'c', name: 'created', state: 'created' }),
-      makeContainer({ id: 'r', name: 'running', state: 'running' }),
-      makeContainer({ id: 'e', name: 'exited', state: 'exited' }),
+      makeContainer({ id: 'c', name: 'charlie', state: 'created' }),
+      makeContainer({ id: 'b', name: 'bravo', state: 'running' }),
+      makeContainer({ id: 'a', name: 'alpha', state: 'exited' }),
     ];
 
-    expect(names(store)).toEqual(['exited', 'running', 'created']);
+    expect(names(store)).toEqual(['alpha', 'bravo', 'charlie']);
+  });
+
+  it('does not move an unranked container when its state changes', () => {
+    const store = useDockerStore();
+    store.containers = [
+      makeContainer({ id: 'a', name: 'alpha', state: 'running' }),
+      makeContainer({ id: 'b', name: 'bravo', state: 'running' }),
+      makeContainer({ id: 'c', name: 'charlie', state: 'running' }),
+    ];
+    const before = names(store);
+
+    store.containers = store.containers.map((c) => (c.name === 'bravo' ? { ...c, state: 'exited' } : c));
+
+    expect(names(store)).toEqual(before);
   });
 
   it('applies the saved order regardless of container state', () => {
@@ -44,7 +58,7 @@ describe('docker store – unfolderedContainers with a saved order', () => {
     expect(names(store)).toEqual(['created', 'running', 'exited']);
   });
 
-  it('lists unranked containers after the ranked ones, in state order', () => {
+  it('lists unranked containers after the ranked ones, by name', () => {
     const store = useDockerStore();
     const folderStore = useFolderStore();
     store.containers = [
@@ -55,8 +69,8 @@ describe('docker store – unfolderedContainers with a saved order', () => {
     ];
     folderStore.unfolderedOrder = ['delta', 'beta'];
 
-    // delta and beta take the saved order; gamma (exited) precedes alpha (running).
-    expect(names(store)).toEqual(['delta', 'beta', 'gamma', 'alpha']);
+    // delta and beta take the saved order; alpha and gamma follow by name.
+    expect(names(store)).toEqual(['delta', 'beta', 'alpha', 'gamma']);
   });
 
   it('ignores names in the saved order that match no container', () => {
@@ -101,5 +115,13 @@ describe('docker store – unfolderedContainers with a saved order', () => {
 
     settingsStore.sortMode = 'manual';
     expect(names(store)).toEqual(['charlie', 'bravo', 'alpha']);
+  });
+
+  it('orders unranked names the way both backends prime them', () => {
+    const store = useDockerStore();
+    store.containers = ['app_db', 'app-db', 'app.db', 'appdb', 'app2', 'app10', 'App1', 'app01'].map((name) => makeContainer({ id: name, name }));
+
+    // Same fixture as FolderManagerTest and folder.service.spec.
+    expect(names(store)).toEqual(['App1', 'app01', 'app2', 'app10', 'app-db', 'app.db', 'app_db', 'appdb']);
   });
 });

@@ -69,6 +69,17 @@ export function parseMemoryCurrent(text: string): number {
     return parseIntOrZero(text.trim());
 }
 
+const MEMORY_STAT_PATTERNS = {
+    inactive_file: /^inactive_file\s+(\d+)$/m,
+    total_inactive_file: /^total_inactive_file\s+(\d+)$/m,
+};
+
+/** One counter from `memory.stat`: `inactive_file` on v2, `total_inactive_file` on v1. 0 when missing. */
+export function parseMemoryStatValue(text: string, key: keyof typeof MEMORY_STAT_PATTERNS): number {
+    const match = MEMORY_STAT_PATTERNS[key].exec(text);
+    return match === null ? 0 : parseIntOrZero(match[1]);
+}
+
 /** `memory.max`: a byte count, or the literal string `max`. */
 export function parseCgroupV2MemoryMax(text: string): number {
     const value = text.trim();
@@ -243,6 +254,8 @@ export interface CgroupContainerStats {
     systemTime: number;
     onlineCpus: number;
     memoryUsage: number;
+    /** Page cache the Docker CLI subtracts from `memoryUsage`. See `dockerMemoryUsage`. */
+    memoryInactiveFile: number;
     memoryLimit: number;
     ioRead: number;
     ioWrite: number;
@@ -271,6 +284,7 @@ export function readCgroupContainerStats(
         systemTime: systemCpu.systemTime,
         onlineCpus: systemCpu.onlineCpus,
         memoryUsage: 0,
+        memoryInactiveFile: 0,
         memoryLimit: 0,
         ioRead: 0,
         ioWrite: 0,
@@ -292,6 +306,9 @@ export function readCgroupContainerStats(
 
     const memCurrent = readFileIfPresent(`${dir}/memory.current`);
     if (memCurrent !== null) result.memoryUsage = parseMemoryCurrent(memCurrent);
+
+    const memStat = readFileIfPresent(`${dir}/memory.stat`);
+    if (memStat !== null) result.memoryInactiveFile = parseMemoryStatValue(memStat, 'inactive_file');
 
     const memMax = readFileIfPresent(`${dir}/memory.max`);
     if (memMax !== null) result.memoryLimit = parseCgroupV2MemoryMax(memMax);
@@ -316,6 +333,9 @@ function readCgroupV1Stats(fullId: string, cgroupRoot: string, result: CgroupCon
     const memDir = cgroupDir('v1', fullId, cgroupRoot, 'memory');
     const memUsage = readFileIfPresent(`${memDir}/memory.usage_in_bytes`);
     if (memUsage !== null) result.memoryUsage = parseMemoryCurrent(memUsage);
+
+    const memStat = readFileIfPresent(`${memDir}/memory.stat`);
+    if (memStat !== null) result.memoryInactiveFile = parseMemoryStatValue(memStat, 'total_inactive_file');
 
     const memLimit = readFileIfPresent(`${memDir}/memory.limit_in_bytes`);
     if (memLimit !== null) result.memoryLimit = parseCgroupV1MemoryLimit(memLimit);

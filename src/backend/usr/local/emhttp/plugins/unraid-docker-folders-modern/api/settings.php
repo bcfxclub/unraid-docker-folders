@@ -12,6 +12,7 @@ require_once dirname(__DIR__) . '/include/auth.php';
 require_once dirname(__DIR__) . '/classes/Database.php';
 require_once dirname(__DIR__) . '/classes/CronManager.php';
 require_once dirname(__DIR__) . '/classes/ComposeManager.php';
+require_once dirname(__DIR__) . '/classes/DockerClient.php';
 
 header('Content-Type: application/json');
 
@@ -113,6 +114,7 @@ function handlePost()
     'default_retention_count',
     'sort_mode', 'sort_folders',
     'backend_mode',
+    'memory_calculation',
   ];
   if (!in_array($key, $allowedKeys, true)) {
     errorResponse('Invalid settings key', 400);
@@ -135,6 +137,10 @@ function handlePost()
   // Validate sort_mode against the known set of modes.
   if ($key === 'sort_mode' && !in_array($value, SORT_MODES, true)) {
     errorResponse('Invalid sort_mode', 400);
+  }
+
+  if ($key === 'memory_calculation' && !in_array($value, MEMORY_CALCULATION_MODES, true)) {
+    errorResponse('Invalid memory_calculation', 400);
   }
 
   // Validate value length
@@ -205,6 +211,11 @@ function handlePost()
   }
 
   dfmUpsertSetting($db, $key, $value);
+
+  // DockerClient caches this one in /tmp. Drop the copy so it applies now.
+  if ($key === 'memory_calculation') {
+    @unlink(DockerClient::MEMORY_MODE_CACHE_PATH);
+  }
 
   // Keep the flash copy of the compose binary in step with the option: take a
   // copy when it is switched on and compose is already installed, drop it

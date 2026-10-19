@@ -35,6 +35,9 @@ define('BACKUP_ALLOWED_ROOTS', ['/mnt', '/boot/config/plugins']);
 // src/frontend/src/types/folder.ts.
 define('SORT_MODES', ['manual', 'name-asc', 'name-desc', 'status', 'created-asc', 'created-desc']);
 define('BACKEND_MODES', ['php', 'graphql']);
+// memory_calculation: 'docker' subtracts inactive page cache as `docker stats`
+// does, 'raw' keeps it. See DockerClient::dockerMemoryUsage().
+define('MEMORY_CALCULATION_MODES', ['docker', 'raw']);
 define('GRAPHQL_PLUGIN_NAME', 'unraid-api-plugin-docker-folders');
 define('UNRAID_API_DIR', '/usr/local/unraid-api');
 define('UNRAID_API_SOCKET', '/var/run/unraid-api.sock');

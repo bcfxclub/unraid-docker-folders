@@ -73,6 +73,7 @@ export const ALLOWED_SETTING_KEYS = [
     'default_retention_count',
     'sort_mode',
     'sort_folders',
+    'memory_calculation',
 ] as const;
 
 export type AllowedSettingKey = (typeof ALLOWED_SETTING_KEYS)[number];

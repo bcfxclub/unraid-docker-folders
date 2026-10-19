@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import { DatabaseService, type Row } from '../db/database.service.js';
 import { EventBusService } from '../events/event-bus.service.js';
+import { stripLeadingSlash } from '../updates/docker-refs.js';
 import { nowSeconds } from '../util/time.js';
 import {
     DockerFolder,
@@ -304,7 +305,8 @@ export class FolderService implements OnModuleInit {
      * Replace the manual order of the containers that are in no folder.
      *
      * The client sends the whole list in display order, so a name that is
-     * absent loses its row and falls back to the state-first default. Empty
+     * absent loses its row and gets a new position at the end on the next
+     * container-list load (`primeUnfolderedOrder`). Empty
      * names and duplicates are skipped, because `container_name` is the
      * primary key, and positions stay contiguous from zero.
      */
@@ -460,8 +462,9 @@ export class FolderService implements OnModuleInit {
      * Bring the folder tables in line with what Docker reports, the way
      * `containers.php` does on every container-list request.
      *
-     * Two jobs, ported from `FolderManager::reconcileContainerIds` and
-     * `syncComposeStacks`, and both are load-bearing rather than tidying:
+     * Three jobs, ported from `FolderManager::reconcileContainerIds`,
+     * `syncComposeStacks` and `primeUnfolderedOrder`, all load-bearing rather
+     * than tidying:
      *
      * - Unraid gives a container a new id every time it is recreated, which
      *   every image update does. Memberships are keyed by name, but drag and
@@ -470,14 +473,16 @@ export class FolderService implements OnModuleInit {
      * - A Compose project gets a folder of its own, created on first sight,
      *   and its unassigned containers are put into it. A container the user
      *   deliberately took out stays out, through `compose_sync_exclusions`.
+     * - Every container left unfoldered gets a saved position, so a fresh
+     *   install does not fall back to an order that moves on start and stop.
      *
      * One transaction where PHP uses several statements, so a crash part way
      * through cannot leave a stack folder with half its containers.
      *
-     * Announces only when a folder or a membership actually changed. The PHP
-     * publishes that as entity `folders`, which the frontend's dispatch table
-     * never matches, so another tab only caught up on its poll; this uses
-     * `folder`, which it does match. The `compose_stacks` bookkeeping is not
+     * Announces only when a folder, a membership or the unfoldered order
+     * actually changed. The PHP publishes that as entity `folders`, which the
+     * frontend's dispatch table never matches, so another tab only caught up
+     * on its poll; this uses `folder`, which it does match. The `compose_stacks` bookkeeping is not
      * announced, matching PHP, which never counted it as a change.
      *
      * Reconciling never deletes anything. With an empty list, which is what a
@@ -486,7 +491,16 @@ export class FolderService implements OnModuleInit {
     syncWithContainers(containers: readonly SyncContainer[]): boolean {
         const changed = this.db.write((db) => {
             reconcileIds(db, containers);
-            return syncComposeProjects(db, containers);
+            const synced = syncComposeProjects(db, containers);
+            // Isolated like PHP's: a failed prime must not roll back the id
+            // reconcile and Compose sync, or fail the container list.
+            let primed = false;
+            try {
+                primed = primeUnfolderedOrder(db, containers);
+            } catch (error) {
+                this.logger.warn(`Could not prime the unfoldered order: ${String(error)}`);
+            }
+            return synced || primed;
         });
 
         if (changed) this.events.publish('folder', 'compose_sync');
@@ -680,6 +694,63 @@ function syncComposeProjects(db: DatabaseSync, containers: readonly SyncContaine
     }
 
     return changed;
+}
+
+/**
+ * Give every unfoldered container with no saved position one. Ported from
+ * `FolderManager::primeUnfolderedOrder`.
+ *
+ * Runs after the Compose sync, so a stack container already sits in its
+ * folder. New names go after the saved order, in natural name order. Existing
+ * rows are never moved: only a drag reorders them.
+ */
+function primeUnfolderedOrder(db: DatabaseSync, containers: readonly SyncContainer[]): boolean {
+    const known = new Set(
+        (db
+            .prepare('SELECT container_name FROM container_folders UNION SELECT container_name FROM unfoldered_order')
+            .all() as { container_name: string }[]).map((row) => row.container_name)
+    );
+
+    const missing = new Set<string>();
+    for (const container of containers) {
+        const name = stripLeadingSlash(container.name);
+        if (name !== '' && !known.has(name)) missing.add(name);
+    }
+    if (missing.size === 0) return false;
+
+    let position = nextPosition(db, 'SELECT MAX(position) AS value FROM unfoldered_order');
+    let added = 0;
+    const insert = db.prepare('INSERT OR IGNORE INTO unfoldered_order (container_name, position) VALUES (?, ?)');
+    for (const name of [...missing].sort(naturalNameCompare)) {
+        added += Number(insert.run(name, position++).changes);
+    }
+    return added > 0;
+}
+
+/**
+ * Case-insensitive natural order: digit runs compare by value, everything else
+ * by code unit. Ported from `FolderManager::naturalNameCompare`, so both
+ * backends prime the same order; `Intl.Collator` sorts punctuation
+ * differently.
+ */
+export function naturalNameCompare(a: string, b: string): number {
+    const ca = a.toLowerCase().match(/\d+|\D+/g) ?? [];
+    const cb = b.toLowerCase().match(/\d+|\D+/g) ?? [];
+    const byUnit = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+    for (let i = 0; i < Math.min(ca.length, cb.length); i++) {
+        let x = ca[i];
+        let y = cb[i];
+        let cmp: number;
+        if (/^\d/.test(x) && /^\d/.test(y)) {
+            x = x.replace(/^0+(?=\d)/, '');
+            y = y.replace(/^0+(?=\d)/, '');
+            cmp = x.length - y.length || byUnit(x, y);
+        } else {
+            cmp = byUnit(x, y);
+        }
+        if (cmp !== 0) return Math.sign(cmp);
+    }
+    return Math.sign(ca.length - cb.length) || byUnit(a, b);
 }
 
 /**

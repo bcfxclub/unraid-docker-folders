@@ -31,6 +31,8 @@ final class DockerClientStatsTest extends TestCase
     {
         $this->client = new DockerClient();
         $this->reflection = new ReflectionClass(DockerClient::class);
+        // Never let a test reach the settings table.
+        $this->setMemoryMode('docker');
     }
 
     /**
@@ -41,6 +43,15 @@ final class DockerClientStatsTest extends TestCase
         $m = $this->reflection->getMethod($method);
         $m->setAccessible(true);
         return $m->invoke($this->client, ...$args);
+    }
+
+    /**
+     * Set the memory_calculation mode memoryMode() would otherwise read from
+     * the settings table.
+     */
+    private function setMemoryMode(string $mode): void
+    {
+        $this->reflection->getProperty('memoryMode')->setValue($this->client, $mode);
     }
 
     // ---------------------------------------------------------------
@@ -187,6 +198,7 @@ final class DockerClientStatsTest extends TestCase
     #[Test]
     public function memoryStats_normal_usage(): void
     {
+        $this->setMemoryMode('raw');
         $stats = [
             'memory_stats' => [
                 'usage' => 524288000,   // ~500 MB
@@ -204,6 +216,7 @@ final class DockerClientStatsTest extends TestCase
     #[Test]
     public function memoryStats_missing_fields(): void
     {
+        $this->setMemoryMode('raw');
         $result = $this->invoke('calculateMemoryStats', [[]]);
 
         $this->assertSame(0, $result['usage']);
@@ -214,6 +227,7 @@ final class DockerClientStatsTest extends TestCase
     #[Test]
     public function memoryStats_zero_limit_returns_zero_percent(): void
     {
+        $this->setMemoryMode('raw');
         $stats = [
             'memory_stats' => [
                 'usage' => 100,
@@ -228,6 +242,7 @@ final class DockerClientStatsTest extends TestCase
     #[Test]
     public function memoryStats_full_usage(): void
     {
+        $this->setMemoryMode('raw');
         $stats = [
             'memory_stats' => [
                 'usage' => 1000,
@@ -237,6 +252,79 @@ final class DockerClientStatsTest extends TestCase
 
         $result = $this->invoke('calculateMemoryStats', [$stats]);
         $this->assertSame(100.0, $result['percent']);
+    }
+
+    #[Test]
+    public function memoryStats_raw_mode_keeps_page_cache(): void
+    {
+        $this->setMemoryMode('raw');
+        $stats = ['memory_stats' => ['usage' => 1000, 'limit' => 2000, 'stats' => ['inactive_file' => 400]]];
+
+        $result = $this->invoke('calculateMemoryStats', [$stats]);
+        $this->assertSame(1000, $result['usage']);
+    }
+
+    #[Test]
+    public function memoryStats_docker_mode_subtracts_v2_inactive_file(): void
+    {
+        $stats = ['memory_stats' => ['usage' => 1000, 'limit' => 2000, 'stats' => ['inactive_file' => 400]]];
+
+        $result = $this->invoke('calculateMemoryStats', [$stats]);
+        $this->assertSame(600, $result['usage']);
+        $this->assertSame(30.0, $result['percent']);
+    }
+
+    #[Test]
+    public function memoryStats_docker_mode_prefers_v1_total_inactive_file(): void
+    {
+        $stats = ['memory_stats' => ['usage' => 1000, 'limit' => 2000, 'stats' => [
+            'total_inactive_file' => 300,
+            'inactive_file' => 100,
+        ]]];
+
+        $result = $this->invoke('calculateMemoryStats', [$stats]);
+        $this->assertSame(700, $result['usage']);
+    }
+
+    #[Test]
+    public function memoryStats_docker_mode_falls_back_to_inactive_file_when_v1_key_is_not_smaller(): void
+    {
+        $stats = ['memory_stats' => ['usage' => 1000, 'limit' => 2000, 'stats' => [
+            'total_inactive_file' => 1000,
+            'inactive_file' => 100,
+        ]]];
+
+        $result = $this->invoke('calculateMemoryStats', [$stats]);
+        $this->assertSame(900, $result['usage']);
+    }
+
+    #[Test]
+    public function memoryStats_docker_mode_keeps_usage_when_cache_is_not_smaller(): void
+    {
+        $stats = ['memory_stats' => ['usage' => 1000, 'limit' => 2000, 'stats' => ['inactive_file' => 1000]]];
+
+        $result = $this->invoke('calculateMemoryStats', [$stats]);
+        $this->assertSame(1000, $result['usage']);
+    }
+
+    #[Test]
+    public function memoryStats_docker_mode_without_counters_keeps_usage(): void
+    {
+        $stats = ['memory_stats' => ['usage' => 1000, 'limit' => 2000]];
+
+        $result = $this->invoke('calculateMemoryStats', [$stats]);
+        $this->assertSame(1000, $result['usage']);
+    }
+
+    #[Test]
+    public function parseMemoryStatValue_reads_the_named_counter(): void
+    {
+        $text = "anon 5000\nfile 9000\nactive_file 2000\ninactive_file 7000\n";
+        $this->assertSame(7000, $this->invoke('parseMemoryStatValue', [$text, 'inactive_file']));
+        $this->assertSame(0, $this->invoke('parseMemoryStatValue', [$text, 'total_inactive_file']));
+
+        $v1 = "cache 9000\ninactive_file 10\ntotal_inactive_file 7000\n";
+        $this->assertSame(7000, $this->invoke('parseMemoryStatValue', [$v1, 'total_inactive_file']));
     }
 
     // ---------------------------------------------------------------

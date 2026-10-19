@@ -19,6 +19,8 @@ class DockerClient
   private $imageInfoCache = [];
   /** Cached result of readHostMemoryTotal(), null until first read. */
   private $hostMemoryTotal = null;
+  /** The memory_calculation setting, null until first read. See memoryMode(). */
+  private $memoryMode = null;
 
   private static $cgroupLayout = null;
   private static $cgroupLayoutDetected = false;
@@ -26,6 +28,10 @@ class DockerClient
   const SLOW_CACHE_PATH = '/tmp/unraid-docker-slow-stats.json';
   const CPU_SAMPLES_PATH = '/tmp/unraid-docker-stats-cpu.json';
   const SLOW_CACHE_TTL = 60;
+  // The memory_calculation setting, cached so a stats poll does not open
+  // data.db on the flash drive. settings.php deletes it on save.
+  const MEMORY_MODE_CACHE_PATH = '/tmp/unraid-docker-memory-mode';
+  const MEMORY_MODE_CACHE_TTL = 60;
   // Port bindings, privileged, CapAdd and ExposedPorts are all immutable for a
   // given container ID (`docker update` cannot change them; a recreate yields a
   // new ID), so this cache has no TTL — entries are added once on first sight
@@ -62,6 +68,54 @@ class DockerClient
   public function getLastError()
   {
     return $this->lastError;
+  }
+
+  /**
+   * The memory_calculation setting, read once per instance so no caller has
+   * to pass it, and from data.db at most once per MEMORY_MODE_CACHE_TTL.
+   * Anything but 'raw', or a failed read, means 'docker'.
+   */
+  private function memoryMode()
+  {
+    if ($this->memoryMode === null) {
+      $cachedAt = @filemtime(self::MEMORY_MODE_CACHE_PATH);
+      if ($cachedAt !== false && time() - $cachedAt < self::MEMORY_MODE_CACHE_TTL) {
+        $mode = trim((string) @file_get_contents(self::MEMORY_MODE_CACHE_PATH));
+      } else {
+        $mode = null;
+        try {
+          require_once __DIR__ . '/Database.php';
+          $mode = Database::getInstance()->fetchValue('SELECT value FROM settings WHERE key = ?', ['memory_calculation']);
+        } catch (Throwable $e) {
+          // Fall through to the default.
+        }
+        @file_put_contents(self::MEMORY_MODE_CACHE_PATH, $mode === 'raw' ? 'raw' : 'docker');
+      }
+      $this->memoryMode = $mode === 'raw' ? 'raw' : 'docker';
+    }
+    return $this->memoryMode;
+  }
+
+  /**
+   * Memory usage as `docker stats` counts it: usage less inactive file cache,
+   * when that cache is smaller than usage. The Docker CLI's
+   * calculateMemUsageUnixNoCache.
+   */
+  private static function dockerMemoryUsage($usage, $inactiveFile)
+  {
+    return ($inactiveFile > 0 && $inactiveFile < $usage) ? $usage - $inactiveFile : $usage;
+  }
+
+  /**
+   * One counter from a cgroup memory.stat file: `inactive_file` on v2,
+   * `total_inactive_file` on v1. 0 when the key is missing.
+   */
+  private static function parseMemoryStatValue($memoryStat, $key)
+  {
+    if (preg_match('/^' . preg_quote($key, '/') . '\s+(\d+)$/m', $memoryStat, $m)) {
+      return (int) $m[1];
+    }
+    return 0;
   }
 
   /**
@@ -889,6 +943,7 @@ class DockerClient
       'system_time' => $systemCpu['system_time'],
       'online_cpus' => $systemCpu['online_cpus'],
       'memory_usage' => 0,
+      'memory_inactive_file' => 0,
       'memory_limit' => 0,
       'io_read' => 0,
       'io_write' => 0,
@@ -911,6 +966,10 @@ class DockerClient
     $memCurrent = @file_get_contents($dir . '/memory.current');
     if ($memCurrent !== false) {
       $result['memory_usage'] = (int) trim($memCurrent);
+    }
+    $memStat = @file_get_contents($dir . '/memory.stat');
+    if ($memStat !== false) {
+      $result['memory_inactive_file'] = self::parseMemoryStatValue($memStat, 'inactive_file');
     }
     $memMax = @file_get_contents($dir . '/memory.max');
     if ($memMax !== false) {
@@ -950,6 +1009,10 @@ class DockerClient
     $memUsage = @file_get_contents($memDir . '/memory.usage_in_bytes');
     if ($memUsage !== false) {
       $result['memory_usage'] = (int) trim($memUsage);
+    }
+    $memStat = @file_get_contents($memDir . '/memory.stat');
+    if ($memStat !== false) {
+      $result['memory_inactive_file'] = self::parseMemoryStatValue($memStat, 'total_inactive_file');
     }
     $memLimit = @file_get_contents($memDir . '/memory.limit_in_bytes');
     if ($memLimit !== false) {
@@ -1181,11 +1244,14 @@ class DockerClient
         $memLimit = $hostMemory;
       }
 
-      $memPercent = $memLimit > 0 ? round(($cg['memory_usage'] / $memLimit) * 100, 2) : 0;
+      $memUsage = $this->memoryMode() === 'docker'
+        ? self::dockerMemoryUsage($cg['memory_usage'], $cg['memory_inactive_file'])
+        : $cg['memory_usage'];
+      $memPercent = $memLimit > 0 ? round(($memUsage / $memLimit) * 100, 2) : 0;
 
       $output[$id] = [
         'cpuPercent' => $cpuPercent,
-        'memoryUsage' => $cg['memory_usage'],
+        'memoryUsage' => $memUsage,
         'memoryLimit' => $memLimit,
         'memoryPercent' => $memPercent,
         'blockRead' => $cg['io_read'],
@@ -1950,6 +2016,14 @@ class DockerClient
     $memStats = $stats['memory_stats'] ?? [];
     $usage = $memStats['usage'] ?? 0;
     $limit = $memStats['limit'] ?? 1;
+
+    if ($this->memoryMode() === 'docker') {
+      // The v1 key when it is smaller than usage, else the v2 key, as the CLI checks them.
+      $counters = $memStats['stats'] ?? [];
+      $v1 = $counters['total_inactive_file'] ?? null;
+      $inactiveFile = ($v1 !== null && $v1 < $usage) ? $v1 : ($counters['inactive_file'] ?? 0);
+      $usage = self::dockerMemoryUsage($usage, $inactiveFile);
+    }
     $percent = $limit > 0 ? round(($usage / $limit) * 100, 2) : 0;
 
     return ['usage' => $usage, 'limit' => $limit, 'percent' => $percent];

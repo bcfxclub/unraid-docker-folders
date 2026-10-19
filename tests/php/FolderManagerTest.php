@@ -50,14 +50,16 @@ final class FolderManagerTest extends TestCase
         $prop->setValue(null, $database);
     }
 
+    /** A container as DockerClient lists it, with no labels. */
+    private static function container(string $name): array
+    {
+        return ['id' => "id-$name", 'name' => "/$name", 'labels' => []];
+    }
+
     /** A container as DockerClient lists it, in Compose project `$project`. */
     private static function composeContainer(string $name, string $project): array
     {
-        return [
-            'id' => "id-$name",
-            'name' => "/$name",
-            'labels' => ['com.docker.compose.project' => $project],
-        ];
+        return ['labels' => ['com.docker.compose.project' => $project]] + self::container($name);
     }
 
     /** @return string[] */
@@ -251,6 +253,69 @@ final class FolderManagerTest extends TestCase
 
         self::assertSame(['db'], $this->folderMembers($folderId));
         self::assertSame(0, $this->db->getRowCount('compose_sync_exclusions'));
+    }
+
+    #[Test]
+    public function primeGivesAFreshInstallAnOrderByName(): void
+    {
+        $changed = $this->manager->primeUnfolderedOrder([
+            self::container('zulu'),
+            self::container('Alpha'),
+            self::container('app10'),
+            self::container('app9'),
+        ]);
+
+        self::assertTrue($changed);
+        self::assertSame(['Alpha', 'app9', 'app10', 'zulu'], $this->manager->getUnfolderedOrder());
+    }
+
+    #[Test]
+    public function primeSortsNamesExactlyAsTheGraphqlPluginDoes(): void
+    {
+        $this->manager->primeUnfolderedOrder(array_map([self::class, 'container'], ['app_db', 'app-db', 'app.db', 'appdb', 'app2', 'app10', 'App1', 'app01']));
+
+        // Same fixture as folder.service.spec and the frontend store spec.
+        self::assertSame(['App1', 'app01', 'app2', 'app10', 'app-db', 'app.db', 'app_db', 'appdb'], $this->manager->getUnfolderedOrder());
+    }
+
+    #[Test]
+    public function primeAppendsNewNamesAndNeverMovesSavedOnes(): void
+    {
+        $this->manager->setUnfolderedOrder(['zulu', 'alpha']);
+
+        $this->manager->primeUnfolderedOrder([self::container('alpha'), self::container('mike'), self::container('zulu')]);
+
+        self::assertSame(
+            [
+                ['container_name' => 'zulu', 'position' => 0],
+                ['container_name' => 'alpha', 'position' => 1],
+                ['container_name' => 'mike', 'position' => 2],
+            ],
+            $this->orderRows()
+        );
+    }
+
+    #[Test]
+    public function primeIsANoOpOnceEveryContainerHasAPosition(): void
+    {
+        $containers = [self::container('alpha'), self::container('bravo')];
+        $this->manager->primeUnfolderedOrder($containers);
+
+        self::assertFalse($this->manager->primeUnfolderedOrder($containers));
+        self::assertCount(2, $this->orderRows());
+    }
+
+    #[Test]
+    public function primeSkipsFolderMembersIncludingAFreshComposeStack(): void
+    {
+        $media = $this->manager->createFolder(['name' => 'Media']);
+        $this->manager->addContainerToFolder($media['id'], 'id-plex', 'plex');
+        $containers = [self::container('plex'), self::composeContainer('db', 'app'), self::container('alpha')];
+
+        $this->manager->syncComposeStacks($containers);
+        $this->manager->primeUnfolderedOrder($containers);
+
+        self::assertSame(['alpha'], $this->manager->getUnfolderedOrder());
     }
 
     #[Test]

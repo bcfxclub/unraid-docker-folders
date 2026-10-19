@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026.10.18-dev4
+### Fixed
+- Containers outside folders no longer reshuffle after loading, because every part of the plugin now sorts their names the same way.
+- Loading the container list at the same time from several places no longer fails while the starting order for unfoldered containers is saved.
+
+## 2026.10.18-dev3
+### Fixed
+- Containers outside any folder now keep their place in the list instead of jumping around when they start or stop.
+
+## 2026.10.18-dev2
+### New
+- A new memory calculation setting under Settings > Docker Folders > Display lets you switch container memory usage back to the raw cgroup number. (#19)
+
+### Fixed
+- Container memory usage now matches what docker stats shows instead of reading higher because page cache was counted. (#19)
+
+### Internal
+- Internal fixes and performance improvements.
+
 ## 2026.10.11
 ### New
 - A new GraphQL backend, marked unstable, can be chosen in the Backend section of the settings page as an alternative to PHP.
