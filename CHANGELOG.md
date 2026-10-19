@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.10.19
+### New
+- A new memory calculation setting under Settings > Docker Folders > Display switches container memory usage between the Docker CLI method (the default) and the raw cgroup number. (#19)
+
+### Fixed
+- Container memory usage now matches `docker stats` instead of reading higher because page cache was counted. (#19)
+- Unfoldered containers keep their place in the list when they start or stop instead of jumping around.
+- Stats polling no longer reads the memory setting from the flash drive on every update. (#19)
+
+### Internal
+- Internal fixes and performance improvements.
+
 ## 2026.10.18-dev4
 ### Fixed
 - Containers outside folders no longer reshuffle after loading, because every part of the plugin now sorts their names the same way.
