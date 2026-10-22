@@ -375,7 +375,8 @@ async function runUnit(unit: UpdateUnit, recreate = false): Promise<UnitResult> 
       const containerIds = unit.containers.map((c) => c.id);
       await useBackend().streams.pull(
         unit.image,
-        recreate ? { containerIds, recreate: true } : { containerIds },
+        // The recreate pass applies the image just pulled, so no second pull.
+        recreate ? { containerIds, recreateOnly: true } : { containerIds },
         onEvent,
         controller.signal,
       );

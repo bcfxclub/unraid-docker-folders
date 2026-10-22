@@ -262,7 +262,8 @@ describe('BatchPullProgressModal', () => {
     expect(pending[3].url).toContain('pull.php?image=nginx%3Alatest');
     const body = new URLSearchParams(pending[3].body);
     expect(body.get('containers')).toBe('id-web');
-    expect(body.get('recreate')).toBe('1');
+    expect(body.get('recreate_only')).toBe('1');
+    expect(body.get('recreate')).toBeNull();
     expect(pending[4].url).toContain('compose-stream.php');
     expect(pending[4].url).toContain('action=up');
     // Offered once.
@@ -387,7 +388,7 @@ describe('BatchPullProgressModal – parent-window (iframe) path', () => {
 
     await hostPresses('recreate');
     expect(latestActions()).toEqual(['cancel']);
-    expect(new URLSearchParams(pending[1].body).get('recreate')).toBe('1');
+    expect(new URLSearchParams(pending[1].body).get('recreate_only')).toBe('1');
 
     pending[1].finish();
     await settle();

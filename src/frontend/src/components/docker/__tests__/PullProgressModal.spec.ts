@@ -72,7 +72,7 @@ describe('PullProgressModal', () => {
 
     expect(mocks.pull).toHaveBeenCalledTimes(2);
     expect(mocks.pull.mock.calls[0][1]).toEqual({});
-    expect(mocks.pull.mock.calls[1][1]).toEqual({ containerIds: ['id-web'], recreate: true });
+    expect(mocks.pull.mock.calls[1][1]).toEqual({ containerIds: ['id-web'], recreateOnly: true });
     expect(wrapper.text()).toContain('web updated successfully');
     // Offered once: the container now runs the new image.
     expect(recreateButton(wrapper)).toBeUndefined();
@@ -84,6 +84,19 @@ describe('PullProgressModal', () => {
 
     const wrapper = await mountOpen();
 
+    expect(recreateButton(wrapper)).toBeUndefined();
+  });
+
+  it('applies a pulled update with a recreate and no pull', async () => {
+    useSettingsStore().postPullAction = 'pull_only';
+    playScripts(recreated);
+
+    const wrapper = await mountOpen({ recreateOnly: true });
+
+    expect(mocks.pull).toHaveBeenCalledTimes(1);
+    expect(mocks.pull.mock.calls[0][1]).toEqual({ containerIds: ['id-web'], recreateOnly: true });
+    expect(wrapper.text()).toContain('Apply Update');
+    expect(wrapper.text()).toContain('web updated successfully');
     expect(recreateButton(wrapper)).toBeUndefined();
   });
 
@@ -187,7 +200,7 @@ describe('PullProgressModal – parent-window (iframe) path', () => {
     await mountOpen();
     await hostPresses('recreate');
 
-    expect(mocks.pull.mock.calls[1][1]).toEqual({ containerIds: ['id-web'], recreate: true });
+    expect(mocks.pull.mock.calls[1][1]).toEqual({ containerIds: ['id-web'], recreateOnly: true });
     expect(latestActions()).toEqual(['close']);
   });
 });

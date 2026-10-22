@@ -206,6 +206,7 @@ export const phpBackend: Backend = {
         body.append('containers', opts.containerIds.join(','));
       }
       if (opts.recreate) body.append('recreate', '1');
+      if (opts.recreateOnly) body.append('recreate_only', '1');
       return runSseStream(`${API_BASE}/pull.php?image=${enc(image)}`, body, onEvent, signal);
     },
     compose: (project, action, opts, onEvent, signal) => {

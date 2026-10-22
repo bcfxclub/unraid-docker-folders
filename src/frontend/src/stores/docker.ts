@@ -75,6 +75,8 @@ export interface PullRequest {
   managed: string | null;
   id: string;
   force?: boolean;
+  /** Apply an update pulled earlier: recreate this container, no pull. */
+  recreateOnly?: boolean;
 }
 
 /**

@@ -28,8 +28,8 @@ function wsUrl(): string {
 }
 
 const PULL_EVENTS_SUBSCRIPTION = `
-  subscription DockerFoldersImagePullEvents($image: String!, $containerIds: [String!], $recreate: Boolean) {
-    dockerFoldersImagePullEvents(image: $image, containerIds: $containerIds, recreate: $recreate) {
+  subscription DockerFoldersImagePullEvents($image: String!, $containerIds: [String!], $recreate: Boolean, $recreateOnly: Boolean) {
+    dockerFoldersImagePullEvents(image: $image, containerIds: $containerIds, recreate: $recreate, recreateOnly: $recreateOnly) {
       event
       data
     }
@@ -139,7 +139,12 @@ export const graphqlStreams: Backend['streams'] = {
   pull: (image, opts, onEvent, signal) =>
     runSubscriptionStream(
       PULL_EVENTS_SUBSCRIPTION,
-      { image, containerIds: opts.containerIds ?? null, recreate: opts.recreate ?? null },
+      {
+        image,
+        containerIds: opts.containerIds ?? null,
+        recreate: opts.recreate ?? null,
+        recreateOnly: opts.recreateOnly ?? null,
+      },
       'dockerFoldersImagePullEvents',
       onEvent,
       signal,

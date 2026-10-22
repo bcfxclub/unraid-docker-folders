@@ -501,15 +501,22 @@ function pullPayload(force = false): PullRequest {
   return force ? { image, name, managed, id, force } : { image, name, managed, id };
 }
 
+/** Apply the image already on disk: recreate, with no pull. */
+function recreatePayload(): PullRequest {
+  const { image, name, managed, id } = props.container;
+  return { image, name, managed, id, recreateOnly: true };
+}
+
 function handleConfirm() {
   const action = confirmAction.value;
   confirmAction.value = null;
   if (action === 'stop') emit('stop', props.container.id);
   else if (action === 'restart') emit('restart', props.container.id);
   else if (action === 'remove') emit('remove', props.container.id, removeImageToo.value);
-  // A recreate goes through the force-update path: a pull that finds the
-  // image already on disk, then a recreate of exactly this container.
-  else if (action === 'force-update' || action === 'recreate') emit('pull', pullPayload(true));
+  else if (action === 'force-update') emit('pull', pullPayload(true));
+  // No pull: the newer image is already on disk. Pulling again would fail for
+  // an image built locally.
+  else if (action === 'recreate') emit('pull', recreatePayload());
   removeImageToo.value = false;
 }
 

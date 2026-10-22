@@ -3,7 +3,7 @@
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-4 border-b border-border">
           <div class="min-w-0">
-            <h2 class="text-base font-semibold text-text truncate">{{ force ? 'Force Update' : 'Pull Image Update' }}</h2>
+            <h2 class="text-base font-semibold text-text truncate">{{ modalTitle }}</h2>
             <p class="text-xs text-text-secondary font-mono truncate mt-0.5">{{ image }}</p>
           </div>
           <button
@@ -85,6 +85,8 @@ interface Props {
   containerName: string;
   containerId?: string;
   force?: boolean;
+  /** Apply an update pulled earlier: recreate the container, no pull. */
+  recreateOnly?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -113,6 +115,11 @@ const recreateStatus = ref<'recreating' | 'recreated' | 'recreate_error' | null>
 const recreateMessage = ref('');
 let abortController: AbortController | null = null;
 
+const modalTitle = computed(() => {
+  if (props.recreateOnly) return 'Apply Update';
+  return props.force ? 'Force Update' : 'Pull Image Update';
+});
+
 /**
  * "Pull + offer recreate": once the pull is in, offer to recreate the
  * container so it runs the new image. A restart would keep the old one.
@@ -122,6 +129,7 @@ const canOfferRecreate = computed(() =>
   isDone.value
   && isComplete.value
   && !props.force
+  && !props.recreateOnly
   && !!props.containerId
   && postPullAction.value === 'pull_and_offer_restart'
   && recreateStatus.value === null,
@@ -142,7 +150,7 @@ const { inIframe } = parentModal;
 function openParent() {
   parentModal.open({
     kind: 'pull-progress',
-    title: `${props.force ? 'Force Update' : 'Pull Image'} — ${props.image}`,
+    title: `${props.recreateOnly || props.force ? modalTitle.value : 'Pull Image'} — ${props.image}`,
     size: 'md',
     dismissable: false,
     fields: [
@@ -225,14 +233,19 @@ function reset() {
 
 async function startPull() {
   reset();
+  if (props.recreateOnly) statusMessage.value = `Recreating ${props.containerName}...`;
   if (inIframe) openParent();
+  if (props.recreateOnly && props.containerId) {
+    await runStream({ containerIds: [props.containerId], recreateOnly: true });
+    return;
+  }
   await runStream(props.force && props.containerId ? { containerIds: [props.containerId], recreate: true } : {});
 }
 
 /**
- * Recreate the container on the image just pulled. Goes through the same pull
- * stream a force update uses: the layers are already on disk, so the pull is
- * a registry check, and the stream then recreates exactly this container.
+ * Recreate the container on the image just pulled, with no second pull: the
+ * image is on disk, and pulling again could bring in a build newer than the
+ * one the user just saw.
  */
 async function startRecreate() {
   if (!props.containerId) return;
@@ -241,10 +254,10 @@ async function startRecreate() {
   statusMessage.value = `Recreating ${props.containerName}...`;
   hideActions();
   patchStatus();
-  await runStream({ containerIds: [props.containerId], recreate: true });
+  await runStream({ containerIds: [props.containerId], recreateOnly: true });
 }
 
-async function runStream(opts: { containerIds?: string[]; recreate?: boolean }) {
+async function runStream(opts: { containerIds?: string[]; recreate?: boolean; recreateOnly?: boolean }) {
   const controller = new AbortController();
   abortController = controller;
 

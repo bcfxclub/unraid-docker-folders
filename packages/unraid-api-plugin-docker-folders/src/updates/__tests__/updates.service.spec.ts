@@ -548,6 +548,23 @@ describe('UpdatesService', () => {
             ]);
         });
 
+        it('rejects recreateOnly without containerIds', async () => {
+            await expect(service.pullImage(PLEX, { recreateOnly: true })).rejects.toThrow(BadRequestException);
+        });
+
+        it('recreateOnly recreates the requested container without pulling', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID), container('plex2', PLEX, PLEX_IMAGE_ID)]);
+
+            const result = await service.pullImage(PLEX, { containers: [CONTAINER_IDS.plex], recreateOnly: true });
+
+            expect(result).toEqual({ success: true, image: PLEX, error: null });
+            // No pull and no registry call: the image is already on disk, and
+            // one built locally could not be pulled at all.
+            expect(docker.calls.filter((call) => call.startsWith('pullImage') || call.startsWith('distribution'))).toEqual([]);
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex]);
+            expect(events.publish).toHaveBeenCalledWith('container', 'updated');
+        });
+
         it('aborts a pull stuck past the 10 minute timeout, keeping that as the reason', async () => {
             vi.useFakeTimers();
             try {
@@ -600,6 +617,26 @@ describe('UpdatesService', () => {
             await done;
 
             expect(seen).toEqual(['status', 'progress', 'complete', 'done']);
+        });
+
+        it('recreateOnly streams the recreate and ends with Recreate complete', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+
+            const seen: { type: string; message?: string }[] = [];
+            const done = new Promise<void>((resolve) => {
+                service
+                    .pullImageEvents(PLEX, { containers: [CONTAINER_IDS.plex], recreateOnly: true })
+                    .subscribe({
+                        next: (event) => {
+                            seen.push(event as { type: string; message?: string });
+                            if (event.type === 'done') resolve();
+                        },
+                    });
+            });
+            await done;
+
+            expect(seen.map((event) => event.type)).toEqual(['status', 'recreating', 'recreated', 'complete', 'done']);
+            expect(seen[3].message).toBe('Recreate complete');
         });
 
         it('emits error then done on failure, never complete', async () => {

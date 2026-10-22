@@ -83,6 +83,13 @@ export interface PullOptions {
     containers?: string[];
     /** Force a recreate even without a detected update. Requires `containers`. */
     recreate?: boolean;
+    /**
+     * Skip the pull and recreate `containers` on the image already on disk,
+     * PHP's `recreate_only=1`. Applies an update pulled earlier: pulling again
+     * would fail for an image built locally, and could swap in a build newer
+     * than the one the user chose to apply. Requires `containers`.
+     */
+    recreateOnly?: boolean;
 }
 
 function toStatus(row: Row, notes: Map<string, Row>): DockerFoldersImageUpdateStatus {
@@ -275,7 +282,8 @@ export class UpdatesService {
      * for the same pull as a stream of every intermediate event.
      */
     async pullImage(image: string, options?: PullOptions): Promise<DockerFoldersImagePullResult> {
-        const { onlyContainerIds, forceRecreate } = this.validatePullRequest(image, options);
+        const { onlyContainerIds, forceRecreate, recreateOnly } = this.validatePullRequest(image, options);
+        if (recreateOnly && onlyContainerIds !== null) return this.runRecreateOnly(image, onlyContainerIds, () => {});
         return this.runPull(image, onlyContainerIds, forceRecreate, () => {});
     }
 
@@ -293,17 +301,26 @@ export class UpdatesService {
      * running after the browser disconnects.
      */
     pullImageEvents(image: string, options?: PullOptions): Observable<DockerFoldersPullEvent> {
-        const { onlyContainerIds, forceRecreate } = this.validatePullRequest(image, options);
+        const { onlyContainerIds, forceRecreate, recreateOnly } = this.validatePullRequest(image, options);
 
         return new Observable<DockerFoldersPullEvent>((subscriber) => {
-            this.runPull(image, onlyContainerIds, forceRecreate, (event) => subscriber.next(event))
+            const emit = (event: DockerFoldersPullEvent) => subscriber.next(event);
+            const run =
+                recreateOnly && onlyContainerIds !== null
+                    ? this.runRecreateOnly(image, onlyContainerIds, emit)
+                    : this.runPull(image, onlyContainerIds, forceRecreate, emit);
+            run
                 .then((result) => {
                     // Exactly one terminal event, then `done`, then complete —
                     // mirrors pull.php's `complete`/`error` followed
                     // unconditionally by `done`.
                     subscriber.next(
                         result.success
-                            ? { type: 'complete', message: 'Pull complete', image: result.image }
+                            ? {
+                                  type: 'complete',
+                                  message: recreateOnly ? 'Recreate complete' : 'Pull complete',
+                                  image: result.image,
+                              }
                             : { type: 'error', message: result.error ?? 'Pull failed' }
                     );
                     subscriber.next({ type: 'done', finished: true });
@@ -657,7 +674,7 @@ export class UpdatesService {
     private validatePullRequest(
         image: string,
         options?: PullOptions
-    ): { onlyContainerIds: Set<string> | null; forceRecreate: boolean } {
+    ): { onlyContainerIds: Set<string> | null; forceRecreate: boolean; recreateOnly: boolean } {
         if (!IMAGE_NAME_PATTERN.test(image) || image.length > MAX_IMAGE_NAME_LENGTH) {
             throw new BadRequestException('Invalid image name');
         }
@@ -677,7 +694,12 @@ export class UpdatesService {
             throw new BadRequestException('recreate requires containers');
         }
 
-        return { onlyContainerIds, forceRecreate };
+        const recreateOnly = options?.recreateOnly === true;
+        if (recreateOnly && onlyContainerIds === null) {
+            throw new BadRequestException('recreateOnly requires containers');
+        }
+
+        return { onlyContainerIds, forceRecreate, recreateOnly };
     }
 
     /**
@@ -731,6 +753,19 @@ export class UpdatesService {
     }
 
     /** `pull.php`'s whole body, minus SSE framing — `emit` takes its place. */
+    /** `pull.php`'s `recreate_only=1` branch: no pull, only the recreate. */
+    private async runRecreateOnly(
+        image: string,
+        onlyContainerIds: Set<string>,
+        emit: (event: DockerFoldersPullEvent) => void
+    ): Promise<DockerFoldersImagePullResult> {
+        this.updateLog.log(`RECREATE ONLY ${image}`);
+        emit({ type: 'status', message: 'Recreating...' });
+        await this.autoRecreate(image, onlyContainerIds, emit);
+        this.events.publish('container', 'updated');
+        return { success: true, image, error: null };
+    }
+
     private async runPull(
         image: string,
         onlyContainerIds: Set<string> | null,
@@ -934,7 +969,7 @@ export class UpdatesService {
         } catch (error) {
             const message = errorMessage(error);
             this.updateLog.log(`RECREATE ERROR ${image}: ${message}`);
-            emit({ type: 'recreate_error', container: '', message: `Auto-recreate failed: ${message}` });
+            emit({ type: 'recreate_error', container: '', message: `Recreate failed: ${message}` });
         }
     }
 

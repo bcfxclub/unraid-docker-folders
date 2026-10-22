@@ -712,7 +712,12 @@ Page URLs are `/<menu section>/<filename without .page>`. They come from the
 - `POST /api/settings.php` - Update setting (body: `{key, value}`)
 - `GET /api/stats.php?ids=id1,id2` - Get live resource stats for containers
 - `GET /api/updates.php` - Image update availability
-- `POST /api/pull.php` - Pull updated images (supports batches)
+- `POST /api/pull.php` - Pull updated images (supports batches). `containers=`
+  limits the recreate to those ids, `recreate=1` forces one, and
+  `recreate_only=1` skips the pull and recreates `containers=` on the image
+  already on disk. Apply Update and the Recreate buttons use `recreate_only`,
+  because a second pull fails for a locally built image. The plugin takes
+  `recreateOnly` on the same mutation and subscription.
 - `GET|POST /api/compose.php` - Read and apply Compose files
 - `GET /api/compose-stream.php` - Stream Compose command output
 - `GET|POST /api/schedules.php` - Container action schedules. The list GET also

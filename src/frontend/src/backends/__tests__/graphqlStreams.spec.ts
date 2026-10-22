@@ -80,7 +80,7 @@ describe('graphqlStreams.pull', () => {
 
     const sent = JSON.parse(socket.sent[1]);
     expect(sent.type).toBe('subscribe');
-    expect(sent.payload.variables).toEqual({ image: 'plex', containerIds: ['abc'], recreate: true });
+    expect(sent.payload.variables).toEqual({ image: 'plex', containerIds: ['abc'], recreate: true, recreateOnly: null });
 
     socket.triggerMessage({
       type: 'next',
@@ -102,13 +102,31 @@ describe('graphqlStreams.pull', () => {
     expect(onEvent).toHaveBeenNthCalledWith(2, 'done', { finished: true });
   });
 
+  it('sends recreateOnly, and the subscription declares it', async () => {
+    const promise = graphqlStreams.pull('plex', { containerIds: ['abc'], recreateOnly: true }, vi.fn(), new AbortController().signal);
+    const socket = FakeWebSocket.instances[0];
+    socket.ready();
+
+    const sent = JSON.parse(socket.sent[1]);
+    expect(sent.payload.variables).toEqual({ image: 'plex', containerIds: ['abc'], recreate: null, recreateOnly: true });
+    expect(sent.payload.query).toContain('recreateOnly: $recreateOnly');
+
+    socket.triggerMessage({
+      type: 'next',
+      id: '1',
+      payload: { data: { dockerFoldersImagePullEvents: { event: 'done', data: '{"finished":true}' } } },
+    });
+    socket.triggerMessage({ type: 'complete', id: '1' });
+    await expect(promise).resolves.toBeUndefined();
+  });
+
   it('defaults containerIds/recreate to null when not given', async () => {
     const promise = graphqlStreams.pull('plex', {}, vi.fn(), new AbortController().signal);
     const socket = FakeWebSocket.instances[0];
     socket.ready();
 
     const sent = JSON.parse(socket.sent[1]);
-    expect(sent.payload.variables).toEqual({ image: 'plex', containerIds: null, recreate: null });
+    expect(sent.payload.variables).toEqual({ image: 'plex', containerIds: null, recreate: null, recreateOnly: null });
 
     socket.triggerMessage({
       type: 'next',
