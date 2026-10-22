@@ -829,12 +829,12 @@ if (file_exists($changelogPath)) {
       <div class="setting-row">
         <div class="setting-info">
           <label for="post-pull-action">Post-pull behavior</label>
-          <div class="description">What to do after pulling an updated image. "Pull only" requires manual apply. "Offer restart" shows a restart button. "Auto recreate" recreates the container automatically.</div>
+          <div class="description">What to do after pulling an updated image. A container keeps running the old image until it is recreated; a restart is not enough. "Pull only" leaves it to you: the container shows Not Applied, and Apply Update in its menu recreates it. "Offer recreate" shows a Recreate button when the pull finishes. "Auto recreate" recreates the container right away.</div>
         </div>
         <div class="setting-control">
           <select id="post-pull-action" onchange="saveSetting('post_pull_action', this.value)">
             <option value="pull_only" <?= $postPullAction === 'pull_only' ? 'selected' : '' ?>>Pull only (manual apply)</option>
-            <option value="pull_and_offer_restart" <?= $postPullAction === 'pull_and_offer_restart' ? 'selected' : '' ?>>Pull + offer restart</option>
+            <option value="pull_and_offer_restart" <?= $postPullAction === 'pull_and_offer_restart' ? 'selected' : '' ?>>Pull + offer recreate</option>
             <option value="pull_and_auto_recreate" <?= $postPullAction === 'pull_and_auto_recreate' ? 'selected' : '' ?>>Pull + auto recreate</option>
           </select>
           <span id="save-status-post-pull-action" class="save-status">Saved</span>

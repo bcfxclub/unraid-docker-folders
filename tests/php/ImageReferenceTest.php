@@ -13,7 +13,8 @@ use PHPUnit\Framework\Attributes\Test;
 
 /**
  * DockerClient::splitImageReference, which turns a reference into the
- * fromImage and tag parameters of a pull.
+ * fromImage and tag parameters of a pull, and the reference tests the
+ * container list uses to spot a pulled image that is not applied yet.
  */
 final class ImageReferenceTest extends TestCase
 {
@@ -41,5 +42,38 @@ final class ImageReferenceTest extends TestCase
     {
         $ref = 'foo/bar@sha256:' . str_repeat('a', 64);
         $this->assertSame([$ref, null], DockerClient::splitImageReference($ref));
+    }
+
+    #[Test]
+    public function onlyATagCanMoveToANewerImage(): void
+    {
+        $this->assertTrue(DockerClient::isTagReference('linuxserver/plex:latest'));
+        $this->assertTrue(DockerClient::isTagReference('nginx'));
+        $this->assertTrue(DockerClient::isTagReference('registry:5000/foo/bar:v2'));
+        $this->assertFalse(DockerClient::isTagReference(''));
+        $this->assertFalse(DockerClient::isTagReference('sha256:' . str_repeat('a', 64)));
+        $this->assertFalse(DockerClient::isTagReference('foo/bar@sha256:' . str_repeat('a', 64)));
+    }
+
+    #[Test]
+    public function aShaInTheListForATaggedContainerMeansTheImageIsOutdated(): void
+    {
+        $sha = 'sha256:' . str_repeat('b', 64);
+        $this->assertTrue(DockerClient::isImageOutdated($sha, 'nginx:latest'));
+    }
+
+    #[Test]
+    public function aListThatStillShowsTheTagIsNotOutdated(): void
+    {
+        $this->assertFalse(DockerClient::isImageOutdated('nginx:latest', 'nginx:latest'));
+    }
+
+    #[Test]
+    public function aContainerCreatedFromAnIdOrDigestIsNeverOutdated(): void
+    {
+        $sha = 'sha256:' . str_repeat('c', 64);
+        $this->assertFalse(DockerClient::isImageOutdated($sha, $sha));
+        $this->assertFalse(DockerClient::isImageOutdated($sha, 'nginx@' . $sha));
+        $this->assertFalse(DockerClient::isImageOutdated($sha, ''));
     }
 }

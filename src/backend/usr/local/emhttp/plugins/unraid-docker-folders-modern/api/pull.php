@@ -155,19 +155,19 @@ try {
 
     if ($postPullAction === 'pull_and_auto_recreate' || $forceRecreate) {
       try {
-        $containers = $dockerClient->listContainers(true);
-        $matchingContainers = [];
-        foreach ($containers as $container) {
-          if ($container['image'] !== $image) {
-            continue;
-          }
-          if ($onlyContainerIds !== null && !isset($onlyContainerIds[$container['id']])) {
-            continue;
-          }
-          $matchingContainers[] = $container;
-        }
+        $selection = selectRecreateTargets($dockerClient->listContainers(true), $image, $onlyContainerIds);
+        $matchingContainers = $selection['targets'];
 
         logUpdate("RECREATE Found " . count($matchingContainers) . " container(s) using {$image}");
+
+        foreach ($selection['missing'] as $missingId) {
+          $shortId = substr($missingId, 0, 12);
+          logUpdate("RECREATE SKIP {$shortId}: not found, or no longer uses {$image}");
+          sendSSE('recreate_error', [
+            'container' => $shortId,
+            'message' => "Container {$shortId} was not recreated: it no longer exists or does not use {$image}",
+          ]);
+        }
 
         foreach ($matchingContainers as $container) {
           $cName = $container['name'];

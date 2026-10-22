@@ -461,6 +461,47 @@ function checkAllImageUpdates($dockerClient, $db, callable $log, $onlyImages = n
 }
 
 /**
+ * Pick the containers a pull recreates.
+ *
+ * Without ids, every container using the image. With ids, those containers
+ * and no others, and each still has to use the pulled image. An id that does
+ * not end up in the list comes back in `missing`, so the caller can report
+ * it. Before this, a requested container that did not match ended the pull
+ * with "Pull complete" and recreated nothing.
+ *
+ * @param array $containers DockerClient::listContainers() output
+ * @param string $image The image that was pulled
+ * @param array|null $onlyContainerIds id => true, or null for every container
+ * @return array{targets: array, missing: string[]}
+ */
+function selectRecreateTargets(array $containers, $image, $onlyContainerIds)
+{
+  $targets = [];
+  $found = [];
+  foreach ($containers as $container) {
+    if ($onlyContainerIds !== null && !isset($onlyContainerIds[$container['id']])) {
+      continue;
+    }
+    if ($container['image'] !== $image) {
+      continue;
+    }
+    $targets[] = $container;
+    $found[$container['id']] = true;
+  }
+
+  $missing = [];
+  if ($onlyContainerIds !== null) {
+    foreach (array_keys($onlyContainerIds) as $id) {
+      if (!isset($found[$id])) {
+        $missing[] = (string) $id;
+      }
+    }
+  }
+
+  return ['targets' => $targets, 'missing' => $missing];
+}
+
+/**
  * Recreate one container on its image's current build, with the update log
  * lines that pull.php and a scheduled update share.
  *

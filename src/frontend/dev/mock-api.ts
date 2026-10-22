@@ -529,6 +529,7 @@ async function handleContainers(req: any, res: any, params: Record<string, strin
       exposedPorts: (c as any).exposedPorts ?? [],
       user: (c as any).user ?? '',
       imageUser: (c as any).imageUser ?? '',
+      imageOutdated: (c as any).imageOutdated ?? false,
       puid: (c as any).puid ?? '',
       pgid: (c as any).pgid ?? '',
       umask: (c as any).umask ?? '',

@@ -59,24 +59,15 @@
             <span class="text-text">{{ recreateMessage }}</span>
           </div>
 
-          <!-- Apply update link for dockerMan containers -->
-          <div v-if="isComplete && managed === 'dockerman' && postPullAction === 'pull_and_offer_restart' && !force" class="pt-2 border-t border-border">
-            <a
-              :href="applyUpdateUrl"
-              class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-text rounded text-sm font-medium no-underline hover:brightness-110 transition"
-            >Apply Update</a>
-            <p class="text-xs text-text-secondary mt-1.5">Opens Unraid's container update page to apply the new image.</p>
-          </div>
+          <p v-if="canOfferRecreate" class="text-xs text-text-secondary">
+            The container still runs the old image. Recreate it to apply the update.
+          </p>
         </div>
 
         <!-- Footer -->
-        <div v-if="isDone" class="px-6 py-3 border-t border-border flex justify-end">
-          <button
-            @click="handleClose"
-            class="px-4 py-1.5 bg-bg border border-border rounded cursor-pointer text-sm text-text hover:brightness-110 transition"
-          >
-            Close
-          </button>
+        <div v-if="isDone" class="px-6 py-3 border-t border-border flex justify-end gap-2">
+          <button @click="handleClose" class="nav-btn">Close</button>
+          <button v-if="canOfferRecreate" @click="startRecreate" class="nav-btn active">Recreate</button>
         </div>
   </BaseModal>
 </template>
@@ -92,7 +83,6 @@ interface Props {
   isOpen: boolean;
   image: string;
   containerName: string;
-  managed: string | null;
   containerId?: string;
   force?: boolean;
 }
@@ -123,14 +113,26 @@ const recreateStatus = ref<'recreating' | 'recreated' | 'recreate_error' | null>
 const recreateMessage = ref('');
 let abortController: AbortController | null = null;
 
-const applyUpdateUrl = computed(() => {
-  return `/Docker/UpdateContainer?xmlTemplate=edit:/boot/config/plugins/dockerMan/templates-user/my-${props.containerName}.xml`;
-});
+/**
+ * "Pull + offer recreate": once the pull is in, offer to recreate the
+ * container so it runs the new image. A restart would keep the old one.
+ * Not after a force update or an auto-recreate, which already recreated.
+ */
+const canOfferRecreate = computed(() =>
+  isDone.value
+  && isComplete.value
+  && !props.force
+  && !!props.containerId
+  && postPullAction.value === 'pull_and_offer_restart'
+  && recreateStatus.value === null,
+);
 
 const parentModal = useParentModal({
   onAction({ actionId }) {
     if (actionId === 'close' || actionId === 'cancel') {
       if (isDone.value) emit('close');
+    } else if (actionId === 'recreate') {
+      if (canOfferRecreate.value) startRecreate();
     }
   },
 });
@@ -191,11 +193,18 @@ function patchLayer(layerId: string) {
 
 function showCloseButton() {
   if (!inIframe) return;
+  const actions: { id: string; label: string; variant: 'default' | 'primary' }[] = [
+    { id: 'close', label: 'Close', variant: 'default' },
+  ];
+  if (canOfferRecreate.value) actions.push({ id: 'recreate', label: 'Recreate', variant: 'primary' });
+  parentModal.update({ dismissable: true, actions });
+}
+
+function hideActions() {
+  if (!inIframe) return;
   parentModal.update({
-    dismissable: true,
-    actions: [
-      { id: 'close', label: 'Close', variant: 'default' },
-    ],
+    dismissable: false,
+    actions: [{ id: 'close', label: 'Close', variant: 'default', hidden: true }],
   });
 }
 
@@ -217,16 +226,30 @@ function reset() {
 async function startPull() {
   reset();
   if (inIframe) openParent();
+  await runStream(props.force && props.containerId ? { containerIds: [props.containerId], recreate: true } : {});
+}
 
-  abortController = new AbortController();
+/**
+ * Recreate the container on the image just pulled. Goes through the same pull
+ * stream a force update uses: the layers are already on disk, so the pull is
+ * a registry check, and the stream then recreates exactly this container.
+ */
+async function startRecreate() {
+  if (!props.containerId) return;
+  isDone.value = false;
+  isComplete.value = false;
+  statusMessage.value = `Recreating ${props.containerName}...`;
+  hideActions();
+  patchStatus();
+  await runStream({ containerIds: [props.containerId], recreate: true });
+}
+
+async function runStream(opts: { containerIds?: string[]; recreate?: boolean }) {
+  const controller = new AbortController();
+  abortController = controller;
 
   try {
-    await useBackend().streams.pull(
-      props.image,
-      props.force && props.containerId ? { containerIds: [props.containerId], recreate: true } : {},
-      handleSSEEvent,
-      abortController.signal,
-    );
+    await useBackend().streams.pull(props.image, opts, handleSSEEvent, controller.signal);
   } catch (e: any) {
     if (e.name !== 'AbortError') {
       errorMessage.value = e.message || 'Pull failed';
@@ -234,6 +257,8 @@ async function startPull() {
     }
   }
 
+  // Closed while running: the modal is gone, so leave its state alone.
+  if (abortController !== controller) return;
   isDone.value = true;
   patchStatus();
   showCloseButton();
@@ -257,8 +282,15 @@ function handleSSEEvent(event: string, data: any) {
       }
       break;
     case 'complete':
-      statusMessage.value = data.message || 'Pull complete';
-      isComplete.value = true;
+      // A recreate that failed is the outcome to show, not the pull under it.
+      if (recreateStatus.value === 'recreate_error') {
+        statusMessage.value = recreateMessage.value;
+      } else {
+        statusMessage.value = recreateStatus.value === 'recreated'
+          ? recreateMessage.value
+          : data.message || 'Pull complete';
+        isComplete.value = true;
+      }
       patchStatus();
       emit('complete', props.image);
       break;
@@ -301,6 +333,7 @@ watch(() => props.isOpen, (open) => {
       abortController.abort();
       abortController = null;
     }
+    isDone.value = false;
     if (inIframe) parentModal.close();
   }
 });

@@ -21,6 +21,7 @@
     </testsuite>
     <testsuite name="ImageReference">
       <file>ImageReferenceTest.php</file>
+      <file>RecreateTargetsTest.php</file>
     </testsuite>
     <testsuite name="UpdateCheck">
       <file>UpdateCheckTest.php</file>

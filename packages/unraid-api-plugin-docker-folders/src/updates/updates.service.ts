@@ -8,7 +8,15 @@ import { DatabaseService, type Row } from '../db/database.service.js';
 import { EventBusService } from '../events/event-bus.service.js';
 import { sendUnraidNotification } from '../schedules/schedule-notifications.js';
 import { nowSeconds } from '../util/time.js';
-import { errorMessage, globMatch, nullableString, resolveImageTag, stripLeadingSlash } from './docker-refs.js';
+import {
+    errorMessage,
+    globMatch,
+    nullableString,
+    type RecreateCandidate,
+    resolveImageTag,
+    selectRecreateTargets,
+    stripLeadingSlash,
+} from './docker-refs.js';
 import type { DockerFoldersPullEvent } from './pull-events.js';
 import { RecreateService, type RecreateResult } from './recreate.service.js';
 import { parseRepo, toReleaseNote } from './release-notes.util.js';
@@ -885,19 +893,23 @@ export class UpdatesService {
         emit: (event: DockerFoldersPullEvent) => void
     ): Promise<void> {
         try {
-            const containers = await this.docker.listContainers({ all: true });
-            const matching = containers.filter((container) => {
-                const name = stripLeadingSlash(container.Names?.[0] ?? '');
-                const resolvedImage = resolveImageTag(container.Image ?? '', name);
-                if (resolvedImage !== image) return false;
-                return onlyContainerIds === null || onlyContainerIds.has(container.Id);
-            });
+            const selection = selectRecreateTargets(await this.recreateCandidates(), image, onlyContainerIds);
+            const matching = selection.targets;
 
             this.updateLog.log(`RECREATE Found ${matching.length} container(s) using ${image}`);
 
+            for (const missingId of selection.missing) {
+                const shortId = missingId.slice(0, 12);
+                this.updateLog.log(`RECREATE SKIP ${shortId}: not found, or no longer uses ${image}`);
+                emit({
+                    type: 'recreate_error',
+                    container: shortId,
+                    message: `Container ${shortId} was not recreated: it no longer exists or does not use ${image}`,
+                });
+            }
+
             for (const container of matching) {
-                const name = stripLeadingSlash(container.Names?.[0] ?? '');
-                const id = container.Id;
+                const { name, id } = container;
 
                 emit({ type: 'recreating', container: name, message: `Recreating ${name}...` });
 
@@ -917,6 +929,33 @@ export class UpdatesService {
             this.updateLog.log(`RECREATE ERROR ${image}: ${message}`);
             emit({ type: 'recreate_error', container: '', message: `Auto-recreate failed: ${message}` });
         }
+    }
+
+    /**
+     * Every container with its image resolved the way the container list
+     * resolves it. Docker's list carries no `Config`, so a container listed
+     * under a bare `sha256:` id with no Unraid template is inspected for its
+     * `Config.Image`. Those are only the containers whose tag already moved,
+     * so a settled server inspects none.
+     */
+    private async recreateCandidates(): Promise<RecreateCandidate[]> {
+        const containers = await this.docker.listContainers({ all: true });
+        return Promise.all(
+            containers.map(async (container) => {
+                const name = stripLeadingSlash(container.Names?.[0] ?? '');
+                const listImage = container.Image ?? '';
+                let image = resolveImageTag(listImage, name);
+                if (image.startsWith('sha256:')) {
+                    try {
+                        const inspect = await this.docker.getContainer(container.Id).inspect();
+                        image = resolveImageTag(listImage, name, inspect.Config?.Image ?? '');
+                    } catch (error) {
+                        this.logger.warn(`Could not inspect container ${name}: ${errorMessage(error)}`);
+                    }
+                }
+                return { id: container.Id, name, image };
+            })
+        );
     }
 
     /**

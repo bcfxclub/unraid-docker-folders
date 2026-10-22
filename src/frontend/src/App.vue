@@ -257,7 +257,6 @@
       :is-open="!!pullingContainer"
       :image="pullingContainer?.image ?? ''"
       :container-name="pullingContainer?.name ?? ''"
-      :managed="pullingContainer?.managed ?? null"
       :container-id="pullingContainer?.id ?? ''"
       :force="pullingContainer?.force ?? false"
       @close="pullingContainer = null"

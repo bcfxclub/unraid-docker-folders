@@ -499,6 +499,44 @@ describe('UpdatesService', () => {
             expect(recreate.calls).toEqual([CONTAINER_IDS.plex2]);
         });
 
+        it('recreates a container Docker lists under a sha256 id, by its Config.Image', async () => {
+            // A container created outside Unraid, after an earlier pull moved
+            // its tag: no template, and Docker lists it by image id.
+            docker.setContainers([container('plex', 'sha256:old-plex', 'sha256:old-plex')]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+
+            const promise = service.pullImage(PLEX, { containers: [CONTAINER_IDS.plex], recreate: true });
+            docker.streamFor(PLEX).end('');
+            await promise;
+
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex]);
+        });
+
+        it('reports a requested container it did not recreate, instead of a silent success', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID), container('sonarr', SONARR, SONARR_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+
+            const seen: { type: string; container?: string }[] = [];
+            const done = new Promise<void>((resolve) => {
+                service
+                    .pullImageEvents(PLEX, { containers: [CONTAINER_IDS.sonarr], recreate: true })
+                    .subscribe({
+                        next: (event) => {
+                            seen.push(event as { type: string; container?: string });
+                            if (event.type === 'done') resolve();
+                        },
+                    });
+            });
+            docker.streamFor(PLEX).end('');
+            await done;
+
+            expect(recreate.calls).toEqual([]);
+            expect(seen.filter((event) => event.type === 'recreate_error')).toEqual([
+                expect.objectContaining({ container: CONTAINER_IDS.sonarr }),
+            ]);
+        });
+
         it('aborts a pull stuck past the 10 minute timeout, keeping that as the reason', async () => {
             vi.useFakeTimers();
             try {

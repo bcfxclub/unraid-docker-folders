@@ -37,23 +37,16 @@
           </div>
         </div>
 
+        <p v-if="recreatableUnits.length > 0" class="px-6 pb-3 text-xs text-text-secondary">
+          The updated containers still run their old images. Recreate them to apply the updates.
+        </p>
+
         <!-- Footer -->
         <div class="px-6 py-3 border-t border-border flex justify-end">
           <div class="flex gap-2">
-            <button
-              v-if="!allDone"
-              @click="cancelBatch"
-              class="px-4 py-1.5 bg-bg border border-border rounded cursor-pointer text-sm text-text hover:brightness-110 transition"
-            >
-              Cancel
-            </button>
-            <button
-              v-if="allDone"
-              @click="handleClose"
-              class="px-4 py-1.5 bg-bg border border-border rounded cursor-pointer text-sm text-text hover:brightness-110 transition"
-            >
-              Close
-            </button>
+            <button v-if="!allDone" @click="cancelBatch" class="nav-btn">Cancel</button>
+            <button v-if="allDone" @click="handleClose" class="nav-btn">Close</button>
+            <button v-if="recreatableUnits.length > 0" @click="startRecreate" class="nav-btn active">Recreate</button>
           </div>
         </div>
   </BaseModal>
@@ -100,6 +93,8 @@ const unitResults = ref<Record<string, UnitResult>>({});
 const unitErrors = ref<Record<string, string>>({});
 const unitRecreate = ref<Record<string, string>>({});
 const allDone = ref(false);
+/** Set once the recreate pass has run, so it is offered only once. */
+const recreateRan = ref(false);
 
 let cancelled = false;
 /** One controller per in-flight unit; cancelling aborts every one of them. */
@@ -108,6 +103,16 @@ let controllers = new Set<AbortController>();
 let runToken = 0;
 
 const completedCount = computed(() => Object.keys(unitResults.value).length);
+
+/**
+ * "Pull + offer recreate": the units whose pull went through, which still run
+ * their old images until they are recreated. A restart would keep those.
+ */
+const recreatableUnits = computed(() => {
+  if (!allDone.value || recreateRan.value) return [];
+  if (settingsStore.postPullAction !== 'pull_and_offer_restart') return [];
+  return props.units.filter((unit) => unitResults.value[unit.id] === 'success');
+});
 
 function statusLabel(id: string): string {
   const result = unitResults.value[id];
@@ -171,6 +176,8 @@ const parentModal = useParentModal({
       cancelBatch();
     } else if (actionId === 'close') {
       if (allDone.value) emit('close');
+    } else if (actionId === 'recreate') {
+      startRecreate();
     }
   },
 });
@@ -230,12 +237,11 @@ function patchUnit(unit: UpdateUnit) {
 
 function showCloseAction() {
   if (!inIframe) return;
-  parentModal.update({
-    dismissable: true,
-    actions: [
-      { id: 'close', label: 'Close', variant: 'default' },
-    ],
-  });
+  const actions: { id: string; label: string; variant: 'default' | 'primary' }[] = [
+    { id: 'close', label: 'Close', variant: 'default' },
+  ];
+  if (recreatableUnits.value.length > 0) actions.push({ id: 'recreate', label: 'Recreate', variant: 'primary' });
+  parentModal.update({ dismissable: true, actions });
 }
 
 function handleClose() {
@@ -259,6 +265,7 @@ function reset() {
   unitErrors.value = {};
   unitRecreate.value = {};
   allDone.value = false;
+  recreateRan.value = false;
   cancelled = false;
   controllers = new Set();
 }
@@ -323,10 +330,13 @@ function applyEvent(
 
     case 'recreate_error':
       unitRecreate.value = { ...unitRecreate.value, [id]: data.message || '' };
+      unitErrors.value = { ...unitErrors.value, [id]: data.message || 'Recreate failed' };
       break;
 
+    // The pull went through, but a container that failed to recreate still
+    // runs the old image, so the unit did not update.
     case 'complete':
-      return 'success';
+      return unitErrors.value[id] ? 'error' : 'success';
 
     case 'error':
       unitErrors.value = { ...unitErrors.value, [id]: data.message || 'Update failed' };
@@ -336,7 +346,7 @@ function applyEvent(
   return null;
 }
 
-async function runUnit(unit: UpdateUnit): Promise<UnitResult> {
+async function runUnit(unit: UpdateUnit, recreate = false): Promise<UnitResult> {
   unitRunning.value = { ...unitRunning.value, [unit.id]: true };
   setStatus(unit.id, 'Preparing...');
   patchUnit(unit);
@@ -356,14 +366,16 @@ async function runUnit(unit: UpdateUnit): Promise<UnitResult> {
     if (unit.kind === 'compose') {
       // `up` pulls and then recreates changed services; `pull` downloads only.
       // Honour the same post-pull setting standalone containers use.
-      const action = settingsStore.postPullAction === 'pull_and_auto_recreate' ? 'up' : 'pull';
+      // The recreate pass always runs `up`, which recreates what changed.
+      const action = recreate || settingsStore.postPullAction === 'pull_and_auto_recreate' ? 'up' : 'pull';
       await useBackend().streams.compose(unit.project, action, {}, onEvent, controller.signal);
     } else {
       // Send the exact container set the confirm dialog listed, so the
       // backend recreates those and nothing else.
+      const containerIds = unit.containers.map((c) => c.id);
       await useBackend().streams.pull(
         unit.image,
-        { containerIds: unit.containers.map((c) => c.id) },
+        recreate ? { containerIds, recreate: true } : { containerIds },
         onEvent,
         controller.signal,
       );
@@ -390,16 +402,13 @@ function finishUnit(unit: UpdateUnit, result: UnitResult) {
   patchUnit(unit);
 }
 
-async function startBatch() {
-  reset();
-  const token = ++runToken;
-  if (inIframe) openParent();
-
-  const units = [...props.units];
+/**
+ * Run units through a pool of `updateConcurrency` workers that share one
+ * cursor, so a fast unit immediately picks up the next instead of waiting on
+ * a slow sibling.
+ */
+async function runPool(units: UpdateUnit[], recreate: boolean) {
   const limit = Math.max(1, Math.min(settingsStore.updateConcurrency, units.length));
-
-  // Worker pool: `limit` workers share one cursor, so a fast unit immediately
-  // picks up the next instead of waiting on a slow sibling.
   let cursor = 0;
   const worker = async () => {
     while (cursor < units.length) {
@@ -408,13 +417,15 @@ async function startBatch() {
         finishUnit(unit, 'cancelled');
         continue;
       }
-      const result = await runUnit(unit);
+      const result = await runUnit(unit, recreate);
       finishUnit(unit, cancelled && result === 'error' ? 'cancelled' : result);
     }
   };
 
   await Promise.all(Array.from({ length: limit }, worker));
+}
 
+function finishRun(token: number) {
   // The modal may have been closed (and a new batch started) while the pool
   // drained — don't resurrect a dead run.
   if (token !== runToken || !props.isOpen) return;
@@ -423,6 +434,45 @@ async function startBatch() {
   patchAll();
   showCloseAction();
   emit('complete');
+}
+
+async function startBatch() {
+  reset();
+  const token = ++runToken;
+  if (inIframe) openParent();
+
+  await runPool([...props.units], false);
+  finishRun(token);
+}
+
+/** The second pass "Pull + offer recreate" offers once the pulls are in. */
+async function startRecreate() {
+  const units = recreatableUnits.value;
+  if (units.length === 0) return;
+
+  recreateRan.value = true;
+  allDone.value = false;
+  cancelled = false;
+  const token = ++runToken;
+
+  const without = <T,>(record: Record<string, T>) =>
+    Object.fromEntries(Object.entries(record).filter(([id]) => !units.some((unit) => unit.id === id)));
+  unitResults.value = without(unitResults.value);
+  unitErrors.value = without(unitErrors.value);
+  unitRecreate.value = without(unitRecreate.value);
+  unitLayers.value = without(unitLayers.value);
+  unitStatus.value = without(unitStatus.value);
+
+  if (inIframe) {
+    parentModal.update({
+      dismissable: false,
+      actions: [{ id: 'cancel', label: 'Cancel', variant: 'default' }],
+    });
+  }
+  patchAll();
+
+  await runPool(units, true);
+  finishRun(token);
 }
 
 watch(() => props.isOpen, (open) => {

@@ -10,7 +10,7 @@ import { detectServerTimezone, formatInTimeZone } from '../util/timezone.js';
  * Written for real this time — an earlier revision of this port deliberately
  * skipped writing this file, reasoning that two backends writing it
  * concurrently would race the way `ContainerListService` avoids racing
- * `/tmp/unraid-docker-container-facts-v3.json`. That reasoning does not apply
+ * `/tmp/unraid-docker-container-facts-v4.json`. That reasoning does not apply
  * here: `backend_mode` gates which backend runs background work at all
  * (settings.service.ts), so only one of PHP's cron / this service's
  * `runScheduledCheck()` is ever appending at a time. `settings.php`'s
