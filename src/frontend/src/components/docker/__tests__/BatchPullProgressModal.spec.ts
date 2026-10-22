@@ -330,3 +330,80 @@ describe('BatchPullProgressModal', () => {
     expect(wrapper.emitted('complete')).toBeFalsy();
   });
 });
+
+/** The surface users see on Unraid: the parent page draws the modal. */
+describe('BatchPullProgressModal – parent-window (iframe) path', () => {
+  let parentPostMessage: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    pending = [];
+    inFlight = 0;
+    maxInFlight = 0;
+    installFetchMock();
+    parentPostMessage = vi.fn();
+    Object.defineProperty(window, 'parent', {
+      value: { postMessage: parentPostMessage },
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Object.defineProperty(window, 'parent', { value: window, configurable: true, writable: true });
+  });
+
+  const messages = () => parentPostMessage.mock.calls.map((c) => c[0]);
+
+  function latestActions(): string[] {
+    const patches = messages().filter((m) => m?.type === 'docker-folders-modal-update' && m.patch?.actions);
+    const actions = patches[patches.length - 1].patch.actions as { id: string; variant?: string }[];
+    return actions.map((a) => (a.variant === 'primary' ? `${a.id}:primary` : a.id));
+  }
+
+  async function hostPresses(actionId: string) {
+    const open = messages().find((m) => m?.type === 'docker-folders-modal' && m.open);
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'docker-folders-modal-action', id: open.modal.id, actionId, values: {} },
+      }),
+    );
+    await settle();
+  }
+
+  it('offers Recreate after the batch, and runs it when the parent asks', async () => {
+    const settings = useSettingsStore();
+    settings.updateConcurrency = 1;
+    settings.postPullAction = 'pull_and_offer_restart';
+
+    await mountModal([imageUnit('nginx:latest', ['web'])]);
+    await settle();
+    pending[0].finish();
+    await settle();
+
+    expect(latestActions()).toEqual(['close', 'recreate:primary']);
+
+    await hostPresses('recreate');
+    expect(latestActions()).toEqual(['cancel']);
+    expect(new URLSearchParams(pending[1].body).get('recreate')).toBe('1');
+
+    pending[1].finish();
+    await settle();
+    expect(latestActions()).toEqual(['close']);
+  });
+
+  it('offers only Close for pull only', async () => {
+    const settings = useSettingsStore();
+    settings.updateConcurrency = 1;
+    settings.postPullAction = 'pull_only';
+
+    await mountModal([imageUnit('nginx:latest', ['web'])]);
+    await settle();
+    pending[0].finish();
+    await settle();
+
+    expect(latestActions()).toEqual(['close']);
+  });
+});

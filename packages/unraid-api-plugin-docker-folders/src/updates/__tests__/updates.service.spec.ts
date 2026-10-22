@@ -225,6 +225,17 @@ describe('UpdatesService', () => {
             ]);
         });
 
+        it('checks a container Docker lists by image id under its Config.Image, as PHP does', async () => {
+            // Created outside Unraid, and its tag moved on an earlier pull.
+            docker.setContainers([container('plex', 'sha256:old-plex', 'sha256:old-plex')]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+
+            const results = await service.checkForUpdates();
+
+            expect(results.map((r) => r.image)).toEqual([PLEX]);
+        });
+
         it('reports no update when the digests match', async () => {
             docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
             docker.setLocalDigests(PLEX_IMAGE_ID, [`${PLEX}@sha256:same`]);

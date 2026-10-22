@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import PullProgressModal from '../PullProgressModal.vue';
@@ -117,5 +117,77 @@ describe('PullProgressModal', () => {
 
     expect(wrapper.text()).toContain('Container id-web was not recreated');
     expect(wrapper.text()).not.toContain('Pull complete');
+  });
+});
+
+/**
+ * On Unraid the modal is drawn by the parent page, and only this path is what
+ * users see. Issue #20 was an offer that existed only in the dev-server modal.
+ */
+describe('PullProgressModal – parent-window (iframe) path', () => {
+  let parentPostMessage: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    mocks.pull.mockReset();
+    parentPostMessage = vi.fn();
+    Object.defineProperty(window, 'parent', {
+      value: { postMessage: parentPostMessage },
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, 'parent', { value: window, configurable: true, writable: true });
+  });
+
+  const messages = () => parentPostMessage.mock.calls.map((c) => c[0]);
+
+  /** The action ids of the newest patch that set actions. */
+  function latestActions(): string[] {
+    const patches = messages().filter((m) => m?.type === 'docker-folders-modal-update' && m.patch?.actions);
+    const actions = patches[patches.length - 1].patch.actions as { id: string; hidden?: boolean; variant?: string }[];
+    return actions.filter((a) => !a.hidden).map((a) => (a.variant === 'primary' ? `${a.id}:primary` : a.id));
+  }
+
+  async function hostPresses(actionId: string) {
+    const open = messages().find((m) => m?.type === 'docker-folders-modal' && m.open);
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'docker-folders-modal-action', id: open.modal.id, actionId, values: {} },
+      }),
+    );
+    await flushPromises();
+  }
+
+  it('offers Recreate as a primary action after the pull', async () => {
+    useSettingsStore().postPullAction = 'pull_and_offer_restart';
+    playScripts(pulled);
+
+    await mountOpen();
+
+    expect(latestActions()).toEqual(['close', 'recreate:primary']);
+  });
+
+  it('offers only Close for pull only', async () => {
+    useSettingsStore().postPullAction = 'pull_only';
+    playScripts(pulled);
+
+    await mountOpen();
+
+    expect(latestActions()).toEqual(['close']);
+  });
+
+  it('recreates when the parent sends the recreate action, then offers only Close', async () => {
+    useSettingsStore().postPullAction = 'pull_and_offer_restart';
+    playScripts(pulled, recreated);
+
+    await mountOpen();
+    await hostPresses('recreate');
+
+    expect(mocks.pull.mock.calls[1][1]).toEqual({ containerIds: ['id-web'], recreate: true });
+    expect(latestActions()).toEqual(['close']);
   });
 });

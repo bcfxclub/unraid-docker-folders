@@ -813,7 +813,7 @@ const composeProject = computed(() => composeProjectOf(props.container) ?? '');
 const isCompose = computed(() => !!composeProject.value);
 
 const needsRecreateTitle = computed(() => isCompose.value
-  ? 'A newer image is pulled but not running. Run Up on the stack to apply it.'
+  ? 'A newer image is pulled but not running. Run Stack Up or Recompose from the stack folder menu to apply it.'
   : 'A newer image is pulled but not running. Recreate the container to apply it.');
 
 const isManaged = computed(() => props.container.managed === 'dockerman');

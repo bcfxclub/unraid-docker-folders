@@ -3,7 +3,13 @@ import { existsSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { Observable } from 'rxjs';
 
-import { DOCKER_CLIENT_TOKEN, DOCKER_SOCKET_PATH, type DockerClient, type DockerInspectInfo } from '../containers/docker-client.js';
+import {
+    DOCKER_CLIENT_TOKEN,
+    DOCKER_SOCKET_PATH,
+    type DockerClient,
+    type DockerInspectInfo,
+    type DockerListContainer,
+} from '../containers/docker-client.js';
 import { DatabaseService, type Row } from '../db/database.service.js';
 import { EventBusService } from '../events/event-bus.service.js';
 import { sendUnraidNotification } from '../schedules/schedule-notifications.js';
@@ -449,11 +455,12 @@ export class UpdatesService {
         // checkAllImageUpdates()'s loop over DockerClient::listContainers(true).
         const uniqueImages = new Map<string, string>();
         const containersByImage = new Map<string, string[]>();
+        const resolved = await this.resolveListImages(containers);
         for (const container of containers) {
             const name = stripLeadingSlash(container.Names?.[0] ?? '');
             const rawImage = container.Image ?? '';
             if (rawImage === '') continue;
-            const image = resolveImageTag(rawImage, name);
+            const image = resolved.get(container.Id) ?? rawImage;
             if (!uniqueImages.has(image)) uniqueImages.set(image, container.ImageID ?? '');
             if (name !== '') containersByImage.set(image, [...(containersByImage.get(image) ?? []), name]);
         }
@@ -932,16 +939,16 @@ export class UpdatesService {
     }
 
     /**
-     * Every container with its image resolved the way the container list
-     * resolves it. Docker's list carries no `Config`, so a container listed
-     * under a bare `sha256:` id with no Unraid template is inspected for its
-     * `Config.Image`. Those are only the containers whose tag already moved,
-     * so a settled server inspects none.
+     * Each container's image, id => reference, resolved the way the container
+     * list and PHP's `DockerClient::listContainers()` resolve it. Docker's list
+     * carries no `Config`, so a container listed under a bare `sha256:` id with
+     * no Unraid template is inspected for its `Config.Image`. Those are only
+     * the containers whose tag already moved, so a settled server inspects
+     * none.
      */
-    private async recreateCandidates(): Promise<RecreateCandidate[]> {
-        const containers = await this.docker.listContainers({ all: true });
-        return Promise.all(
-            containers.map(async (container) => {
+    private async resolveListImages(containers: DockerListContainer[]): Promise<Map<string, string>> {
+        const entries = await Promise.all(
+            containers.map(async (container): Promise<[string, string]> => {
                 const name = stripLeadingSlash(container.Names?.[0] ?? '');
                 const listImage = container.Image ?? '';
                 let image = resolveImageTag(listImage, name);
@@ -953,9 +960,21 @@ export class UpdatesService {
                         this.logger.warn(`Could not inspect container ${name}: ${errorMessage(error)}`);
                     }
                 }
-                return { id: container.Id, name, image };
+                return [container.Id, image];
             })
         );
+        return new Map(entries);
+    }
+
+    /** Every container, with its image resolved by `resolveListImages()`. */
+    private async recreateCandidates(): Promise<RecreateCandidate[]> {
+        const containers = await this.docker.listContainers({ all: true });
+        const resolved = await this.resolveListImages(containers);
+        return containers.map((container) => ({
+            id: container.Id,
+            name: stripLeadingSlash(container.Names?.[0] ?? ''),
+            image: resolved.get(container.Id) ?? container.Image ?? '',
+        }));
     }
 
     /**

@@ -829,7 +829,7 @@ if (file_exists($changelogPath)) {
       <div class="setting-row">
         <div class="setting-info">
           <label for="post-pull-action">Post-pull behavior</label>
-          <div class="description">What to do after pulling an updated image. A container keeps running the old image until it is recreated; a restart is not enough. "Pull only" leaves it to you: the container shows Not Applied, and Apply Update in its menu recreates it. "Offer recreate" shows a Recreate button when the pull finishes. "Auto recreate" recreates the container right away.</div>
+          <div class="description">What to do after pulling an updated image. A container keeps running the old image until it is recreated; a restart is not enough. "Pull only" leaves it to you: the container shows Not Applied, and Apply Update in its menu recreates it (for a compose stack, Recompose in the stack folder menu). "Offer recreate" shows a Recreate button when the pull finishes. "Auto recreate" recreates the container right away.</div>
         </div>
         <div class="setting-control">
           <select id="post-pull-action" onchange="saveSetting('post_pull_action', this.value)">
