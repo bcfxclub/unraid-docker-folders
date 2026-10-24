@@ -86,8 +86,11 @@ marketing-style empty states. None of that belongs here.
   modal/section titles. Anything larger needs a rule-break note.
 - No decorative headings, no `font-black`, no letter-spacing tricks outside the
   existing `.nav-btn` uppercase pattern.
-- Fonts: inherit (`clear-sans` from Unraid) and the existing monospace stack
-  for logs/inputs. Never add a webfont.
+- Fonts: the app root's `font-sans`, which is Tailwind's system stack
+  (`ui-sans-serif, system-ui, sans-serif`), and the existing monospace stack
+  for logs/inputs. Unraid's own `clear-sans` does not reach the iframe: no font
+  crosses the theme bridge (§10), so the parent page and the plugin render in
+  different faces. Never add a webfont to close that gap.
 
 ## 4. Spacing & density
 
@@ -138,7 +141,7 @@ marketing-style empty states. None of that belongs here.
 - Every change must work on **both dark and light Unraid themes**. All the
   theme tokens resolve from Unraid CSS variables — if a style only looks right
   on one theme, it's wrong. Never assume a dark background.
-- `yarn dev` is light-only; see the dark-theme recipe in §16.
+- `yarn dev` is light-only; see the dark-theme recipe in §17.
 
 ---
 
@@ -174,7 +177,7 @@ utility classes we actually write:
 | Token | Utility | Source |
 |---|---|---|
 | `--color-text` | `text-text` | `--text-color` |
-| `--color-text-secondary` | `text-text-secondary` | text 65% → background (see §16) |
+| `--color-text-secondary` | `text-text-secondary` | text 65% → background (see §17) |
 | `--color-bg` | `bg-bg` | `--background-color` |
 | `--color-bg-card` | `bg-bg-card` | background + 3% text |
 | `--color-bg-input` | `bg-bg-input` | background + 8% text |
@@ -186,7 +189,7 @@ utility classes we actually write:
 | `--color-success` | `text-success` | fixed `#4caf50` |
 | `--color-error` | `text-error` | fixed `#f44336` |
 | `--color-warning` | `text-warning` | fixed `#ff9800` |
-| `--color-muted` | `text-muted` | text 58% → background (see §16) |
+| `--color-muted` | `text-muted` | text 58% → background (see §17) |
 
 The four semantic colors are intentionally **not** themeable — success is green
 on every Unraid theme.
@@ -457,9 +460,86 @@ existing shared classes (`.expand-grid`, `.state-change-pulse`,
 
 ---
 
-## 16. Known limitations
+## 16. Page anatomy (as shipped, Unraid 7.3)
+
+What the Folders page looks like on a real box, measured on Unraid 7.3.4 with
+the black theme. Match these when adding to the page; they are the "existing
+patterns" §8 means.
+
+**Measured black theme.** `--text-color #f2f2f2`, `--background-color #1d1b1b`,
+`--border-color #404040`. `--header-background` is **empty** on 7.3 (Unraid
+moved the header to `--header-background-color`, `#000000` on black), so
+`--color-primary` resolves to its `#ff8c2f` fallback. See §17.
+
+**Toolbar** (`App.vue` header). One row, `border-b-2 border-border` under it,
+wraps on narrow screens:
+
+- Left, icon-only `.nav-btn`s: settings (an `<a>`), drag lock (`.warning` while
+  locked), sort menu (grip icon + chevron).
+- Middle, the search `.form-input.subtle`, `flex-1`, with an overlay on its
+  right edge that holds the counts (`40 containers, 9 folders`) and the clear ×.
+- Right: the grid/list `.view-mode-toggle` pill (accent slider), then icon-only
+  `.nav-btn`s with a corner count badge (`absolute -top-1 -right-1`, 16px,
+  `text-[10px] font-bold`): updates (`bg-warning`), security (`bg-error/15` or
+  `bg-warning/20`, hidden at zero). Last, the create menu: a `.nav-btn.active`
+  with a plus and a chevron.
+
+**Folder header** (`FolderHeader.vue`). Not a card: a `bg-bg` bar,
+`px-6 py-4`, `rounded-sm`, `mb-2`, no border, `hover:bg-bg-card`. The whole bar
+toggles collapse. Left to right:
+
+- drag handle, chevron, a 36px 2×2 grid of the members' icons;
+- name, `text-sm font-semibold`;
+- for a stack folder, the `COMPOSE` chip (`bg-info/15 text-info`, 11px
+  uppercase, `rounded`) and `ComposeControls`: 14px icon buttons in
+  `text-text-secondary` for start, recompose, stop, schedules and edit;
+- the running count pill, `h-6 rounded-full text-xs font-semibold`:
+  `bg-primary text-primary-text` while anything runs, else
+  `bg-border text-text-secondary`;
+- an update pill, `bg-warning/20 text-warning`, when images are outdated.
+
+Right side: hide-stopped eye, autostart indicator (`text-success` when every
+member autostarts, else 30% opacity), kebab. Behind it all, the folder-color
+tint (§2), 40% opacity collapsed, full expanded.
+
+**Container card** (grid view). `bg-bg-card` card with the icon in a
+`.status-halo`, name, the image on a monospace line led by a link icon, an
+uptime/state line with a chevron to details, ports, CPU/MEM bars, and an action
+row of 32px icon buttons coloured by intent: stop `text-error`, start
+`text-success`, restart `text-primary`, pull `text-warning`, each filling with
+its colour on hover.
+
+**Container row** (list view, `.container-row`). `px-4 py-3`,
+`border-b border-border/50`, `rounded`, 5% hover tint. Chevron (12px), the
+haloed icon, then a two-line block: name `text-xs font-semibold` plus pills and
+the state in `text-text-secondary`, and the image line. Right side: ports in
+monospace, a CPU/MEM pair of inline stats bars, and the same 32px action buttons,
+which in a row get the 6% `.action-btn` fill.
+
+New grouped views (a stacks view, say) should be a folder header plus container
+rows, not a new card type.
+
+---
+
+## 17. Known limitations
 
 Recorded deliberately — do not "fix" these without evidence.
+
+- **`--header-background` is unset on Unraid 7.3.** The black theme leaves it
+  empty and puts the header colour in `--header-background-color` (`#000`).
+  The accent the plugin shows is therefore the `#ff8c2f` fallback in
+  `main.css`, not a colour the user chose. It happens to match Unraid's own
+  orange. Bridging `--header-background-color` instead would turn the accent
+  black, so leave the fallback alone until a theme sets a real accent.
+- **Shipped code that breaks §1 and §10.** Found while measuring §16, not yet
+  fixed: `ComposeControls.vue` hovers with palette classes
+  (`hover:text-green-400`, `hover:text-red-400`; use `hover:text-success`,
+  `hover:text-error`); `ComposeFileEditor.vue` and `ComposeSetupBanner.vue` use
+  `text-green-400` / `bg-green-500/10` for success; `FolderHeader.vue`'s
+  hidden-count badge and `App.vue`'s update badge use `text-white`.
+- **The `COMPOSE` chip uses `info` as a type marker**, not a state, which §1
+  forbids. It is the only such use. Keep it as is until stacks get their own
+  view; do not copy it for other type labels.
 
 - **`--text-color-secondary` is never bridged — resolved by deriving instead.**
   That variable is not in `Folders.page`'s bridge list, so
