@@ -167,6 +167,11 @@ export class DockerFoldersContainer {
     @Field(() => String, { description: 'UMASK from Config.Env.' })
     umask!: string;
 
+    @Field(() => Boolean, {
+        description: 'State.OOMKilled, read only for a container whose last exit was 137, so a kill for memory is told from a timed-out stop.',
+    })
+    oomKilled!: boolean;
+
     @Field(() => [DockerFoldersLabel])
     labels!: DockerFoldersLabel[];
 

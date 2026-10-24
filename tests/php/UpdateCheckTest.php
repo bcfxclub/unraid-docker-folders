@@ -29,7 +29,7 @@ class MockDockerClient extends DockerClient
         // Skip parent – avoids needing a real Docker socket
     }
 
-    public function listContainers($all = true): array
+    public function listContainers($all = true, $withOomCheck = false): array
     {
         return $this->containers;
     }

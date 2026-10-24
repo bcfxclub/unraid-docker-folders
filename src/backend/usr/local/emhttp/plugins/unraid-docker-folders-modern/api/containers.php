@@ -152,7 +152,7 @@ function handleGet($dockerClient)
     ]);
   } else {
     // List all containers
-    $containers = $dockerClient->listContainers(true);
+    $containers = $dockerClient->listContainers(true, true);
 
     // listContainers() answers [] both for a server with no containers and for
     // a request that failed. Only the failure sets lastError. Report it,

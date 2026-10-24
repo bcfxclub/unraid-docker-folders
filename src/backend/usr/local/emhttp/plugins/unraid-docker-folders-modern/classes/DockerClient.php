@@ -60,6 +60,18 @@ class DockerClient
   // never report that the pulled image is waiting to be applied.
   const FACTS_CACHE_PATH = '/tmp/unraid-docker-container-facts-v4.json';
 
+  // State.OOMKilled for containers whose last exit was 137, exited or
+  // restarting. That code is both a `docker stop` that timed out and a kill
+  // for running out of memory, and only inspect tells them apart. It changes
+  // with every run, so each answer is tied to the exit it describes
+  // (State.FinishedAt): the list's "Exited (137) 5 minutes ago" says when the
+  // last exit was, and an exit newer than the saved one is inspected again.
+  // So each exit costs one inspect, whatever the server's size. See
+  // planOomChecks().
+  const OOM_CACHE_PATH = '/tmp/unraid-docker-oom-killed-v2.json';
+  // A failed inspect is retried after this, not on every list.
+  const OOM_RETRY_SECONDS = 300;
+
   public function __construct($socketPath = DOCKER_SOCKET, $apiVersion = DOCKER_API_VERSION)
   {
     $this->socketPath = $socketPath;
@@ -140,9 +152,12 @@ class DockerClient
    * List all containers
    *
    * @param bool $all Include stopped containers
+   * @param bool $withOomCheck Read State.OOMKilled for containers that exited
+   *   with 137 (getOomKilledMap). Only the Folders list shows it, so schedule,
+   *   backup and update runs skip the inspects.
    * @return array Array of container objects
    */
-  public function listContainers($all = true)
+  public function listContainers($all = true, $withOomCheck = false)
   {
     $params = $all ? '?all=1' : '';
     $response = $this->request('GET', "/containers/json{$params}");
@@ -161,6 +176,7 @@ class DockerClient
     // data, cached by ID.
     $ids = array_column($response, 'Id');
     $factsMap = $this->getContainerFactsMap($ids);
+    $oomMap = $withOomCheck ? $this->getOomKilledMap($response) : [];
 
     // Transform Docker API response to our format
     $containers = [];
@@ -181,6 +197,7 @@ class DockerClient
       $formatted['puid'] = $facts['puid'] ?? '';
       $formatted['pgid'] = $facts['pgid'] ?? '';
       $formatted['umask'] = $facts['umask'] ?? '';
+      $formatted['oomKilled'] = $oomMap[$container['Id']] ?? false;
       $containers[] = $formatted;
     }
 
@@ -278,6 +295,123 @@ class DockerClient
     }
 
     return $cache;
+  }
+
+  /**
+   * id => State.OOMKilled for the listed containers whose last exit was 137.
+   * See OOM_CACHE_PATH.
+   *
+   * @param array $response Raw /containers/json list
+   * @return array id => bool
+   */
+  private function getOomKilledMap(array $response)
+  {
+    // Most lists have no exit-137 container: skip the cache file entirely. An
+    // entry left in it is dropped or checked again by the next list with one.
+    $candidates = array_filter($response, [self::class, 'isOomCandidate']);
+    if (empty($candidates)) return [];
+
+    $now = time();
+    $cache = $this->loadJsonCache(self::OOM_CACHE_PATH);
+    $plan = self::planOomChecks($candidates, $cache, $now);
+
+    $requests = [];
+    foreach ($plan['inspect'] as $id) {
+      $requests[$id] = "/containers/" . rawurlencode($id) . "/json";
+    }
+    $results = $this->requestMulti($requests);
+    foreach ($plan['inspect'] as $id) {
+      $state = $results[$id]['State'] ?? null;
+      if (!is_array($state)) {
+        // Keep the old answer, and wait OOM_RETRY_SECONDS before trying again.
+        $plan['cache'][$id] = ['oom' => !empty($cache[$id]['oom']), 'finished' => 0, 'failedAt' => $now];
+        continue;
+      }
+      $finished = strtotime((string) ($state['FinishedAt'] ?? ''));
+      $plan['cache'][$id] = ['oom' => !empty($state['OOMKilled']), 'finished' => $finished > 0 ? $finished : 0];
+    }
+
+    if ($plan['cache'] !== $cache) {
+      $this->saveJsonCache(self::OOM_CACHE_PATH, $plan['cache']);
+    }
+
+    $map = [];
+    foreach ($plan['cache'] as $id => $entry) {
+      $map[$id] = !empty($entry['oom']);
+    }
+    return $map;
+  }
+
+  /** Exited, or restarting, after an exit with 137. */
+  public static function isOomCandidate(array $container)
+  {
+    $state = $container['State'] ?? '';
+    return ($state === 'exited' || $state === 'restarting')
+      && preg_match('/^(?:Exited|Restarting) \(137\)/', (string) ($container['Status'] ?? '')) === 1;
+  }
+
+  /**
+   * Which candidates to inspect, and the cache with every other entry
+   * dropped: a container gone, or seen in another state, has nothing to say.
+   * Pure, so the rule can be tested without a socket.
+   *
+   * A saved answer stands until the list shows a later exit. The status age
+   * is rounded ("5 minutes", "2 hours"), so the exit is only known to be
+   * newer once the saved FinishedAt falls before the oldest time the age
+   * allows, less a minute for clock skew. Fine-grained where it matters: a
+   * container that ran again a minute later shows "Exited (137) 30 seconds
+   * ago".
+   *
+   * @param array $candidates Listed containers that pass isOomCandidate()
+   * @param array $cache      id => {oom: bool, finished: int, failedAt?: int}
+   * @param int   $now
+   * @return array {inspect: string[], cache: array}
+   */
+  public static function planOomChecks(array $candidates, array $cache, $now)
+  {
+    $kept = [];
+    $inspect = [];
+    foreach ($candidates as $container) {
+      $id = (string) ($container['Id'] ?? '');
+      if ($id === '') continue;
+      $entry = $cache[$id] ?? null;
+      if (!is_array($entry)) {
+        $inspect[] = $id;
+        continue;
+      }
+      $kept[$id] = $entry;
+      if (isset($entry['failedAt'])) {
+        if ($now - (int) $entry['failedAt'] >= self::OOM_RETRY_SECONDS) $inspect[] = $id;
+        continue;
+      }
+      $maxAge = self::statusAgeUpperBound((string) ($container['Status'] ?? ''));
+      if ($maxAge !== null && (int) ($entry['finished'] ?? 0) < $now - $maxAge - 60) {
+        $inspect[] = $id;
+      }
+    }
+    return ['inspect' => $inspect, 'cache' => $kept];
+  }
+
+  /**
+   * The most seconds ago the exit in a status line can have been, from
+   * Docker's HumanDuration wording ("Exited (1) About an hour ago"), or null
+   * when the line has no age Docker would write.
+   *
+   * @param string $status
+   * @return int|null
+   */
+  public static function statusAgeUpperBound($status)
+  {
+    if (!preg_match('/\) (.+) ago$/', $status, $m)) return null;
+    $age = $m[1];
+    if ($age === 'Less than a second') return 1;
+    if ($age === 'About a minute') return 120;
+    if ($age === 'About an hour') return 5400;
+    if (!preg_match('/^(\d+) (second|minute|hour|day|week|month|year)s?$/', $age, $n)) return null;
+    $count = (int) $n[1];
+    $unit = ['second' => 1, 'minute' => 60, 'hour' => 3600, 'day' => 86400, 'week' => 604800, 'month' => 2592000, 'year' => 31536000][$n[2]];
+    // Hours are rounded to the nearest, the rest are whole units.
+    return $n[2] === 'hour' ? (int) (($count + 0.5) * $unit) : ($count + 1) * $unit;
   }
 
   /**

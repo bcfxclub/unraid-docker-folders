@@ -143,6 +143,11 @@ export interface Container {
    * Empty means the image never overrode the default.
    */
   umask: string;
+  /**
+   * State.OOMKilled. Both backends read it only for a container whose last
+   * exit was 137, which is a timed-out stop as often as a kill for memory.
+   */
+  oomKilled?: boolean;
   created: number;
   icon: string | null;
   managed: string | null;

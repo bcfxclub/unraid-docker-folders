@@ -72,6 +72,19 @@ describe('exit codes', () => {
     expect(isShownWhenHidingStopped(undefined)).toBe(false);
   });
 
+  it('tells a kill for memory from a timed-out stop, both exit 137', () => {
+    const status = 'Exited (137) 1 hour ago';
+    expect(isCrashedContainer({ state: 'exited', status, oomKilled: false })).toBe(false);
+    expect(containerStatus({ state: 'exited', status, oomKilled: true }, true)).toEqual({
+      halo: 'status-halo-error',
+      tooltip: 'Crashed (out of memory)',
+      crashed: true,
+    });
+    expect(containerStatus({ state: 'restarting', status: 'Restarting (137) 5 seconds ago', oomKilled: true }, true).tooltip).toBe(
+      'Crashing, restarting (out of memory)',
+    );
+  });
+
   it('marks a dead container as crashed, with no code', () => {
     expect(containerStatus({ state: 'dead', status: 'Dead' }, true)).toEqual({ halo: 'status-halo-error', tooltip: 'Dead', crashed: true });
   });

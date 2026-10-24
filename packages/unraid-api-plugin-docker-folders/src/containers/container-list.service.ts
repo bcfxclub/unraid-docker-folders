@@ -56,10 +56,97 @@ interface CachedFacts extends ContainerFacts {
     configImage: string;
 }
 
+/**
+ * `State.OOMKilled` for containers whose last exit was 137, ported from
+ * `DockerClient::getOomKilledMap`. That code is both a `docker stop` that
+ * timed out and a kill for running out of memory, and only inspect tells them
+ * apart. Each answer is tied to the exit it describes (`State.FinishedAt`):
+ * the list's "Exited (137) 5 minutes ago" says when the last exit was, and an
+ * exit newer than the saved one is inspected again. So each exit costs one
+ * inspect, whatever the server's size.
+ */
+interface OomAnswer {
+    oom: boolean;
+    /** FinishedAt in epoch seconds, 0 when unknown. */
+    finished: number;
+    /** Set when the inspect failed, so it is retried after OOM_RETRY_SECONDS. */
+    failedAt?: number;
+}
+
+const OOM_RETRY_SECONDS = 300;
+
+type ListedForOom = Pick<DockerListContainer, 'Id' | 'State' | 'Status'>;
+
+/** Exited, or restarting, after an exit with 137. */
+export function isOomCandidate(container: ListedForOom): boolean {
+    return (
+        (container.State === 'exited' || container.State === 'restarting') &&
+        /^(?:Exited|Restarting) \(137\)/.test(container.Status ?? '')
+    );
+}
+
+/**
+ * Which candidates to inspect, and the answers still worth keeping: a
+ * container gone, or seen in another state, has nothing to say. See
+ * `DockerClient::planOomChecks` for the rule, which this mirrors.
+ */
+export function planOomChecks(
+    candidates: ListedForOom[],
+    cache: ReadonlyMap<string, OomAnswer>,
+    now: number,
+): { inspect: string[]; kept: Map<string, OomAnswer> } {
+    const inspect: string[] = [];
+    const kept = new Map<string, OomAnswer>();
+    for (const container of candidates) {
+        const entry = cache.get(container.Id);
+        if (!entry) {
+            inspect.push(container.Id);
+            continue;
+        }
+        kept.set(container.Id, entry);
+        if (entry.failedAt !== undefined) {
+            if (now - entry.failedAt >= OOM_RETRY_SECONDS) inspect.push(container.Id);
+            continue;
+        }
+        const maxAge = statusAgeUpperBound(container.Status ?? '');
+        if (maxAge !== null && entry.finished < now - maxAge - 60) inspect.push(container.Id);
+    }
+    return { inspect, kept };
+}
+
+const AGE_UNITS: Record<string, number> = {
+    second: 1,
+    minute: 60,
+    hour: 3600,
+    day: 86400,
+    week: 604800,
+    month: 2592000,
+    year: 31536000,
+};
+
+/**
+ * The most seconds ago the exit in a status line can have been, from Docker's
+ * HumanDuration wording, or null when the line has no age Docker would write.
+ */
+export function statusAgeUpperBound(status: string): number | null {
+    const age = /\) (.+) ago$/.exec(status)?.[1];
+    if (age === undefined) return null;
+    if (age === 'Less than a second') return 1;
+    if (age === 'About a minute') return 120;
+    if (age === 'About an hour') return 5400;
+    const match = /^(\d+) (second|minute|hour|day|week|month|year)s?$/.exec(age);
+    if (!match) return null;
+    const count = Number(match[1]);
+    const unit = AGE_UNITS[match[2]];
+    // Hours are rounded to the nearest, the rest are whole units.
+    return match[2] === 'hour' ? Math.trunc((count + 0.5) * unit) : (count + 1) * unit;
+}
+
 @Injectable()
 export class ContainerListService {
     private readonly logger = new Logger(ContainerListService.name);
     private readonly facts = new Map<string, CachedFacts>();
+    private oom = new Map<string, OomAnswer>();
 
     constructor(@Inject(DOCKER_CLIENT_TOKEN) private readonly docker: DockerClient) {}
 
@@ -67,7 +154,7 @@ export class ContainerListService {
         const raw = await this.docker.listContainers({ all: true });
 
         const autostart = readAutostartMap();
-        const facts = await this.factsFor(raw.map((container) => container.Id));
+        const [facts, oom] = await Promise.all([this.factsFor(raw.map((container) => container.Id)), this.oomFor(raw)]);
 
         return raw.map((container) => {
             const name = stripLeadingSlash(container.Names?.[0] ?? '');
@@ -104,8 +191,29 @@ export class ContainerListService {
                 puid: known?.puid ?? '',
                 pgid: known?.pgid ?? '',
                 umask: known?.umask ?? '',
+                oomKilled: oom.get(container.Id)?.oom ?? false,
             };
         });
+    }
+
+    private async oomFor(raw: DockerListContainer[]): Promise<Map<string, OomAnswer>> {
+        const now = Math.floor(Date.now() / 1000);
+        const { inspect, kept } = planOomChecks(raw.filter(isOomCandidate), this.oom, now);
+        await Promise.all(
+            inspect.map(async (id) => {
+                try {
+                    const state = (await this.docker.getContainer(id).inspect()).State;
+                    const finished = Math.floor(Date.parse(state?.FinishedAt ?? '') / 1000);
+                    kept.set(id, { oom: Boolean(state?.OOMKilled), finished: finished > 0 ? finished : 0 });
+                } catch (error) {
+                    // Keep the old answer, and wait OOM_RETRY_SECONDS before trying again.
+                    kept.set(id, { oom: kept.get(id)?.oom ?? false, finished: 0, failedAt: now });
+                    this.logger.warn(`Could not inspect container ${id}: ${String(error)}`);
+                }
+            }),
+        );
+        this.oom = kept;
+        return kept;
     }
 
     /**

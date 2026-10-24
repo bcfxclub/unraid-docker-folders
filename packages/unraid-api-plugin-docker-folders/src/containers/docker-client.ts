@@ -28,7 +28,7 @@ export interface DockerInspectInfo {
     Name?: string;
     /** The container's image ID (Docker's top-level `Image`), not a tag. */
     Image?: string;
-    State?: { Paused?: boolean };
+    State?: { Paused?: boolean; OOMKilled?: boolean; FinishedAt?: string };
     HostConfig?: { PortBindings?: unknown; Privileged?: unknown; CapAdd?: unknown } | null;
     Config?: {
         ExposedPorts?: unknown;

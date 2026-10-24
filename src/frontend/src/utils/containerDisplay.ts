@@ -36,29 +36,38 @@ export function containerExitCode(container: Pick<Container, 'status'>): number 
  * The exit codes a `docker stop` gives: 0 for a clean exit, and 128 + the
  * signal for a process that died of it. 143 is SIGTERM, the default stop
  * signal, 137 SIGKILL after the stop timeout, and 130 / 131 SIGINT / SIGQUIT,
- * which some images set as STOPSIGNAL. 137 is also an OOM kill, which a
- * status line cannot tell apart, so it counts as a stop. An app that exits 1
- * from its own SIGTERM handler still reads as a crash.
+ * which some images set as STOPSIGNAL. 137 is also a kill for running out of
+ * memory: the backends read State.OOMKilled for those (`oomKilled`). Docker
+ * sets that when any process in the container ran out of memory during the
+ * run, so a stop that timed out after a worker was killed for memory reads
+ * as an out-of-memory crash too. An app that exits 1 from its own SIGTERM
+ * handler still reads as a crash.
  */
 const STOP_EXIT_CODES = new Set([0, 130, 131, 137, 143]);
 
+type CrashInput = Pick<Container, 'state' | 'status' | 'oomKilled'>;
+
 /**
- * The process died on its own. Exited with a code no stop gives; or
- * restarting, which a restart policy only does after an exit nobody asked
- * for, so any code counts; or dead, which Docker reports for a container it
- * could not remove or clean up. A container stopped from Unraid or `docker
- * stop` is not one.
+ * The process died on its own. Exited with a code no stop gives, or killed
+ * for running out of memory; or restarting, which a restart policy only does
+ * after an exit nobody asked for, so any code counts; or dead, which Docker
+ * reports for a container it could not remove or clean up. A container
+ * stopped from Unraid or `docker stop` is not one.
  */
-export function isCrashedContainer(container: Pick<Container, 'state' | 'status'>): boolean {
+export function isCrashedContainer(container: CrashInput): boolean {
   return crashKind(container) !== null;
 }
 
-/** How the container crashed, with its exit code when the status has one. */
-function crashKind(container: Pick<Container, 'state' | 'status'>): { code: number | null } | null {
+/**
+ * How the container crashed: its exit code when the status has one, and
+ * whether that was a kill for memory. Null when it did not crash.
+ */
+function crashKind(container: CrashInput): { code: number | null; oom?: true } | null {
   const { state } = container;
   if (state === 'dead') return { code: null };
   if (state !== 'exited' && state !== 'restarting') return null;
   const code = containerExitCode(container);
+  if (code === 137 && container.oomKilled) return { code, oom: true };
   if (state === 'restarting') return { code };
   return code !== null && !STOP_EXIT_CODES.has(code) ? { code } : null;
 }
@@ -68,7 +77,7 @@ function crashKind(container: Pick<Container, 'state' | 'status'>): { code: numb
  * crash is what the user most needs to see, so hiding it with the stopped
  * containers would defeat marking it.
  */
-export function isShownWhenHidingStopped(container?: Pick<Container, 'state' | 'status'>): boolean {
+export function isShownWhenHidingStopped(container?: CrashInput): boolean {
   return !!container && (isAliveContainer(container) || isCrashedContainer(container));
 }
 
@@ -76,7 +85,7 @@ export function isShownWhenHidingStopped(container?: Pick<Container, 'state' | '
 // .status-halo in main.css). Halo and tooltip resolve together so a newly
 // handled state can't land in one and be forgotten in the other — they were
 // once two parallel branch chains.
-export function containerStatus(container: Pick<Container, 'state' | 'status'>, distinguishHealthy: boolean): ContainerStatus {
+export function containerStatus(container: CrashInput, distinguishHealthy: boolean): ContainerStatus {
   const state = container.state;
   const ok = (halo: string, tooltip: string): ContainerStatus => ({ halo, tooltip, crashed: false });
   if (state === 'running') {
@@ -89,7 +98,8 @@ export function containerStatus(container: Pick<Container, 'state' | 'status'>, 
   const crash = crashKind(container);
   if (crash) {
     const verb = state === 'restarting' ? 'Crashing, restarting' : state === 'dead' ? 'Dead' : 'Crashed';
-    return { halo: 'status-halo-error', tooltip: crash.code === null ? verb : `${verb} (exit code ${crash.code})`, crashed: true };
+    const detail = crash.oom ? ' (out of memory)' : crash.code === null ? '' : ` (exit code ${crash.code})`;
+    return { halo: 'status-halo-error', tooltip: `${verb}${detail}`, crashed: true };
   }
   if (state === 'exited') return ok('status-halo-error', 'Exited');
   if (state === 'stopped') return ok('status-halo-error', 'Stopped');
