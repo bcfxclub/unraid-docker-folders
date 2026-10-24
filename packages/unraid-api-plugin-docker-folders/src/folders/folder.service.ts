@@ -786,8 +786,8 @@ function upsertComposeStack(
     const composeFile = configFiles === null ? null : configFiles.split(',')[0];
 
     const existing = db
-        .prepare('SELECT project_name FROM compose_stacks WHERE project_name = ?')
-        .get(project);
+        .prepare('SELECT working_dir, compose_file FROM compose_stacks WHERE project_name = ?')
+        .get(project) as { working_dir: string | null; compose_file: string | null } | undefined;
 
     if (existing === undefined) {
         db.prepare(
@@ -798,6 +798,13 @@ function upsertComposeStack(
         ).run(project, workingDir, composeFile, now, now);
         return;
     }
+
+    // Write only a path that changed, as `ComposeManager::upsertStack` does.
+    // This runs on every sync, so writing unconditionally bumped updated_at
+    // on every poll.
+    const workingDirChanged = workingDir !== null && workingDir !== existing.working_dir;
+    const composeFileChanged = composeFile !== null && composeFile !== existing.compose_file;
+    if (!workingDirChanged && !composeFileChanged) return;
 
     db.prepare(
         `UPDATE compose_stacks SET
