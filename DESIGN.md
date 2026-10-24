@@ -453,7 +453,8 @@ captions · `text-sm` body, labels, list rows · `text-base` compact modal title
 In-iframe overlays are all at the same level and stack by DOM order.
 
 **Motion** — `0.15s` hover/color transitions · `150ms` card enter · `200ms`
-modal fade+scale, expand/collapse grid, view-mode slider · `300ms` progress
+modal fade+scale, expand/collapse grid, view-mode slider, compose stacks pane
+slide (`.stacks-pane-*`) · `300ms` progress
 bars · `600ms` state-change pulse · `2s` new-log-line highlight. Prefer the
 existing shared classes (`.expand-grid`, `.state-change-pulse`,
 `.container-card-enter`) over new one-off keyframes.

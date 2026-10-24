@@ -437,6 +437,18 @@
   transform: scale(0.95);
 }
 
+/* Compose stacks pane slides in from the left when its header button opens it */
+.stacks-pane-enter-active,
+.stacks-pane-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.stacks-pane-enter-from,
+.stacks-pane-leave-to {
+  opacity: 0;
+  transform: translateX(-16px);
+}
+
 /* Container state change pulse */
 @keyframes state-change-pulse {
   0%, 100% { border-color: var(--border-color, #e0e0e0); }
@@ -531,6 +543,11 @@
   #unraid-docker-folders-modern .skeleton {
     animation: none;
     background-image: none;
+  }
+
+  .stacks-pane-enter-active,
+  .stacks-pane-leave-active {
+    transition: none;
   }
 }
 

@@ -147,17 +147,19 @@
       <ComposeSetupBanner />
       <!-- Pane and content wrap, so on a phone the pane sits above the folders. -->
       <div class="flex flex-wrap gap-4 items-start">
-        <StacksPane
-          v-if="stacksPaneOpen"
-          id="stacks-pane"
-          class="flex-[1_1_240px] max-w-[280px] min-w-0"
-          @edit-compose="openComposeEditor"
-          @compose-up="openComposeUp"
-          @compose-recompose="openComposeRecompose"
-          @compose-down="downConfirm.request"
-          @compose-pull="handleComposePull"
-          @schedules="openSchedules"
-        />
+        <Transition name="stacks-pane">
+          <StacksPane
+            v-if="stacksPaneOpen"
+            id="stacks-pane"
+            class="flex-[1_1_240px] max-w-[280px] min-w-0"
+            @edit-compose="openComposeEditor"
+            @compose-up="openComposeUp"
+            @compose-recompose="openComposeRecompose"
+            @compose-down="downConfirm.request"
+            @compose-pull="handleComposePull"
+            @schedules="openSchedules"
+          />
+        </Transition>
         <div class="flex-[999_1_560px] min-w-0">
           <LoadingSkeleton v-if="isLoading" :view="viewMode" />
 
