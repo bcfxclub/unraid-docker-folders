@@ -719,7 +719,7 @@ if (file_exists($changelogPath)) {
     <div class="setting-row">
       <div class="setting-info">
         <label for="show-inline-logs">Show inline logs</label>
-        <div class="description">When enabled, expanding a running container shows a live log panel alongside resource stats. <strong>Default: Off</strong></div>
+        <div class="description">When enabled, expanding a running container shows a live log panel alongside resource stats. A stopped container always shows its last 200 log lines, so you can see why it stopped. <strong>Default: Off</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="show-inline-logs" <?= $showInlineLogs ? 'checked' : '' ?> onchange="saveSetting('show_inline_logs', this.checked ? '1' : '0')" />
@@ -730,7 +730,7 @@ if (file_exists($changelogPath)) {
     <div class="setting-row">
       <div class="setting-info">
         <label for="log-refresh-interval">Log refresh interval</label>
-        <div class="description">How often to auto-refresh inline logs when the panel is open. Only applies when inline logs are enabled. <strong>Default: 10 seconds</strong></div>
+        <div class="description">How often to auto-refresh inline logs when the panel is open. Only applies to running containers, when inline logs are enabled. <strong>Default: 10 seconds</strong></div>
       </div>
       <div class="setting-control">
         <select id="log-refresh-interval" onchange="saveSetting('log_refresh_interval', this.value)">

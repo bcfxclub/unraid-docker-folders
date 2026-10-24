@@ -19,11 +19,11 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 pt-2 border-t border-border">
       <!-- Left: image, network, ports, volumes, health, command, labels.
            Spans the full row when no stats column exists or is expected, so a
-           stopped container doesn't sit in half a row beside a blank track. The
-           predicate matches the right cell's so nothing shifts on first poll. -->
+           stopped container doesn't sit in half a row beside a blank track. See
+           hasStatsColumn. -->
       <div
         class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 content-start min-w-0"
-        :class="{ 'md:col-span-2': !(isRunning && showStats) }"
+        :class="{ 'md:col-span-2': !hasStatsColumn }"
       >
         <template v-if="container.image">
           <span class="text-text-secondary shrink-0">Image</span>
@@ -69,18 +69,24 @@
         </template>
         <p v-if="!hasMetadata" class="col-span-2 text-text-secondary italic">No additional details available</p>
       </div>
-      <!-- Right: I/O, PIDs, uptime, sizes -->
+      <!-- Right: I/O, PIDs, uptime, sizes. A stopped container keeps only what
+           still holds after it stops: I/O, PIDs and uptime describe a process
+           that is gone, and uptime would count from the last start. -->
       <div v-if="containerStats" class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 content-start min-w-0">
-        <span class="text-text-secondary">Block I/O</span>
-        <span class="text-text font-mono truncate">R: {{ formatBytes(containerStats.blockRead) }} / W: {{ formatBytes(containerStats.blockWrite) }}</span>
-        <span class="text-text-secondary">Net I/O</span>
-        <span class="text-text font-mono truncate">RX: {{ formatBytes(containerStats.netRx) }} / TX: {{ formatBytes(containerStats.netTx) }}</span>
-        <span class="text-text-secondary">PIDs</span>
-        <span class="text-text font-mono">{{ containerStats.pids }}</span>
+        <template v-if="isRunning">
+          <span class="text-text-secondary">Block I/O</span>
+          <span class="text-text font-mono truncate">R: {{ formatBytes(containerStats.blockRead) }} / W: {{ formatBytes(containerStats.blockWrite) }}</span>
+          <span class="text-text-secondary">Net I/O</span>
+          <span class="text-text font-mono truncate">RX: {{ formatBytes(containerStats.netRx) }} / TX: {{ formatBytes(containerStats.netTx) }}</span>
+          <span class="text-text-secondary">PIDs</span>
+          <span class="text-text font-mono">{{ containerStats.pids }}</span>
+        </template>
         <span class="text-text-secondary">Restarts</span>
         <span class="font-mono" :class="restartClass">{{ containerStats.restartCount }}</span>
-        <span class="text-text-secondary">Uptime</span>
-        <span class="text-text font-mono">{{ formatUptime(containerStats.startedAt) }}</span>
+        <template v-if="isRunning">
+          <span class="text-text-secondary">Uptime</span>
+          <span class="text-text font-mono">{{ formatUptime(containerStats.startedAt) }}</span>
+        </template>
         <span class="text-text-secondary">Image Size</span>
         <span class="text-text font-mono">{{ formatBytes(containerStats.imageSize) }}</span>
         <span class="text-text-secondary">Log Size</span>
@@ -282,6 +288,11 @@ const emit = defineEmits<{ (e: 'refresh-logs'): void }>();
 
 const dockerStore = useDockerStore();
 const scheduleStore = useScheduleStore();
+
+// The right stats cell renders whenever stats exist, which includes a stopped
+// container's last reading. A running container with stats on keeps the track
+// open before the first poll too, so nothing shifts when it lands.
+const hasStatsColumn = computed(() => !!props.containerStats || (props.isRunning && props.showStats));
 
 // Schedules target a container by NAME, not by docker id — see the emit at
 // ContainerCard's kebab handler. App.vue fetches schedules on load and the

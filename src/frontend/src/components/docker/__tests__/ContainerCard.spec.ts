@@ -742,11 +742,11 @@ describe('ContainerCard', () => {
       }
     });
 
-    it('does not show log panel for exited containers', async () => {
+    it('shows the log panel for exited containers even with the setting off', async () => {
       const wrapper = mountCardWithSharedPinia(
         { state: 'exited' },
         { view: 'list' },
-        { enableLogs: true },
+        { enableLogs: false },
       );
 
       // Expand
@@ -755,7 +755,8 @@ describe('ContainerCard', () => {
       await flushPromises();
 
       const refreshBtn = wrapper.findAll('button').find((b) => b.attributes('title') === 'Refresh logs');
-      expect(refreshBtn).toBeUndefined();
+      expect(refreshBtn).toBeDefined();
+      expect(findLogsCall()?.[0]).toContain('tail=200');
     });
 
     it('passes container name in the logs fetch URL', async () => {
