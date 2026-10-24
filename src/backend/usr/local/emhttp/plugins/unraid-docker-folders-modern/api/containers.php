@@ -13,6 +13,7 @@ require_once dirname(__DIR__) . '/classes/DockerClient.php';
 require_once dirname(__DIR__) . '/classes/FolderManager.php';
 require_once dirname(__DIR__) . '/classes/AdoptBuilder.php';
 require_once dirname(__DIR__) . '/classes/SecurityAdvisor.php';
+require_once dirname(__DIR__) . '/classes/ContainerWatch.php';
 require_once dirname(__DIR__) . '/classes/WebSocketPublisher.php';
 
 // Set JSON content type
@@ -161,6 +162,10 @@ function handleGet($dockerClient)
     if (empty($containers) && $dockerClient->getLastError() !== '') {
       errorResponse('Cannot reach Docker: ' . $dockerClient->getLastError(), 503);
     }
+
+    // What the once-a-minute container watch found: a process that exited
+    // while Docker still lists it running, and ports gone dark.
+    $containers = ContainerWatch::annotate($containers, ContainerWatch::loadSweep(ContainerWatch::STATE_PATH, time()), time());
 
     // Reconcile container IDs (handles container recreate/update)
     $folderManager = new FolderManager();

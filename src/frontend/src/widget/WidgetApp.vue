@@ -132,7 +132,7 @@ import { useScheduleStore } from '@/stores/schedules';
 import type { Schedule } from '@/types/schedule';
 import { initLiveUpdates } from '@/composables/useLiveUpdates';
 import { containerMatchesSearch } from '@/utils/search';
-import { isCrashedContainer, isShownWhenHidingStopped } from '@/utils/containerDisplay';
+import { isCrashedContainer, isRunningContainer, isShownWhenHidingStopped } from '@/utils/containerDisplay';
 import { composeProjectOf } from '@/utils/updateUnits';
 import { effectiveSortMode, sortByMode } from '@/utils/sortMode';
 import { reportHeightToParent } from '@/utils/iframeHost';
@@ -233,7 +233,7 @@ function groupTint(group: Group): string {
 }
 
 function makeGroup(key: string, name: string, color: string, members: Container[]): Group {
-  const running = members.filter((c) => c.state === 'running').length;
+  const running = members.filter(isRunningContainer).length;
   const checkUpdates = settingsStore.enableUpdateChecks;
   const updates = checkUpdates ? members.filter((c) => updatesStore.hasUpdate(c.image)).length : 0;
   const failed = members.filter((c) => failedSchedules.value.has(c.name)).length;
@@ -308,7 +308,7 @@ function onParentMessage(e: MessageEvent) {
 // stats arrive.
 const tileSummary = computed(() => ({
   type: 'docker-folders-summary',
-  running: runningIds.value.length,
+  running: dockerStore.containers.filter(isRunningContainer).length,
   total: dockerStore.containers.length,
   crashed: dockerStore.containers.filter(isCrashedContainer).length,
   cpu: runningTotal.value?.cpuPercent ?? null,

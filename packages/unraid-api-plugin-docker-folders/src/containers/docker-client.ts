@@ -28,8 +28,18 @@ export interface DockerInspectInfo {
     Name?: string;
     /** The container's image ID (Docker's top-level `Image`), not a tag. */
     Image?: string;
-    State?: { Paused?: boolean; OOMKilled?: boolean; FinishedAt?: string };
-    HostConfig?: { PortBindings?: unknown; Privileged?: unknown; CapAdd?: unknown } | null;
+    State?: {
+        Paused?: boolean;
+        OOMKilled?: boolean;
+        FinishedAt?: string;
+        /** The container watch's fields (`container-watch.ts`). */
+        Running?: boolean;
+        StartedAt?: string;
+        ExitCode?: number;
+        Pid?: number;
+        Restarting?: boolean;
+    };
+    HostConfig?: { PortBindings?: unknown; Privileged?: unknown; CapAdd?: unknown; NetworkMode?: string } | null;
     Config?: {
         ExposedPorts?: unknown;
         User?: unknown;

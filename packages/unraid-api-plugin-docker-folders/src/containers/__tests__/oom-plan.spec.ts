@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { isOomCandidate, planOomChecks, statusAgeUpperBound } from '../container-list.service.js';
+import { isOomCandidate, planOomChecks } from '../container-list.service.js';
+import { statusAgeUpperBound } from '../docker-status.js';
 
 // Mirrors tests/php/DockerClientOomPlanTest.php.
 describe('planOomChecks', () => {

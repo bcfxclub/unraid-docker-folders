@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
+  containerPortProblem,
+  isRunningContainer,
   containerStatus,
   containerEditUrl,
   containerExitCode,
@@ -83,6 +85,32 @@ describe('exit codes', () => {
     expect(containerStatus({ state: 'restarting', status: 'Restarting (137) 5 seconds ago', oomKilled: true }, true).tooltip).toBe(
       'Crashing, restarting (out of memory)',
     );
+  });
+
+  it('marks a running container whose process exited as crashed', () => {
+    const ghost = { state: 'running', status: 'Up 19 hours', processExited: true };
+    expect(isCrashedContainer(ghost)).toBe(true);
+    expect(isRunningContainer(ghost)).toBe(false);
+    expect(isRunningContainer({ state: 'running' })).toBe(true);
+    expect(containerStatus(ghost, true)).toEqual({
+      halo: 'status-halo-error',
+      tooltip: 'Crashed, though Docker still lists it as running',
+      crashed: true,
+    });
+  });
+
+  it('warns about a running container whose ports went dark', () => {
+    expect(containerPortProblem({ state: 'running', closedPorts: [5432] })).toBe('nothing listens on port 5432');
+    expect(containerPortProblem({ state: 'exited', closedPorts: [5432] })).toBeNull();
+    expect(containerPortProblem({ state: 'running', closedPorts: [80, 443], unpublishedPorts: [8080] })).toBe(
+      'nothing listens on ports 80, 443; host port 8080 not published',
+    );
+    expect(containerPortProblem({ state: 'running', closedPorts: [], unpublishedPorts: [] })).toBeNull();
+    expect(containerStatus({ state: 'running', status: 'Up 2 hours', unpublishedPorts: [5432] }, true)).toEqual({
+      halo: 'status-halo-warning',
+      tooltip: 'Running, but host port 5432 not published',
+      crashed: false,
+    });
   });
 
   it('marks a dead container as crashed, with no code', () => {

@@ -315,11 +315,7 @@ class DockerClient
     $cache = $this->loadJsonCache(self::OOM_CACHE_PATH);
     $plan = self::planOomChecks($candidates, $cache, $now);
 
-    $requests = [];
-    foreach ($plan['inspect'] as $id) {
-      $requests[$id] = "/containers/" . rawurlencode($id) . "/json";
-    }
-    $results = $this->requestMulti($requests);
+    $results = $this->inspectMany($plan['inspect']);
     foreach ($plan['inspect'] as $id) {
       $state = $results[$id]['State'] ?? null;
       if (!is_array($state)) {
@@ -402,8 +398,24 @@ class DockerClient
    */
   public static function statusAgeUpperBound($status)
   {
-    if (!preg_match('/\) (.+) ago$/', $status, $m)) return null;
-    $age = $m[1];
+    return preg_match('/\) (.+) ago$/', $status, $m) ? self::durationUpperBound($m[1]) : null;
+  }
+
+  /**
+   * The most seconds a running container can have been up, from a status
+   * line such as "Up 19 hours (healthy)", or null for any other line.
+   *
+   * @param string $status
+   * @return int|null
+   */
+  public static function uptimeUpperBound($status)
+  {
+    return preg_match('/^Up (.+?)(?: \([^)]*\))?$/', $status, $m) ? self::durationUpperBound($m[1]) : null;
+  }
+
+  /** Docker's HumanDuration wording ("About an hour", "5 minutes") as its most seconds. */
+  private static function durationUpperBound($age)
+  {
     if ($age === 'Less than a second') return 1;
     if ($age === 'About a minute') return 120;
     if ($age === 'About an hour') return 5400;
@@ -552,7 +564,7 @@ class DockerClient
    * @param mixed $portBindings
    * @return array List of {hostIp, hostPort, containerPort, type}
    */
-  private static function parsePortBindings($portBindings)
+  public static function parsePortBindings($portBindings)
   {
     if (!is_array($portBindings)) {
       return [];
@@ -1618,6 +1630,33 @@ class DockerClient
     }
 
     return $result;
+  }
+
+  /**
+   * Docker's own list of every container, or null when the request failed,
+   * so a failure is never read as "every container is gone".
+   *
+   * @return array|null
+   */
+  public function listContainersRaw()
+  {
+    $response = $this->request('GET', '/containers/json?all=1');
+    return is_array($response) ? $response : null;
+  }
+
+  /**
+   * Inspect several containers in parallel.
+   *
+   * @param string[] $ids
+   * @return array id => inspect payload, or null for one that failed
+   */
+  public function inspectMany(array $ids)
+  {
+    $requests = [];
+    foreach ($ids as $id) {
+      $requests[$id] = '/containers/' . rawurlencode($id) . '/json';
+    }
+    return $this->requestMulti($requests);
   }
 
   /**

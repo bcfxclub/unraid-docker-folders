@@ -13,6 +13,9 @@ import type {
 import { DOCKER_CLIENT_TOKEN, type DockerClient, type DockerListContainer } from './docker-client.js';
 import { isImageOutdated, resolveImageTag } from '../updates/docker-refs.js';
 import { readAutostartMap } from './unraid-templates.js';
+import { statusAgeUpperBound } from './docker-status.js';
+import { ContainerWatchService } from './container-watch.service.js';
+import { nowSeconds } from '../util/time.js';
 
 /**
  * The container list, ported from `DockerClient::listContainers`.
@@ -114,41 +117,16 @@ export function planOomChecks(
     return { inspect, kept };
 }
 
-const AGE_UNITS: Record<string, number> = {
-    second: 1,
-    minute: 60,
-    hour: 3600,
-    day: 86400,
-    week: 604800,
-    month: 2592000,
-    year: 31536000,
-};
-
-/**
- * The most seconds ago the exit in a status line can have been, from Docker's
- * HumanDuration wording, or null when the line has no age Docker would write.
- */
-export function statusAgeUpperBound(status: string): number | null {
-    const age = /\) (.+) ago$/.exec(status)?.[1];
-    if (age === undefined) return null;
-    if (age === 'Less than a second') return 1;
-    if (age === 'About a minute') return 120;
-    if (age === 'About an hour') return 5400;
-    const match = /^(\d+) (second|minute|hour|day|week|month|year)s?$/.exec(age);
-    if (!match) return null;
-    const count = Number(match[1]);
-    const unit = AGE_UNITS[match[2]];
-    // Hours are rounded to the nearest, the rest are whole units.
-    return match[2] === 'hour' ? Math.trunc((count + 0.5) * unit) : (count + 1) * unit;
-}
-
 @Injectable()
 export class ContainerListService {
     private readonly logger = new Logger(ContainerListService.name);
     private readonly facts = new Map<string, CachedFacts>();
     private oom = new Map<string, OomAnswer>();
 
-    constructor(@Inject(DOCKER_CLIENT_TOKEN) private readonly docker: DockerClient) {}
+    constructor(
+        @Inject(DOCKER_CLIENT_TOKEN) private readonly docker: DockerClient,
+        private readonly watch: ContainerWatchService,
+    ) {}
 
     async listContainers(): Promise<DockerFoldersContainer[]> {
         const raw = await this.docker.listContainers({ all: true });
@@ -156,6 +134,7 @@ export class ContainerListService {
         const autostart = readAutostartMap();
         const [facts, oom] = await Promise.all([this.factsFor(raw.map((container) => container.Id)), this.oomFor(raw)]);
 
+        const now = nowSeconds();
         return raw.map((container) => {
             const name = stripLeadingSlash(container.Names?.[0] ?? '');
             const labels = container.Labels ?? {};
@@ -192,12 +171,13 @@ export class ContainerListService {
                 pgid: known?.pgid ?? '',
                 umask: known?.umask ?? '',
                 oomKilled: oom.get(container.Id)?.oom ?? false,
+                ...this.watch.findings(container, now),
             };
         });
     }
 
     private async oomFor(raw: DockerListContainer[]): Promise<Map<string, OomAnswer>> {
-        const now = Math.floor(Date.now() / 1000);
+        const now = nowSeconds();
         const { inspect, kept } = planOomChecks(raw.filter(isOomCandidate), this.oom, now);
         await Promise.all(
             inspect.map(async (id) => {

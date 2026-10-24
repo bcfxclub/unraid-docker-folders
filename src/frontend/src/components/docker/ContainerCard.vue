@@ -75,6 +75,7 @@
       </div>
 
       <ActionFailureLine :container="container" class="px-4 sm:px-6 pb-1" />
+      <PortProblemLine :container="container" class="px-4 sm:px-6 pb-1" />
   
       <!-- Compact ports (collapsed) -->
       <div v-if="compactPorts && !expanded" class="px-4 sm:px-6 pb-0.5">
@@ -218,6 +219,7 @@
           <ImageLink :image="container.image" :href="imageLink" />
         </span>
         <ActionFailureLine :container="container" />
+        <PortProblemLine :container="container" />
       </div>
 
       <!-- Compact ports (list collapsed) -->
@@ -370,6 +372,7 @@ import IconGlobe from '@/components/icons/IconGlobe.vue';
 import IconAutostart from '@/components/icons/IconAutostart.vue';
 import IconAdopt from '@/components/icons/IconAdopt.vue';
 import ActionFailureLine from '@/components/docker/ActionFailureLine.vue';
+import PortProblemLine from '@/components/docker/PortProblemLine.vue';
 
 const isMobile = useIsMobile();
 const dockerStore = useDockerStore();

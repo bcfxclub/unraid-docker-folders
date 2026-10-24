@@ -148,6 +148,15 @@ export interface Container {
    * exit was 137, which is a timed-out stop as often as a kill for memory.
    */
   oomKilled?: boolean;
+  /**
+   * From the backends' once-a-minute container watch. The process exited
+   * while Docker still lists the container as running.
+   */
+  processExited?: boolean;
+  /** Container ports seen listening earlier in this run that nothing listens on now. */
+  closedPorts?: number[];
+  /** Host ports the container asks for that Docker has not published. */
+  unpublishedPorts?: number[];
   created: number;
   icon: string | null;
   managed: string | null;

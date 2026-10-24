@@ -508,7 +508,9 @@ tint (§2), 40% opacity collapsed, full expanded.
 **Container card** (grid view). `bg-bg-card` card with the icon in a
 `.status-halo`, name, the image on a monospace line led by a link icon, an
 uptime/state line (`text-error` once the container crashed) with a chevron to
-details, ports, CPU/MEM bars, and an action
+details, a `text-warning` 11px line under it when the container watch found a
+port gone dark ("Running, but nothing listens on port 5432", `PortProblemLine`,
+also in list rows and the widget, with a `status-halo-warning` halo), ports, CPU/MEM bars, and an action
 row of 32px icon buttons coloured by intent: stop `text-error`, start
 `text-success`, restart `text-primary`, pull `text-warning`, each filling with
 its colour on hover.

@@ -172,6 +172,21 @@ export class DockerFoldersContainer {
     })
     oomKilled!: boolean;
 
+    @Field(() => Boolean, {
+        description: "The container watch found the process exited while Docker still lists the container as running.",
+    })
+    processExited!: boolean;
+
+    @Field(() => [Int], {
+        description: 'Container ports seen listening earlier in this run that nothing listens on now, on two sweeps in a row.',
+    })
+    closedPorts!: number[];
+
+    @Field(() => [Int], {
+        description: 'Host ports the container asks for that Docker has not published, on two sweeps in a row.',
+    })
+    unpublishedPorts!: number[];
+
     @Field(() => [DockerFoldersLabel])
     labels!: DockerFoldersLabel[];
 
