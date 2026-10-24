@@ -154,6 +154,7 @@
           @edit-compose="openComposeEditor"
           @compose-up="openComposeUp"
           @compose-recompose="openComposeRecompose"
+          @compose-down="downConfirm.request"
           @compose-pull="handleComposePull"
           @schedules="openSchedules"
         />
@@ -182,6 +183,7 @@
                 @edit-compose="openComposeEditor"
                 @compose-up="openComposeUp"
                 @compose-recompose="openComposeRecompose"
+                @compose-down="downConfirm.request"
                 @compose-pull="handleComposePull"
                 @schedules="openSchedules"
                 @security="openSecurity"
@@ -313,6 +315,7 @@
       @cancel="deletingFolderId = null"
     />
     <StackActionConfirmModal v-if="recomposeConfirm.pending.value" :pending="recomposeConfirm.pending.value" @confirm="recomposeConfirm.confirm" @cancel="recomposeConfirm.cancel" />
+    <StackActionConfirmModal v-if="downConfirm.pending.value" :pending="downConfirm.pending.value" @confirm="downConfirm.confirm" @cancel="downConfirm.cancel" />
     <UpdateConfirmModal
       :is-open="showBatchConfirm"
       :units="pendingUnits"
@@ -488,6 +491,7 @@ function handleCreate(action: 'stack' | 'folder') {
 }
 
 function openComposeUp(project: string) {
+  composeStore.clearStackStatus(project);
   composeProgressProject.value = project;
   composeProgressMode.value = 'up';
   composeProgressForceRecreate.value = false;
@@ -499,11 +503,17 @@ function openComposeUp(project: string) {
 // and asking again would replace the editor with the confirm on Unraid.
 const recomposeConfirm = useStackActionConfirm('recompose', startComposeRecompose);
 
+// Stack Down from the stacks pane and from a folder header. Its progress and
+// any failure show on both (composeStore.runStackAction). Up, Recompose and
+// Pull start below, so each clears an old stop or down failure first.
+const downConfirm = useStackActionConfirm('down', (project) => composeStore.runStackAction(project, 'down'));
+
 function openComposeRecompose(project: string) {
   recomposeConfirm.request(project);
 }
 
 function startComposeRecompose(project: string) {
+  composeStore.clearStackStatus(project);
   composeProgressProject.value = project;
   composeProgressMode.value = 'up';
   composeProgressForceRecreate.value = true;
@@ -513,6 +523,7 @@ function startComposeRecompose(project: string) {
 // Pull streams its output into the same progress modal as up/recompose —
 // a bare await gave no sign anything was happening.
 function handleComposePull(project: string) {
+  composeStore.clearStackStatus(project);
   composeProgressProject.value = project;
   composeProgressMode.value = 'pull';
   composeProgressForceRecreate.value = false;

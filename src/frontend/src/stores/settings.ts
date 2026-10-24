@@ -204,12 +204,16 @@ export const useSettingsStore = defineStore('settings', () => {
   async function setConfirmStackAction(action: DestructiveStackAction, value: boolean) {
     confirmStackActions.value[action] = value;
 
+    // On a failed save, go back to the saved value, so the dialog never stops
+    // asking for a choice the server did not keep.
     try {
       const { ok } = await useBackend().settings.set(CONFIRM_SETTING_KEYS[action], value ? '1' : '0');
-      if (!ok) console.error(`Setting ${CONFIRM_SETTING_KEYS[action]} was not saved`);
+      if (ok) return;
+      console.error(`Setting ${CONFIRM_SETTING_KEYS[action]} was not saved`);
     } catch (e) {
       console.error('Error saving setting:', e);
     }
+    confirmStackActions.value[action] = !value;
   }
 
   async function setEnableSecurityAdvisor(value: boolean) {

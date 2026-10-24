@@ -1,9 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import FolderContainer from '../FolderContainer.vue';
+import FolderHeader from '../FolderHeader.vue';
 import type { Folder } from '@/types/folder';
 import { useDockerStore } from '@/stores/docker';
+import { useFolderStore } from '@/stores/folders';
 import { useSettingsStore } from '@/stores/settings';
 import { makeContainer } from '@/test/fixtures';
 
@@ -337,5 +340,30 @@ describe('FolderContainer stack filter', () => {
     expect(list.text()).toContain('sonarr');
     expect(list.text()).not.toContain('plex');
     expect(wrapper.find('.expand-grid').classes()).toContain('expand-expanded');
+  });
+
+  it('still collapses from the header while filtered, without changing the saved state', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const docker = useDockerStore();
+    docker.containers = [makeContainer({ id: 's', name: 'sonarr', labels: { 'com.docker.compose.project': 'arr' } })];
+    docker.stackFilter = 'arr';
+    const folderStore = useFolderStore();
+    folderStore.toggleFolderCollapse = vi.fn();
+    const wrapper = mount(FolderContainer, {
+      props: { folder: makeFolder({ collapsed: false, containers: ['sonarr'].map(assoc) }) },
+      global: { plugins: [pinia] },
+    });
+    const grid = () => wrapper.find('.expand-grid').classes();
+    wrapper.findComponent(FolderHeader).vm.$emit('toggle-collapse');
+    await nextTick();
+    expect(grid()).not.toContain('expand-expanded');
+    expect(folderStore.toggleFolderCollapse).not.toHaveBeenCalled();
+    // Picking another stack opens it again.
+    docker.stackFilter = 'other';
+    await nextTick();
+    docker.stackFilter = 'arr';
+    await nextTick();
+    expect(grid()).toContain('expand-expanded');
   });
 });

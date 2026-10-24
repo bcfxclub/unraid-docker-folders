@@ -10,8 +10,8 @@ export interface PendingStackAction {
  * Ask before a stack action that deletes containers, unless the user turned
  * that question off. Bind `pending`, `confirm` and `cancel` to a
  * StackActionConfirmModal, and call `request` where the action used to run.
- * Mount the modal with `v-if="pending"`: an idle one then holds no
- * parent-page listener, and a closing one never shows another action's text.
+ * Mount the modal with `v-if="pending"`, so a closing one never shows
+ * another action's text. App.vue hosts one per action.
  */
 export function useStackActionConfirm(action: DestructiveStackAction, run: (project: string) => void) {
   const settingsStore = useSettingsStore();

@@ -32,9 +32,9 @@
             <span class="text-sm font-semibold truncate">{{ row.project }}</span>
             <span
               class="text-[11px] truncate"
-              :class="statuses.get(row.project)?.failed ? 'text-error' : 'text-text-secondary'"
-              :title="statuses.get(row.project)?.text ?? row.location"
-            >{{ statuses.get(row.project)?.text ?? row.location }}</span>
+              :class="composeStore.stackActionStatus.get(row.project)?.error ? 'text-error' : 'text-text-secondary'"
+              :title="statusLine(row)"
+            >{{ statusLine(row) }}</span>
           </span>
         </span>
       </button>
@@ -46,19 +46,16 @@
         @select="(action) => handleSelect(row.project, action)"
       />
     </div>
-    <StackActionConfirmModal v-if="downConfirm.pending.value" :pending="downConfirm.pending.value" @confirm="downConfirm.confirm" @cancel="downConfirm.cancel" />
   </nav>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { useComposeStore } from '@/stores/compose';
+import { computed } from 'vue';
+import { useComposeStore, stackActionText } from '@/stores/compose';
 import { useDockerStore, type Container } from '@/stores/docker';
 import { useFolderStore } from '@/stores/folders';
 import KebabMenu from '@/components/KebabMenu.vue';
 import type { KebabMenuItem } from '@/components/KebabMenu.vue';
-import StackActionConfirmModal from '@/components/compose/StackActionConfirmModal.vue';
-import { useStackActionConfirm } from '@/composables/useStackActionConfirm';
 import { byLabel } from '@/utils/menu';
 import { STOPWATCH_ICON, TRASH_ICON } from '@/utils/menuIcons';
 import { stackActionItems } from '@/utils/stackMenu';
@@ -75,6 +72,7 @@ const emit = defineEmits<{
   'edit-compose': [project: string];
   'compose-up': [project: string];
   'compose-recompose': [project: string];
+  'compose-down': [project: string];
   'compose-pull': [project: string];
   schedules: [targetType: string, targetId: string];
 }>();
@@ -86,23 +84,8 @@ const folderStore = useFolderStore();
 /** How many folder names "In …" lists before it shortens to "+N more". */
 const MAX_LISTED_FOLDERS = 2;
 
-/**
- * Stop and down run here rather than in a progress modal, so the row's
- * folder line says what is happening ("Stopping…"), and its actions are
- * disabled until the call returns so a second click can't start an
- * overlapping one. A failure takes the line until the next action on that
- * stack.
- */
-const statuses = ref(new Map<string, { text: string; failed: boolean }>());
-const downConfirm = useStackActionConfirm('down', (project) => runStackAction(project, 'Removing…', composeStore.stackDown));
-
 function isSelected(project: string): boolean {
   return dockerStore.stackFilter === project;
-}
-
-function isBusy(project: string): boolean {
-  const status = statuses.value.get(project);
-  return !!status && !status.failed;
 }
 
 // Every known stack, plus any project seen only on container labels. Counts
@@ -135,6 +118,12 @@ function locationText(members: Container[]): string {
   return rest > 0 ? `In ${listed} +${rest} more` : `In ${listed}`;
 }
 
+/** A stop or down in progress, or its failure, replaces the folder line. */
+function statusLine(row: StackRow): string {
+  const status = composeStore.stackActionStatus.get(row.project);
+  return status ? stackActionText(status) : row.location;
+}
+
 function toggle(project: string) {
   dockerStore.stackFilter = dockerStore.stackFilter === project ? null : project;
 }
@@ -142,9 +131,8 @@ function toggle(project: string) {
 // The same stack actions as the folder kebab (stackActionItems), plus
 // Schedules, which the folder header has as a button, and Stack Down.
 function menuItems(row: StackRow): KebabMenuItem[] {
-  const busy = isBusy(row.project);
-  const disabled = composeStore.composeActionsDisabled || busy;
-  const reason = (busy ? statuses.value.get(row.project)?.text : composeStore.composeDisabledReason) ?? undefined;
+  const disabled = composeStore.stackActionsDisabled(row.project);
+  const reason = composeStore.stackDisabledReason(row.project);
   const items = stackActionItems({
     running: row.running > 0,
     disabled,
@@ -159,33 +147,13 @@ function menuItems(row: StackRow): KebabMenuItem[] {
   ];
 }
 
-/** Run a stop or down, showing `label` on the row until it returns. */
-async function runStackAction(
-  project: string,
-  label: string,
-  action: (project: string) => Promise<{ success: boolean; error?: string }>,
-) {
-  if (isBusy(project)) return;
-  statuses.value.set(project, { text: label, failed: false });
-  let result: { success: boolean; error?: string } = { success: false };
-  try {
-    result = await action(project);
-    await Promise.all([dockerStore.fetchContainers(), folderStore.fetchFolders()]);
-  } finally {
-    if (result.success) statuses.value.delete(project);
-    else statuses.value.set(project, { text: result.error || 'Failed', failed: true });
-  }
-}
-
 function handleSelect(project: string, action: string) {
-  // A new action clears an old failure, never a stop or down still running.
-  if (!isBusy(project)) statuses.value.delete(project);
   if (action === 'compose-up') emit('compose-up', project);
   else if (action === 'compose-pull') emit('compose-pull', project);
   else if (action === 'compose-recompose') emit('compose-recompose', project);
   else if (action === 'compose-edit') emit('edit-compose', project);
   else if (action === 'schedules') emit('schedules', 'stack', project);
-  else if (action === 'compose-stop') runStackAction(project, 'Stopping…', composeStore.stackStop);
-  else if (action === 'compose-down') downConfirm.request(project);
+  else if (action === 'compose-stop') composeStore.runStackAction(project, 'stop');
+  else if (action === 'compose-down') emit('compose-down', project);
 }
 </script>

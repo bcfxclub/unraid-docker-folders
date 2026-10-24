@@ -1,6 +1,6 @@
 <template>
   <div class="mb-1">
-    <FolderHeader :folder="folder" :hide-stopped="hideStopped" :hidden-count="hiddenCount" @toggle-collapse="toggleCollapse" @toggle-hide-stopped="hideStopped = !hideStopped" @edit="$emit('edit', folder)" @delete="$emit('delete', folder.id)" @update-folder="$emit('update-folder', folder)" @edit-compose="(p) => emit('edit-compose', p)" @compose-up="(p) => emit('compose-up', p)" @compose-recompose="(p) => emit('compose-recompose', p)" @compose-pull="(p) => emit('compose-pull', p)" @schedules="(type, id) => emit('schedules', type, id)" />
+    <FolderHeader :folder="folder" :collapsed="!isExpanded" :hide-stopped="hideStopped" :hidden-count="hiddenCount" @toggle-collapse="toggleCollapse" @toggle-hide-stopped="hideStopped = !hideStopped" @edit="$emit('edit', folder)" @delete="$emit('delete', folder.id)" @update-folder="$emit('update-folder', folder)" @edit-compose="(p) => emit('edit-compose', p)" @compose-up="(p) => emit('compose-up', p)" @compose-recompose="(p) => emit('compose-recompose', p)" @compose-down="(p) => emit('compose-down', p)" @compose-pull="(p) => emit('compose-pull', p)" @schedules="(type, id) => emit('schedules', type, id)" />
 
     <div class="expand-grid" :class="{ 'expand-expanded': isExpanded, 'expand-settled': expandSettled }">
       <div class="expand-inner px-2 sm:px-4">
@@ -90,6 +90,7 @@ const emit = defineEmits<{
   'edit-compose': [project: string];
   'compose-up': [project: string];
   'compose-recompose': [project: string];
+  'compose-down': [project: string];
   'compose-pull': [project: string];
   schedules: [targetType: string, targetId: string];
   security: [containerId: string];
@@ -107,8 +108,15 @@ const hideStopped = ref(safeLocalStorageGet(`docker-folders-hide-stopped-${props
 watch(hideStopped, (v) => safeLocalStorageSet(storageKey.value, v ? '1' : '0'));
 
 
-// A search or a stack filter opens every folder it leaves on screen.
-const isExpanded = computed(() => !props.folder.collapsed || dockerStore.isFiltering);
+// A search or a stack filter opens every folder it leaves on screen. While
+// one is on, the header toggles this override instead of the saved state, so
+// a folder can still be closed without changing how it is saved. Starting a
+// filter, or picking another stack, opens them all again.
+const filterCollapsed = ref(false);
+watch(() => [dockerStore.isFiltering, dockerStore.stackFilter], () => {
+  filterCollapsed.value = false;
+});
+const isExpanded = computed(() => (dockerStore.isFiltering ? !filterCollapsed.value : !props.folder.collapsed));
 
 // Overflow on the expand container must stay hidden while the height
 // transition runs (see .expand-settled in main.css), so mark the folder as
@@ -184,8 +192,9 @@ function getContainer(name: string) {
 }
 
 function toggleCollapse() {
-  const wasCollapsed = props.folder.collapsed;
-  folderStore.toggleFolderCollapse(props.folder.id);
+  const wasCollapsed = !isExpanded.value;
+  if (dockerStore.isFiltering) filterCollapsed.value = !filterCollapsed.value;
+  else folderStore.toggleFolderCollapse(props.folder.id);
 
   // Pre-fetch stats for running containers when expanding a folder
   // so data is ready by the time ContainerCard components mount
@@ -205,7 +214,7 @@ const collapsedRegisteredIds = ref(new Set<string>());
 
 function registerCollapsedStats() {
   unregisterCollapsedStats();
-  if (!props.folder.collapsed || !settingsStore.showStats) return;
+  if (isExpanded.value || !settingsStore.showStats) return;
   for (const assoc of folderContainers.value) {
     const container = getContainer(assoc.container_name);
     if (container?.state === 'running') {
@@ -225,8 +234,10 @@ function unregisterCollapsedStats() {
 onMounted(() => registerCollapsedStats());
 onUnmounted(() => unregisterCollapsedStats());
 
-watch(() => props.folder.collapsed, () => {
-  if (props.folder.collapsed) {
+// Also when the listed containers change while collapsed: a filter can
+// collapse a folder, and clearing or changing it changes who is listed.
+watch([isExpanded, () => folderContainers.value.map((a) => a.container_name).join('\n')], ([expanded]) => {
+  if (!expanded) {
     // Wait for ContainerCards to unmount first, then register
     nextTick(() => registerCollapsedStats());
   } else {

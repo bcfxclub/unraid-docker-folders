@@ -11,12 +11,12 @@
          paint on top. -->
     <div
       class="absolute inset-0 rounded-sm pointer-events-none transition-opacity duration-200"
-      :class="folder.collapsed ? 'opacity-40' : 'opacity-100'"
+      :class="collapsed ? 'opacity-40' : 'opacity-100'"
       :style="{ background: `linear-gradient(to right, ${folderTint}, transparent)` }"
     ></div>
     <div class="relative flex items-center gap-2 flex-1 min-w-0">
       <DragHandle v-if="!dragLocked" handle-class="folder-drag-handle shrink-0 text-text-secondary cursor-grab active:cursor-grabbing" />
-      <ChevronIcon :expanded="!folder.collapsed" />
+      <ChevronIcon :expanded="!collapsed" />
       <div
         v-if="containerIcons.length > 0"
         class="hidden sm:grid shrink-0 gap-0.5 mr-2"
@@ -41,6 +41,7 @@
         @edit-compose="(p) => emit('edit-compose', p)"
         @compose-up="(p) => emit('compose-up', p)"
         @compose-recompose="(p) => emit('compose-recompose', p)"
+        @compose-down="(p) => emit('compose-down', p)"
         @schedules="(type, id) => emit('schedules', type, id)"
       />
       <span class="shrink-0 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold ml-1" :class="runningCount > 0 ? 'bg-primary text-primary-text' : 'bg-border text-text-secondary'" :title="`${runningCount} running / ${existingContainerCount} total`">
@@ -56,14 +57,14 @@
         <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
         <span class="hidden sm:inline">Checking…</span>
       </span>
-      <span v-if="folder.collapsed && collapsedPorts" class="hidden sm:inline text-[11px] text-text font-mono ml-2 truncate">Ports: {{ collapsedPorts }}</span>
+      <span v-if="collapsed && collapsedPorts" class="hidden sm:inline text-[11px] text-text font-mono ml-2 truncate">Ports: {{ collapsedPorts }}</span>
       <!-- Folder total stats loading -->
-      <div v-if="folder.collapsed && settingsStore.showStats && !folderStats && runningCount > 0" class="hidden md:block ml-auto mr-4 shrink-0 w-[140px] space-y-0.5">
+      <div v-if="collapsed && settingsStore.showStats && !folderStats && runningCount > 0" class="hidden md:block ml-auto mr-4 shrink-0 w-[140px] space-y-0.5">
         <StatsBar label="CPU" :percent="null" size="inline" />
         <StatsBar label="MEM" :percent="null" size="inline" />
       </div>
       <!-- Folder total stats, as a share of the host -->
-      <div v-if="folder.collapsed && settingsStore.showStats && folderStats" class="hidden md:block ml-auto mr-4 shrink-0 w-[140px] space-y-0.5" @click.stop>
+      <div v-if="collapsed && settingsStore.showStats && folderStats" class="hidden md:block ml-auto mr-4 shrink-0 w-[140px] space-y-0.5" @click.stop>
         <StatsBar label="CPU" :percent="folderStats.cpuPercent" size="inline" />
         <StatsBar label="MEM" :percent="folderStats.memPercent" size="inline" />
       </div>
@@ -142,6 +143,8 @@ const menuOpen = computed(() => kebabMenu.value?.menuOpen ?? false);
 
 interface Props {
   folder: Folder;
+  /** Shown state, not the saved one: a filter can hold a collapsed folder open. */
+  collapsed: boolean;
   hideStopped?: boolean;
   hiddenCount?: number;
 }
@@ -164,6 +167,7 @@ const emit = defineEmits<{
   'update-folder': [];
   'edit-compose': [project: string];
   'compose-recompose': [project: string];
+  'compose-down': [project: string];
   'compose-pull': [project: string];
   'compose-up': [project: string];
   schedules: [targetType: string, targetId: string];
@@ -258,8 +262,9 @@ const folderMenuItems = computed<KebabMenuItem[]>(() => {
   return items;
 });
 
-function composeAvailability() {
-  return { composeDisabled: composeStore.composeActionsDisabled, composeReason: composeStore.composeDisabledReason ?? undefined };
+// Also off while a stop or down runs on this stack, from here or the stacks pane.
+function composeAvailability(project: string) {
+  return { composeDisabled: composeStore.stackActionsDisabled(project), composeReason: composeStore.stackDisabledReason(project) };
 }
 
 /** Things that act on the folder's containers or images right now. */
@@ -282,7 +287,7 @@ const actionItems = computed<KebabMenuItem[]>(() => {
   }
 
   if (props.folder.compose_project) {
-    const { composeDisabled, composeReason } = composeAvailability();
+    const { composeDisabled, composeReason } = composeAvailability(props.folder.compose_project);
     items.push(...stackActionItems({
       running: isRunning.value,
       disabled: composeDisabled,
@@ -319,7 +324,7 @@ const optionItems = computed<KebabMenuItem[]>(() => {
   const items: KebabMenuItem[] = [{ label: 'Edit Folder', icon: EDIT_ICON, action: 'edit' }];
 
   if (props.folder.compose_project) {
-    const { composeDisabled, composeReason } = composeAvailability();
+    const { composeDisabled, composeReason } = composeAvailability(props.folder.compose_project);
     items.push(
       { label: composeStack.value?.autostart ? 'Disable Stack Autostart' : 'Enable Stack Autostart', icon: REFRESH_ICON, action: 'compose-toggle-autostart', disabled: composeDisabled, title: composeReason },
     );
@@ -361,7 +366,7 @@ async function handleMenuSelect(action: string) {
   else if (action === 'compose-up' && props.folder.compose_project) {
     emit('compose-up', props.folder.compose_project);
   } else if (action === 'compose-stop' && props.folder.compose_project) {
-    await composeStore.stackStop(props.folder.compose_project);
+    await composeStore.runStackAction(props.folder.compose_project, 'stop');
   } else if (action === 'compose-pull' && props.folder.compose_project) {
     emit('compose-pull', props.folder.compose_project);
   } else if (action === 'compose-recompose' && props.folder.compose_project) {

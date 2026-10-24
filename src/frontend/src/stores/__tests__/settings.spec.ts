@@ -355,4 +355,13 @@ describe('settings store – confirmStackActions', () => {
     const body = String(mockApiFetch.mock.calls[0][1]?.body ?? '');
     expect(decodeURIComponent(body)).toContain('"key":"confirm_recompose","value":"0"');
   });
+
+  it('setConfirmStackAction goes back to asking when the save fails', async () => {
+    mockApiFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ message: 'Invalid settings key' }) } as Response);
+
+    const store = useSettingsStore();
+    await store.setConfirmStackAction('down', false);
+
+    expect(store.confirmStackActions.down).toBe(true);
+  });
 });

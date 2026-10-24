@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import StacksPane from '../StacksPane.vue';
@@ -104,16 +104,25 @@ describe('StacksPane', () => {
     expect(labels).not.toContain('Stop All');
   });
 
-  it('shows a failed stop on the row instead of dropping it', async () => {
+  it('runs Stop All through the shared stack action, and emits Stack Down for App to confirm', async () => {
     const compose = useComposeStore();
-    compose.stackStop = async () => ({ success: false, error: 'compose stop failed' });
-    const docker = useDockerStore();
-    docker.fetchContainers = async () => {};
-    useFolderStore().fetchFolders = async () => {};
+    compose.runStackAction = vi.fn(async () => {});
     const wrapper = mountPane();
-    await wrapper.findAll('button').find((b) => b.attributes('title') === 'Actions for arr')!.trigger('click');
-    await wrapper.findAll('.kebab-menu-item').find((el) => el.text().trim() === 'Stop All')!.trigger('click');
+    const openMenu = () => wrapper.findAll('button').find((b) => b.attributes('title') === 'Actions for arr')!.trigger('click');
+    const item = (label: string) => wrapper.findAll('.kebab-menu-item').find((el) => el.text().trim() === label)!;
+    await openMenu();
+    await item('Stop All').trigger('click');
+    expect(compose.runStackAction).toHaveBeenCalledWith('arr', 'stop');
+    await openMenu();
+    await item('Stack Down').trigger('click');
+    expect(wrapper.emitted('compose-down')).toEqual([['arr']]);
+  });
+
+  it('shows a running or failed stack action on the row', async () => {
+    const compose = useComposeStore();
+    compose.stackActionStatus.set('arr', { kind: 'down', error: 'compose down failed' });
+    const wrapper = mountPane();
     await flushPromises();
-    expect(rowFor(wrapper, 'arr').text()).toContain('compose stop failed');
+    expect(rowFor(wrapper, 'arr').text()).toContain('compose down failed');
   });
 });

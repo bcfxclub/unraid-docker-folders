@@ -32,7 +32,7 @@ let pinia: Pinia;
 
 function mountHeader(folder?: Partial<Folder>) {
   return mount(FolderHeader, {
-    props: { folder: makeFolder(folder) },
+    props: { folder: makeFolder(folder), collapsed: !!makeFolder(folder).collapsed },
     global: {
       plugins: [pinia],
     },
