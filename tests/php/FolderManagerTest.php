@@ -249,6 +249,8 @@ final class FolderManagerTest extends TestCase
 
         self::assertSame(0, (int) $this->db->fetchValue('SELECT COUNT(*) FROM folders WHERE compose_project = ?', ['valheim']));
         self::assertSame(['valheim'], $this->folderMembers((int) $games['id']));
+        // The stack still gets its metadata, so the compose editor can find it.
+        self::assertSame(1, (int) $this->db->fetchValue('SELECT COUNT(*) FROM compose_stacks WHERE project_name = ?', ['valheim']));
     }
 
     #[Test]
@@ -259,6 +261,34 @@ final class FolderManagerTest extends TestCase
         $this->manager->syncComposeStacks([self::composeContainer('db', 'app')]);
 
         self::assertSame(0, (int) $this->db->fetchValue('SELECT COUNT(*) FROM folders WHERE compose_project = ?', ['app']));
+        self::assertSame(1, (int) $this->db->fetchValue('SELECT COUNT(*) FROM compose_stacks WHERE project_name = ?', ['app']));
+    }
+
+    #[Test]
+    public function composeSyncGroupsOnlyTheStackContainersThatHaveNoFolder(): void
+    {
+        $games = $this->manager->createFolder(['name' => 'Games']);
+        $this->manager->addContainerToFolder($games['id'], 'id-web', 'web');
+
+        $this->manager->syncComposeStacks([self::composeContainer('web', 'app'), self::composeContainer('db', 'app')]);
+
+        $folderId = (int) $this->db->fetchValue('SELECT id FROM folders WHERE compose_project = ?', ['app']);
+        self::assertSame(['db'], $this->folderMembers($folderId));
+        self::assertSame(['web'], $this->folderMembers((int) $games['id']));
+    }
+
+    #[Test]
+    public function composeSyncLeavesAnExistingStackFolderAloneWhenItsContainersMoved(): void
+    {
+        $this->manager->syncComposeStacks([self::composeContainer('db', 'app')]);
+        $folderId = (int) $this->db->fetchValue('SELECT id FROM folders WHERE compose_project = ?', ['app']);
+        $games = $this->manager->createFolder(['name' => 'Games']);
+        $this->manager->addContainerToFolder($games['id'], 'id-db', 'db');
+
+        self::assertFalse($this->manager->syncComposeStacks([self::composeContainer('db', 'app')]));
+
+        self::assertSame([], $this->folderMembers($folderId));
+        self::assertSame(['db'], $this->folderMembers((int) $games['id']));
     }
 
     #[Test]
