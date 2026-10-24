@@ -292,6 +292,31 @@ final class FolderManagerTest extends TestCase
     }
 
     #[Test]
+    public function composeSyncReportsNoChangeWhenTheContainerInsertFails(): void
+    {
+        $this->manager->syncComposeStacks([self::composeContainer('web', 'app')]);
+        $this->db->exec(
+            "CREATE TRIGGER refuse_db BEFORE INSERT ON container_folders WHEN NEW.container_name = 'db'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END"
+        );
+
+        // The failed insert warns (SQLite3) and logs (FolderManager) on purpose;
+        // keep both out of the run.
+        $log = ini_set('error_log', '/dev/null');
+        set_error_handler(static fn (): bool => true, E_WARNING);
+        try {
+            $changed = $this->manager->syncComposeStacks([self::composeContainer('web', 'app'), self::composeContainer('db', 'app')]);
+        } finally {
+            restore_error_handler();
+            ini_set('error_log', $log === false ? '' : $log);
+        }
+
+        self::assertFalse($changed);
+        $folderId = (int) $this->db->fetchValue('SELECT id FROM folders WHERE compose_project = ?', ['app']);
+        self::assertSame(['web'], $this->folderMembers($folderId));
+    }
+
+    #[Test]
     public function addingTheContainerBackLetsComposeSyncManageItAgain(): void
     {
         $containers = [self::composeContainer('db', 'app')];

@@ -336,6 +336,30 @@ describe('FolderService writes', () => {
             expect(service.getFolder(games.id)?.containers.map((c) => c.containerName)).toEqual(['web']);
         });
 
+        it('rewrites a stack row only when a path changed, as PHP does', () => {
+            const labels = (dir: string) => ({
+                'com.docker.compose.project': 'app',
+                'com.docker.compose.project.working_dir': dir,
+            });
+            service.syncWithContainers([container('db', labels('/mnt/user/appdata/app'))]);
+            const handle = new DatabaseSync(temp.path);
+            handle.exec("UPDATE compose_stacks SET updated_at = 1 WHERE project_name = 'app'");
+
+            service.syncWithContainers([container('db', labels('/mnt/user/appdata/app'))]);
+            expect(temp.rows("SELECT updated_at FROM compose_stacks WHERE project_name = 'app'")).toEqual([
+                { updated_at: 1 },
+            ]);
+
+            service.syncWithContainers([container('db', labels('/mnt/user/stacks/app'))]);
+            const [row] = temp.rows("SELECT working_dir, updated_at FROM compose_stacks WHERE project_name = 'app'") as {
+                working_dir: string;
+                updated_at: number;
+            }[];
+            handle.close();
+            expect(row.working_dir).toBe('/mnt/user/stacks/app');
+            expect(row.updated_at).toBeGreaterThan(1);
+        });
+
         it('leaves an existing stack folder alone when its containers moved', () => {
             const app = [container('db', { 'com.docker.compose.project': 'app' })];
             service.syncWithContainers(app);

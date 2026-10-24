@@ -553,6 +553,8 @@ class FolderManager
       $excluded[$row['container_name']] = true;
     }
 
+    $composeManager = new ComposeManager();
+
     foreach ($projects as $projectName => $projectContainers) {
       // Upsert compose_stacks metadata from Docker labels
       $firstContainer = $projectContainers[0];
@@ -561,7 +563,6 @@ class FolderManager
       $configFiles = $labels['com.docker.compose.project.config_files'] ?? null;
       $composeFile = $configFiles ? explode(',', $configFiles)[0] : null;
 
-      $composeManager = new ComposeManager();
       $composeManager->upsertStack($projectName, $workingDir, $composeFile);
 
       // Containers that are in no folder and that the user has not taken out of one
@@ -591,9 +592,12 @@ class FolderManager
       }
 
       foreach ($pending as [$containerId, $containerName]) {
-        $this->addContainerToFolder($folderId, $containerId, $containerName);
-        $assignmentMap[$containerName] = $folderId;
-        $changed = true;
+        // A failed insert (logged inside) leaves the container pending, so
+        // the next sync tries again. Do not report a change that did not happen.
+        if ($this->addContainerToFolder($folderId, $containerId, $containerName)) {
+          $assignmentMap[$containerName] = $folderId;
+          $changed = true;
+        }
       }
     }
 
