@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.10.24-dev2
+### New
+- Filter the Folders page by compose stack
+
+### Fixed
+- Stop rewriting unchanged stack rows on every sync
+
+### Internal
+- Internal fixes and performance improvements.
+
 ## 2026.10.24-dev1
 ### Fixed
 - Compose sync no longer recreates an empty stack folder after you move the stack's containers elsewhere or delete the folder. (#21)
