@@ -575,7 +575,7 @@ describe('graphql container list', () => {
           dockerFoldersContainerList: {
             containers: [
               {
-                id: 'abc', name: 'plex', image: 'plexinc/pms-docker', state: 'running',
+                id: 'abc', name: 'plex', image: 'plexinc/pms-docker', imageOutdated: true, state: 'running',
                 status: 'Up', command: '/init', created: 1, networkMode: 'bridge',
                 privileged: false, capAdd: [], exposedPorts: ['32400/tcp'], user: '',
                 imageUser: '', puid: '99', pgid: '100', umask: '', icon: null,
@@ -608,6 +608,10 @@ describe('graphql container list', () => {
     // An unpublished port has no IP or PublicPort at all, as in Docker's JSON.
     expect(plex.ports[1]).toEqual({ PrivatePort: 1900, Type: 'udp' });
     expect(data.dismissals).toEqual([{ container_name: 'plex', finding_type: 'host-network' }]);
+    expect(plex.imageOutdated).toBe(true);
+    // The field has to be asked for, or GraphQL mode never sees it.
+    const body = JSON.parse(String(vi.mocked(globalThis.fetch).mock.calls[0][1]?.body));
+    expect(body.query).toContain('imageOutdated');
   });
 
   // The plugin does not own the update-check cron line yet, so these two

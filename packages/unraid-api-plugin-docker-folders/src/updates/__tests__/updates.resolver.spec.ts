@@ -70,7 +70,24 @@ describe('UpdatesResolver.dockerFoldersImagePullEvents', () => {
 
         await drain(resolver.dockerFoldersImagePullEvents('plex', ['abc123'], true));
 
-        expect(updates.pullImageEvents).toHaveBeenCalledWith('plex', { containers: ['abc123'], recreate: true });
+        expect(updates.pullImageEvents).toHaveBeenCalledWith('plex', {
+            containers: ['abc123'],
+            recreate: true,
+            recreateOnly: undefined,
+        });
+    });
+
+    it('forwards recreateOnly to pullImageEvents', async () => {
+        const updates = fakeUpdatesService();
+        const resolver = new UpdatesResolver(updates);
+
+        await drain(resolver.dockerFoldersImagePullEvents('plex', ['abc123'], undefined, true));
+
+        expect(updates.pullImageEvents).toHaveBeenCalledWith('plex', {
+            containers: ['abc123'],
+            recreate: undefined,
+            recreateOnly: true,
+        });
     });
 
     it('rejects synchronously-thrown validation errors (bad image name) as a subscribe failure, not a stream event', async () => {

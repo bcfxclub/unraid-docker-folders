@@ -272,10 +272,14 @@ export interface Backend {
    * `e.name !== 'AbortError'` check they already had.
    */
   streams: {
-    /** `pull.php`, or its GraphQL subscription equivalent. */
+    /**
+     * `pull.php`, or its GraphQL subscription equivalent. `recreateOnly`
+     * skips the pull and recreates `containerIds` on the image already on
+     * disk, to apply an update pulled earlier.
+     */
     pull(
       image: string,
-      opts: { containerIds?: string[]; recreate?: boolean },
+      opts: { containerIds?: string[]; recreate?: boolean; recreateOnly?: boolean },
       onEvent: (event: string, data: unknown) => void,
       signal: AbortSignal,
     ): Promise<void>;

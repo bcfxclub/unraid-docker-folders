@@ -75,6 +75,16 @@ if ($forceRecreate && $onlyContainerIds === null) {
   errorResponse('recreate=1 requires containers=', 400);
 }
 
+// Recreate only: skip the pull and recreate the listed container(s) on the
+// image already on disk. Used to apply an update that was pulled earlier.
+// Pulling again would fail for an image built locally, and could swap in a
+// build newer than the one the user chose to apply.
+$recreateOnly = (($_POST['recreate_only'] ?? '') === '1');
+if ($recreateOnly && $onlyContainerIds === null) {
+  header('Content-Type: application/json');
+  errorResponse('recreate_only=1 requires containers=', 400);
+}
+
 // Allow unlimited execution time — image pulls can take minutes
 set_time_limit(0);
 ignore_user_abort(true);
@@ -97,8 +107,65 @@ function sendSSE($event, $data)
   flush();
 }
 
+/**
+ * Recreate the containers selectRecreateTargets() picks, reporting each one.
+ */
+function recreateTargets($dockerClient, $image, $onlyContainerIds)
+{
+  try {
+    $selection = selectRecreateTargets($dockerClient->listContainers(true), $image, $onlyContainerIds);
+    $matchingContainers = $selection['targets'];
+
+    logUpdate("RECREATE Found " . count($matchingContainers) . " container(s) using {$image}");
+
+    foreach ($selection['missing'] as $missingId) {
+      $shortId = substr($missingId, 0, 12);
+      logUpdate("RECREATE SKIP {$shortId}: not found, or no longer uses {$image}");
+      sendSSE('recreate_error', [
+        'container' => $shortId,
+        'message' => "Container {$shortId} was not recreated: it no longer exists or does not use {$image}",
+      ]);
+    }
+
+    foreach ($matchingContainers as $container) {
+      $cName = $container['name'];
+      $cId = $container['id'];
+
+      sendSSE('recreating', ['container' => $cName, 'message' => "Recreating {$cName}..."]);
+
+      $recreateResult = recreateOneContainer($dockerClient, $cName, $cId);
+
+      if ($recreateResult['success']) {
+        sendSSE('recreated', ['container' => $cName, 'message' => "{$cName} updated successfully"]);
+      } else {
+        sendSSE('recreate_error', [
+          'container' => $cName,
+          'message' => "Failed to recreate {$cName}: {$recreateResult['error']}",
+        ]);
+      }
+    }
+  } catch (\Throwable $e) {
+    logUpdate("RECREATE ERROR {$image}: " . $e->getMessage());
+    sendSSE('recreate_error', ['container' => '', 'message' => 'Recreate failed: ' . $e->getMessage()]);
+  }
+}
+
 try {
   $dockerClient = new DockerClient();
+
+  if ($recreateOnly) {
+    logUpdate("RECREATE ONLY {$image}");
+    sendSSE('status', ['message' => 'Recreating...']);
+    recreateTargets($dockerClient, $image, $onlyContainerIds);
+    try {
+      WebSocketPublisher::publish('container', 'updated');
+    } catch (\Throwable $e) {
+      logUpdate("RECREATE WARN {$image}: WebSocket publish failed: " . $e->getMessage());
+    }
+    sendSSE('complete', ['message' => 'Recreate complete', 'image' => $image]);
+    sendSSE('done', ['finished' => true]);
+    exit;
+  }
 
   sendSSE('status', ['message' => "Pulling {$image}..."]);
 
@@ -154,42 +221,7 @@ try {
     logUpdate("PULL post_pull_action={$postPullAction} for {$image}");
 
     if ($postPullAction === 'pull_and_auto_recreate' || $forceRecreate) {
-      try {
-        $containers = $dockerClient->listContainers(true);
-        $matchingContainers = [];
-        foreach ($containers as $container) {
-          if ($container['image'] !== $image) {
-            continue;
-          }
-          if ($onlyContainerIds !== null && !isset($onlyContainerIds[$container['id']])) {
-            continue;
-          }
-          $matchingContainers[] = $container;
-        }
-
-        logUpdate("RECREATE Found " . count($matchingContainers) . " container(s) using {$image}");
-
-        foreach ($matchingContainers as $container) {
-          $cName = $container['name'];
-          $cId = $container['id'];
-
-          sendSSE('recreating', ['container' => $cName, 'message' => "Recreating {$cName}..."]);
-
-          $recreateResult = recreateOneContainer($dockerClient, $cName, $cId);
-
-          if ($recreateResult['success']) {
-            sendSSE('recreated', ['container' => $cName, 'message' => "{$cName} updated successfully"]);
-          } else {
-            sendSSE('recreate_error', [
-              'container' => $cName,
-              'message' => "Failed to recreate {$cName}: {$recreateResult['error']}",
-            ]);
-          }
-        }
-      } catch (\Throwable $e) {
-        logUpdate("RECREATE ERROR {$image}: " . $e->getMessage());
-        sendSSE('recreate_error', ['container' => '', 'message' => 'Auto-recreate failed: ' . $e->getMessage()]);
-      }
+      recreateTargets($dockerClient, $image, $onlyContainerIds);
     }
 
     sendSSE('complete', ['message' => 'Pull complete', 'image' => $image]);

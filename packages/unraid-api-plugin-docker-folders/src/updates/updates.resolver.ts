@@ -42,15 +42,17 @@ export class UpdatesResolver {
         description:
             'Pull an image. With post_pull_action set to auto-recreate, or with recreate ' +
             'true, also recreates the containers using it (restricted to containerIds when given). ' +
+            'With recreateOnly true, skips the pull and only recreates containerIds. ' +
             'For the same pull as a stream of progress events, see dockerFoldersImagePullEvents below.',
     })
     public pullDockerFoldersImage(
         @Args('image') image: string,
         @Args('containerIds', { type: () => [String], nullable: true })
         containerIds?: string[],
-        @Args('recreate', { type: () => Boolean, nullable: true }) recreate?: boolean
+        @Args('recreate', { type: () => Boolean, nullable: true }) recreate?: boolean,
+        @Args('recreateOnly', { type: () => Boolean, nullable: true }) recreateOnly?: boolean
     ): Promise<DockerFoldersImagePullResult> {
-        return this.updates.pullImage(image, { containers: containerIds, recreate });
+        return this.updates.pullImage(image, { containers: containerIds, recreate, recreateOnly });
     }
 
     /**
@@ -82,10 +84,11 @@ export class UpdatesResolver {
         @Args('image') image: string,
         @Args('containerIds', { type: () => [String], nullable: true })
         containerIds?: string[],
-        @Args('recreate', { type: () => Boolean, nullable: true }) recreate?: boolean
+        @Args('recreate', { type: () => Boolean, nullable: true }) recreate?: boolean,
+        @Args('recreateOnly', { type: () => Boolean, nullable: true }) recreateOnly?: boolean
     ): AsyncIterableIterator<{ dockerFoldersImagePullEvents: DockerFoldersStreamEvent }> {
         const events$ = mapObservable(
-            this.updates.pullImageEvents(image, { containers: containerIds, recreate }),
+            this.updates.pullImageEvents(image, { containers: containerIds, recreate, recreateOnly }),
             (event) => ({ dockerFoldersImagePullEvents: toStreamEvent(event) })
         );
         return observableToAsyncIterator(events$);

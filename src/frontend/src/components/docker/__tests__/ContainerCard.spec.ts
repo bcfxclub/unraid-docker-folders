@@ -1294,6 +1294,41 @@ describe('ContainerCard', () => {
     });
   });
 
+  describe('pulled image not applied', () => {
+    it('shows Not Applied when the container runs an older image than its tag', () => {
+      const wrapper = mountCard({ imageOutdated: true });
+      expect(wrapper.text()).toContain('Not Applied');
+    });
+
+    it('shows nothing when the container runs the image its tag names', () => {
+      const wrapper = mountCard({ imageOutdated: false });
+      expect(wrapper.text()).not.toContain('Not Applied');
+    });
+
+    it('confirming Apply Update recreates the container without pulling', async () => {
+      const wrapper = mountCard({ id: 'stale-1', name: 'my-app', image: 'nginx:latest', managed: null, imageOutdated: true });
+      await openKebab(wrapper);
+      const item = wrapper.findAll('.kebab-menu-item').find((el) => el.text().trim() === 'Apply Update')!;
+      await item.trigger('click');
+      await wrapper.vm.$nextTick();
+
+      const confirmBtn = wrapper.findAll('button').find((b) => b.text() === 'Recreate')!;
+      await confirmBtn.trigger('click');
+
+      expect(wrapper.emitted('pull')).toEqual([
+        [{ image: 'nginx:latest', name: 'my-app', managed: null, id: 'stale-1', recreateOnly: true }],
+      ]);
+    });
+
+    it('offers no Apply Update for a compose container, whose stack owns the recreate', async () => {
+      const wrapper = mountCard({ imageOutdated: true, labels: { 'com.docker.compose.project': 'db-stack' } });
+      expect(wrapper.text()).toContain('Not Applied');
+      await openKebab(wrapper);
+      const labels = wrapper.findAll('.kebab-menu-item').map((el) => el.text().trim());
+      expect(labels).not.toContain('Apply Update');
+    });
+  });
+
   describe('security badge', () => {
     /** The shield button, found by the aria-label it carries. */
     const badge = (wrapper: CardWrapper) =>

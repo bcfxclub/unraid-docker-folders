@@ -299,6 +299,80 @@ describe('FolderService writes', () => {
             expect(service.getUnfolderedOrder()).toEqual(['App1', 'app01', 'app2', 'app10', 'app-db', 'app.db', 'app_db', 'appdb']);
         });
 
+        it('makes no stack folder when the stack already lives in another folder', () => {
+            const games = service.createFolder({ name: 'Games' });
+            service.addContainerToFolder(games.id, 'id-valheim', 'valheim');
+
+            service.syncWithContainers([container('valheim', { 'com.docker.compose.project': 'valheim' })]);
+
+            expect(temp.rows("SELECT id FROM folders WHERE compose_project = 'valheim'")).toEqual([]);
+            expect(service.getFolder(games.id)?.containers.map((c) => c.containerName)).toEqual(['valheim']);
+            // The stack still gets its metadata, so the compose editor can find it.
+            expect(temp.rows("SELECT project_name FROM compose_stacks WHERE project_name = 'valheim'")).toHaveLength(1);
+        });
+
+        it('makes no stack folder for a stack whose containers the user removed', () => {
+            const folder = service.createFolder({ name: 'Media' });
+            service.addContainerToFolder(folder.id, 'id-db', 'db');
+            service.removeContainerFromFolder('db');
+
+            service.syncWithContainers([container('db', { 'com.docker.compose.project': 'app' })]);
+
+            expect(temp.rows("SELECT id FROM folders WHERE compose_project = 'app'")).toEqual([]);
+            expect(temp.rows("SELECT project_name FROM compose_stacks WHERE project_name = 'app'")).toHaveLength(1);
+        });
+
+        it('groups only the stack containers that have no folder', () => {
+            const games = service.createFolder({ name: 'Games' });
+            service.addContainerToFolder(games.id, 'id-web', 'web');
+
+            service.syncWithContainers([
+                container('web', { 'com.docker.compose.project': 'app' }),
+                container('db', { 'com.docker.compose.project': 'app' }),
+            ]);
+
+            const [stack] = temp.rows("SELECT id FROM folders WHERE compose_project = 'app'") as { id: number }[];
+            expect(service.getFolder(Number(stack.id))?.containers.map((c) => c.containerName)).toEqual(['db']);
+            expect(service.getFolder(games.id)?.containers.map((c) => c.containerName)).toEqual(['web']);
+        });
+
+        it('rewrites a stack row only when a path changed, as PHP does', () => {
+            const labels = (dir: string) => ({
+                'com.docker.compose.project': 'app',
+                'com.docker.compose.project.working_dir': dir,
+            });
+            service.syncWithContainers([container('db', labels('/mnt/user/appdata/app'))]);
+            const handle = new DatabaseSync(temp.path);
+            handle.exec("UPDATE compose_stacks SET updated_at = 1 WHERE project_name = 'app'");
+
+            service.syncWithContainers([container('db', labels('/mnt/user/appdata/app'))]);
+            expect(temp.rows("SELECT updated_at FROM compose_stacks WHERE project_name = 'app'")).toEqual([
+                { updated_at: 1 },
+            ]);
+
+            service.syncWithContainers([container('db', labels('/mnt/user/stacks/app'))]);
+            const [row] = temp.rows("SELECT working_dir, updated_at FROM compose_stacks WHERE project_name = 'app'") as {
+                working_dir: string;
+                updated_at: number;
+            }[];
+            handle.close();
+            expect(row.working_dir).toBe('/mnt/user/stacks/app');
+            expect(row.updated_at).toBeGreaterThan(1);
+        });
+
+        it('leaves an existing stack folder alone when its containers moved', () => {
+            const app = [container('db', { 'com.docker.compose.project': 'app' })];
+            service.syncWithContainers(app);
+            const [stack] = temp.rows("SELECT id FROM folders WHERE compose_project = 'app'") as { id: number }[];
+            const games = service.createFolder({ name: 'Games' });
+            service.addContainerToFolder(games.id, 'id-db', 'db');
+
+            service.syncWithContainers(app);
+
+            expect(service.getFolder(Number(stack.id))?.containers).toEqual([]);
+            expect(service.getFolder(games.id)?.containers.map((c) => c.containerName)).toEqual(['db']);
+        });
+
         it('keeps the id reconcile and Compose sync when priming fails', () => {
             const handle = new DatabaseSync(temp.path);
             handle.exec('DROP TABLE unfoldered_order');

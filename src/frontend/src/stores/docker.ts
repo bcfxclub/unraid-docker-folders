@@ -75,6 +75,8 @@ export interface PullRequest {
   managed: string | null;
   id: string;
   force?: boolean;
+  /** Apply an update pulled earlier: recreate this container, no pull. */
+  recreateOnly?: boolean;
 }
 
 /**
@@ -97,6 +99,11 @@ export interface Container {
   id: string;
   name: string;
   image: string;
+  /**
+   * A newer image for this tag is on disk, but the container still runs the
+   * old one. A pull leaves it like this until the container is recreated.
+   */
+  imageOutdated: boolean;
   state: string;
   status: string;
   command: string;

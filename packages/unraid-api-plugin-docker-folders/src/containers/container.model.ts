@@ -100,9 +100,16 @@ export class DockerFoldersContainer {
     name!: string;
 
     @Field(() => String, {
-        description: 'Resolved through the Unraid template, so it is a tag rather than a digest.',
+        description:
+            'Resolved through the Unraid template, then Config.Image, so it is a tag rather than a digest.',
     })
     image!: string;
+
+    @Field(() => Boolean, {
+        description:
+            'A newer image for this tag is on disk, but the container still runs the old one. Recreating it applies the update.',
+    })
+    imageOutdated!: boolean;
 
     @Field(() => String)
     state!: string;

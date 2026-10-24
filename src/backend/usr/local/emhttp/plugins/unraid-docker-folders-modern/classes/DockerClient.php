@@ -52,7 +52,11 @@ class DockerClient
   // reads as "the image asks for no user" and makes every container built from
   // an image that declares USER root look as though somebody pinned it to root.
   // That is the bug v3 exists to clear, so the old entries have to go.
-  const FACTS_CACHE_PATH = '/tmp/unraid-docker-container-facts-v3.json';
+  //
+  // And to v4, when configImage joined it. A v3 entry carries none, so a
+  // container whose tag moved to a newer image would show a bare sha256 id and
+  // never report that the pulled image is waiting to be applied.
+  const FACTS_CACHE_PATH = '/tmp/unraid-docker-container-facts-v4.json';
 
   public function __construct($socketPath = DOCKER_SOCKET, $apiVersion = DOCKER_API_VERSION)
   {
@@ -147,11 +151,11 @@ class DockerClient
     // Transform Docker API response to our format
     $containers = [];
     foreach ($response as $container) {
-      $formatted = $this->formatContainer($container);
+      $facts = $factsMap[$container['Id']] ?? [];
+      $formatted = $this->formatContainer($container, $facts['configImage'] ?? '');
       $autostartInfo = $autostartMap[$formatted['name']] ?? null;
       $formatted['autostart'] = $autostartInfo ? $autostartInfo['autostart'] : false;
       $formatted['autostartDelay'] = $autostartInfo ? $autostartInfo['autostartDelay'] : 0;
-      $facts = $factsMap[$formatted['id']] ?? [];
       $formatted['hostPorts'] = $facts['ports'] ?? [];
       $formatted['privileged'] = $facts['privileged'] ?? false;
       $formatted['capAdd'] = $facts['capAdd'] ?? [];
@@ -208,6 +212,10 @@ class DockerClient
         if ($inspect === null) continue; // transient failure — retry next list
         $facts = self::extractFacts($inspect);
         $facts['imageUser'] = '';
+        // The reference the container was created from. Fixed for the life of
+        // the container id, unlike the list's Image, which turns into a bare
+        // sha256 id once that reference moves to a newer image.
+        $facts['configImage'] = (string) ($inspect['Config']['Image'] ?? '');
         // Asked for whenever the container states a user at all. Docker copies
         // the image's own USER into Config.User, so the value alone cannot say
         // whether anybody chose it. Gating on "looks like root" here instead
@@ -2090,14 +2098,18 @@ class DockerClient
    * After a pull + recreate the container's Image field may be a sha256 digest
    * pointing to the OLD (now untagged) image. Fallback chain:
    *   1. Unraid's dockerMan XML template (most reliable — has exact user-configured tag)
-   *   2. RepoTags on the image (works if image still has tags)
-   *   3. Original SHA reference (last resort)
+   *   2. The container's own Config.Image, when the caller has it. Containers
+   *      created outside Unraid have no template, and their old image usually
+   *      has no tags left once the pull moved the tag away.
+   *   3. RepoTags on the image (works if image still has tags)
+   *   4. Original SHA reference (last resort)
    *
    * @param string $imageRef Image reference (tag or sha256 digest)
    * @param string $containerName Container name for template lookup (optional)
+   * @param string $configImage The container's Config.Image (optional)
    * @return string Resolved tag or original reference
    */
-  public function resolveImageTag($imageRef, $containerName = '')
+  public function resolveImageTag($imageRef, $containerName = '', $configImage = '')
   {
     if (!$imageRef || strpos($imageRef, 'sha256:') !== 0) {
       return $imageRef;
@@ -2112,7 +2124,12 @@ class DockerClient
       }
     }
 
-    // 2. Try RepoTags from the image metadata
+    // 2. The reference the container was created from
+    if (self::isTagReference($configImage)) {
+      return $configImage;
+    }
+
+    // 3. Try RepoTags from the image metadata
     if (!isset($this->imageInfoCache[$imageRef])) {
       $this->imageInfoCache[$imageRef] = $this->getImageInfo($imageRef);
     }
@@ -2226,14 +2243,47 @@ class DockerClient
     return $map;
   }
 
-  private function formatContainer($container)
+  /**
+   * Whether a reference names an image by tag, so it can move to a newer
+   * image. A bare sha256 id and a digest pin never move.
+   *
+   * @param string $ref Image reference
+   * @return bool
+   */
+  public static function isTagReference($ref)
+  {
+    $ref = (string) $ref;
+    return $ref !== '' && strpos($ref, 'sha256:') !== 0 && strpos($ref, '@') === false;
+  }
+
+  /**
+   * Whether the container runs an older image than its tag now names.
+   *
+   * Docker's list reports a container's Config.Image only while that
+   * reference still resolves to the image the container runs. Once a pull
+   * moves the tag, the list reports the container's image id instead. So a
+   * sha256 id in the list, for a container created from a tag, means a newer
+   * image is on disk and the container has to be recreated to use it.
+   *
+   * @param string $listImage The Image field of Docker's container list
+   * @param string $configImage The container's Config.Image
+   * @return bool
+   */
+  public static function isImageOutdated($listImage, $configImage)
+  {
+    return strpos((string) $listImage, 'sha256:') === 0 && self::isTagReference($configImage);
+  }
+
+  private function formatContainer($container, $configImage = '')
   {
     $labels = $container['Labels'] ?? [];
     $name = ltrim($container['Names'][0] ?? '', '/');
+    $listImage = $container['Image'] ?? '';
     return [
       'id' => $container['Id'],
       'name' => $name,
-      'image' => $this->resolveImageTag($container['Image'], $name),
+      'image' => $this->resolveImageTag($listImage, $name, $configImage),
+      'imageOutdated' => self::isImageOutdated($listImage, $configImage),
       'imageId' => $container['ImageID'] ?? '',
       'command' => $container['Command'] ?? '',
       'created' => $container['Created'],

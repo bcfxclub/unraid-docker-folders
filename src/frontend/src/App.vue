@@ -257,9 +257,9 @@
       :is-open="!!pullingContainer"
       :image="pullingContainer?.image ?? ''"
       :container-name="pullingContainer?.name ?? ''"
-      :managed="pullingContainer?.managed ?? null"
       :container-id="pullingContainer?.id ?? ''"
       :force="pullingContainer?.force ?? false"
+      :recreate-only="pullingContainer?.recreateOnly ?? false"
       @close="pullingContainer = null"
       @complete="handlePullComplete"
     />
@@ -726,10 +726,10 @@ async function handleRemove(id: string, removeImage = false) {
 }
 
 function handlePull(data: PullRequest) {
-  // A forced update targets exactly the chosen container by id, so it must
-  // never fall into the sibling-batch-confirm path below (which recreates
-  // every container sharing the image).
-  if (data.force) {
+  // A forced update, or applying a pulled one, targets exactly the chosen
+  // container by id, so it must never fall into the sibling-batch-confirm
+  // path below (which recreates every container sharing the image).
+  if (data.force || data.recreateOnly) {
     pullingContainer.value = data;
     return;
   }

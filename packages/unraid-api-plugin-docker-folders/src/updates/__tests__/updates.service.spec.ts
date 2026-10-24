@@ -225,6 +225,17 @@ describe('UpdatesService', () => {
             ]);
         });
 
+        it('checks a container Docker lists by image id under its Config.Image, as PHP does', async () => {
+            // Created outside Unraid, and its tag moved on an earlier pull.
+            docker.setContainers([container('plex', 'sha256:old-plex', 'sha256:old-plex')]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setRemoteDigest(PLEX, 'sha256:new');
+
+            const results = await service.checkForUpdates();
+
+            expect(results.map((r) => r.image)).toEqual([PLEX]);
+        });
+
         it('reports no update when the digests match', async () => {
             docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
             docker.setLocalDigests(PLEX_IMAGE_ID, [`${PLEX}@sha256:same`]);
@@ -499,6 +510,61 @@ describe('UpdatesService', () => {
             expect(recreate.calls).toEqual([CONTAINER_IDS.plex2]);
         });
 
+        it('recreates a container Docker lists under a sha256 id, by its Config.Image', async () => {
+            // A container created outside Unraid, after an earlier pull moved
+            // its tag: no template, and Docker lists it by image id.
+            docker.setContainers([container('plex', 'sha256:old-plex', 'sha256:old-plex')]);
+            docker.setContainerConfigImage(CONTAINER_IDS.plex, PLEX);
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+
+            const promise = service.pullImage(PLEX, { containers: [CONTAINER_IDS.plex], recreate: true });
+            docker.streamFor(PLEX).end('');
+            await promise;
+
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex]);
+        });
+
+        it('reports a requested container it did not recreate, instead of a silent success', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID), container('sonarr', SONARR, SONARR_IMAGE_ID)]);
+            docker.setRemoteDigest(PLEX, 'sha256:pulled');
+
+            const seen: { type: string; container?: string }[] = [];
+            const done = new Promise<void>((resolve) => {
+                service
+                    .pullImageEvents(PLEX, { containers: [CONTAINER_IDS.sonarr], recreate: true })
+                    .subscribe({
+                        next: (event) => {
+                            seen.push(event as { type: string; container?: string });
+                            if (event.type === 'done') resolve();
+                        },
+                    });
+            });
+            docker.streamFor(PLEX).end('');
+            await done;
+
+            expect(recreate.calls).toEqual([]);
+            expect(seen.filter((event) => event.type === 'recreate_error')).toEqual([
+                expect.objectContaining({ container: CONTAINER_IDS.sonarr }),
+            ]);
+        });
+
+        it('rejects recreateOnly without containerIds', async () => {
+            await expect(service.pullImage(PLEX, { recreateOnly: true })).rejects.toThrow(BadRequestException);
+        });
+
+        it('recreateOnly recreates the requested container without pulling', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID), container('plex2', PLEX, PLEX_IMAGE_ID)]);
+
+            const result = await service.pullImage(PLEX, { containers: [CONTAINER_IDS.plex], recreateOnly: true });
+
+            expect(result).toEqual({ success: true, image: PLEX, error: null });
+            // No pull and no registry call: the image is already on disk, and
+            // one built locally could not be pulled at all.
+            expect(docker.calls.filter((call) => call.startsWith('pullImage') || call.startsWith('distribution'))).toEqual([]);
+            expect(recreate.calls).toEqual([CONTAINER_IDS.plex]);
+            expect(events.publish).toHaveBeenCalledWith('container', 'updated');
+        });
+
         it('aborts a pull stuck past the 10 minute timeout, keeping that as the reason', async () => {
             vi.useFakeTimers();
             try {
@@ -551,6 +617,26 @@ describe('UpdatesService', () => {
             await done;
 
             expect(seen).toEqual(['status', 'progress', 'complete', 'done']);
+        });
+
+        it('recreateOnly streams the recreate and ends with Recreate complete', async () => {
+            docker.setContainers([container('plex', PLEX, PLEX_IMAGE_ID)]);
+
+            const seen: { type: string; message?: string }[] = [];
+            const done = new Promise<void>((resolve) => {
+                service
+                    .pullImageEvents(PLEX, { containers: [CONTAINER_IDS.plex], recreateOnly: true })
+                    .subscribe({
+                        next: (event) => {
+                            seen.push(event as { type: string; message?: string });
+                            if (event.type === 'done') resolve();
+                        },
+                    });
+            });
+            await done;
+
+            expect(seen.map((event) => event.type)).toEqual(['status', 'recreating', 'recreated', 'complete', 'done']);
+            expect(seen[3].message).toBe('Recreate complete');
         });
 
         it('emits error then done on failure, never complete', async () => {

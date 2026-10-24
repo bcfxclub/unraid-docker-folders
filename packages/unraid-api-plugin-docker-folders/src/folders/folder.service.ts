@@ -470,9 +470,11 @@ export class FolderService implements OnModuleInit {
      *   every image update does. Memberships are keyed by name, but drag and
      *   drop reorders by id, so a stale id makes a recreated container
      *   impossible to move until this rewrites it.
-     * - A Compose project gets a folder of its own, created on first sight,
-     *   and its unassigned containers are put into it. A container the user
-     *   deliberately took out stays out, through `compose_sync_exclusions`.
+     * - A Compose project's unassigned containers are put into a folder of
+     *   its own, created when the first of them needs it. A container the
+     *   user deliberately took out stays out, through `compose_sync_exclusions`.
+     *   A stack with no such container gets no folder, so a stack folder the
+     *   user deleted after moving its containers elsewhere stays deleted.
      * - Every container left unfoldered gets a saved position, so a fresh
      *   install does not fall back to an order that moves on start and stop.
      *
@@ -658,6 +660,15 @@ function syncComposeProjects(db: DatabaseSync, containers: readonly SyncContaine
     const now = nowSeconds();
 
     for (const [project, members] of byProject) {
+        upsertComposeStack(db, project, members[0].labels, now);
+
+        const pending = members
+            .map((container) => ({ id: container.id, name: container.name.replace(/^\//, '') }))
+            .filter(({ name }) => !assigned.has(name) && !excluded.has(name));
+        // Every container already has a home, so a stack folder would sit
+        // empty, and deleting it would only bring it back on the next sync.
+        if (pending.length === 0) continue;
+
         let folderId = folderByProject.get(project);
         if (folderId === undefined) {
             const position = nextPosition(db, 'SELECT MAX(position) AS value FROM folders');
@@ -673,12 +684,7 @@ function syncComposeProjects(db: DatabaseSync, containers: readonly SyncContaine
             changed = true;
         }
 
-        upsertComposeStack(db, project, members[0].labels, now);
-
-        for (const container of members) {
-            const name = container.name.replace(/^\//, '');
-            if (assigned.has(name) || excluded.has(name)) continue;
-
+        for (const { id, name } of pending) {
             const position = nextPosition(
                 db,
                 'SELECT MAX(position) AS value FROM container_folders WHERE folder_id = ?',
@@ -687,7 +693,7 @@ function syncComposeProjects(db: DatabaseSync, containers: readonly SyncContaine
             db.prepare(
                 `INSERT INTO container_folders (container_id, container_name, folder_id, position)
                  VALUES (?, ?, ?, ?)`
-            ).run(container.id, name, folderId, position);
+            ).run(id, name, folderId, position);
             assigned.add(name);
             changed = true;
         }
@@ -780,8 +786,8 @@ function upsertComposeStack(
     const composeFile = configFiles === null ? null : configFiles.split(',')[0];
 
     const existing = db
-        .prepare('SELECT project_name FROM compose_stacks WHERE project_name = ?')
-        .get(project);
+        .prepare('SELECT working_dir, compose_file FROM compose_stacks WHERE project_name = ?')
+        .get(project) as { working_dir: string | null; compose_file: string | null } | undefined;
 
     if (existing === undefined) {
         db.prepare(
@@ -792,6 +798,13 @@ function upsertComposeStack(
         ).run(project, workingDir, composeFile, now, now);
         return;
     }
+
+    // Write only a path that changed, as `ComposeManager::upsertStack` does.
+    // This runs on every sync, so writing unconditionally bumped updated_at
+    // on every poll.
+    const workingDirChanged = workingDir !== null && workingDir !== existing.working_dir;
+    const composeFileChanged = composeFile !== null && composeFile !== existing.compose_file;
+    if (!workingDirChanged && !composeFileChanged) return;
 
     db.prepare(
         `UPDATE compose_stacks SET

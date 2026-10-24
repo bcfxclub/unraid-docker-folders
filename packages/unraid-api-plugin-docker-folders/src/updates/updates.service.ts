@@ -3,12 +3,26 @@ import { existsSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { Observable } from 'rxjs';
 
-import { DOCKER_CLIENT_TOKEN, DOCKER_SOCKET_PATH, type DockerClient, type DockerInspectInfo } from '../containers/docker-client.js';
+import {
+    DOCKER_CLIENT_TOKEN,
+    DOCKER_SOCKET_PATH,
+    type DockerClient,
+    type DockerInspectInfo,
+    type DockerListContainer,
+} from '../containers/docker-client.js';
 import { DatabaseService, type Row } from '../db/database.service.js';
 import { EventBusService } from '../events/event-bus.service.js';
 import { sendUnraidNotification } from '../schedules/schedule-notifications.js';
 import { nowSeconds } from '../util/time.js';
-import { errorMessage, globMatch, nullableString, resolveImageTag, stripLeadingSlash } from './docker-refs.js';
+import {
+    errorMessage,
+    globMatch,
+    nullableString,
+    type RecreateCandidate,
+    resolveImageTag,
+    selectRecreateTargets,
+    stripLeadingSlash,
+} from './docker-refs.js';
 import type { DockerFoldersPullEvent } from './pull-events.js';
 import { RecreateService, type RecreateResult } from './recreate.service.js';
 import { parseRepo, toReleaseNote } from './release-notes.util.js';
@@ -69,6 +83,13 @@ export interface PullOptions {
     containers?: string[];
     /** Force a recreate even without a detected update. Requires `containers`. */
     recreate?: boolean;
+    /**
+     * Skip the pull and recreate `containers` on the image already on disk,
+     * PHP's `recreate_only=1`. Applies an update pulled earlier: pulling again
+     * would fail for an image built locally, and could swap in a build newer
+     * than the one the user chose to apply. Requires `containers`.
+     */
+    recreateOnly?: boolean;
 }
 
 function toStatus(row: Row, notes: Map<string, Row>): DockerFoldersImageUpdateStatus {
@@ -261,7 +282,8 @@ export class UpdatesService {
      * for the same pull as a stream of every intermediate event.
      */
     async pullImage(image: string, options?: PullOptions): Promise<DockerFoldersImagePullResult> {
-        const { onlyContainerIds, forceRecreate } = this.validatePullRequest(image, options);
+        const { onlyContainerIds, forceRecreate, recreateOnly } = this.validatePullRequest(image, options);
+        if (recreateOnly && onlyContainerIds !== null) return this.runRecreateOnly(image, onlyContainerIds, () => {});
         return this.runPull(image, onlyContainerIds, forceRecreate, () => {});
     }
 
@@ -279,17 +301,26 @@ export class UpdatesService {
      * running after the browser disconnects.
      */
     pullImageEvents(image: string, options?: PullOptions): Observable<DockerFoldersPullEvent> {
-        const { onlyContainerIds, forceRecreate } = this.validatePullRequest(image, options);
+        const { onlyContainerIds, forceRecreate, recreateOnly } = this.validatePullRequest(image, options);
 
         return new Observable<DockerFoldersPullEvent>((subscriber) => {
-            this.runPull(image, onlyContainerIds, forceRecreate, (event) => subscriber.next(event))
+            const emit = (event: DockerFoldersPullEvent) => subscriber.next(event);
+            const run =
+                recreateOnly && onlyContainerIds !== null
+                    ? this.runRecreateOnly(image, onlyContainerIds, emit)
+                    : this.runPull(image, onlyContainerIds, forceRecreate, emit);
+            run
                 .then((result) => {
                     // Exactly one terminal event, then `done`, then complete —
                     // mirrors pull.php's `complete`/`error` followed
                     // unconditionally by `done`.
                     subscriber.next(
                         result.success
-                            ? { type: 'complete', message: 'Pull complete', image: result.image }
+                            ? {
+                                  type: 'complete',
+                                  message: recreateOnly ? 'Recreate complete' : 'Pull complete',
+                                  image: result.image,
+                              }
                             : { type: 'error', message: result.error ?? 'Pull failed' }
                     );
                     subscriber.next({ type: 'done', finished: true });
@@ -441,11 +472,12 @@ export class UpdatesService {
         // checkAllImageUpdates()'s loop over DockerClient::listContainers(true).
         const uniqueImages = new Map<string, string>();
         const containersByImage = new Map<string, string[]>();
+        const resolved = await this.resolveListImages(containers);
         for (const container of containers) {
             const name = stripLeadingSlash(container.Names?.[0] ?? '');
             const rawImage = container.Image ?? '';
             if (rawImage === '') continue;
-            const image = resolveImageTag(rawImage, name);
+            const image = resolved.get(container.Id) ?? rawImage;
             if (!uniqueImages.has(image)) uniqueImages.set(image, container.ImageID ?? '');
             if (name !== '') containersByImage.set(image, [...(containersByImage.get(image) ?? []), name]);
         }
@@ -642,7 +674,7 @@ export class UpdatesService {
     private validatePullRequest(
         image: string,
         options?: PullOptions
-    ): { onlyContainerIds: Set<string> | null; forceRecreate: boolean } {
+    ): { onlyContainerIds: Set<string> | null; forceRecreate: boolean; recreateOnly: boolean } {
         if (!IMAGE_NAME_PATTERN.test(image) || image.length > MAX_IMAGE_NAME_LENGTH) {
             throw new BadRequestException('Invalid image name');
         }
@@ -662,7 +694,12 @@ export class UpdatesService {
             throw new BadRequestException('recreate requires containers');
         }
 
-        return { onlyContainerIds, forceRecreate };
+        const recreateOnly = options?.recreateOnly === true;
+        if (recreateOnly && onlyContainerIds === null) {
+            throw new BadRequestException('recreateOnly requires containers');
+        }
+
+        return { onlyContainerIds, forceRecreate, recreateOnly };
     }
 
     /**
@@ -716,6 +753,19 @@ export class UpdatesService {
     }
 
     /** `pull.php`'s whole body, minus SSE framing — `emit` takes its place. */
+    /** `pull.php`'s `recreate_only=1` branch: no pull, only the recreate. */
+    private async runRecreateOnly(
+        image: string,
+        onlyContainerIds: Set<string>,
+        emit: (event: DockerFoldersPullEvent) => void
+    ): Promise<DockerFoldersImagePullResult> {
+        this.updateLog.log(`RECREATE ONLY ${image}`);
+        emit({ type: 'status', message: 'Recreating...' });
+        await this.autoRecreate(image, onlyContainerIds, emit);
+        this.events.publish('container', 'updated');
+        return { success: true, image, error: null };
+    }
+
     private async runPull(
         image: string,
         onlyContainerIds: Set<string> | null,
@@ -885,19 +935,23 @@ export class UpdatesService {
         emit: (event: DockerFoldersPullEvent) => void
     ): Promise<void> {
         try {
-            const containers = await this.docker.listContainers({ all: true });
-            const matching = containers.filter((container) => {
-                const name = stripLeadingSlash(container.Names?.[0] ?? '');
-                const resolvedImage = resolveImageTag(container.Image ?? '', name);
-                if (resolvedImage !== image) return false;
-                return onlyContainerIds === null || onlyContainerIds.has(container.Id);
-            });
+            const selection = selectRecreateTargets(await this.recreateCandidates(), image, onlyContainerIds);
+            const matching = selection.targets;
 
             this.updateLog.log(`RECREATE Found ${matching.length} container(s) using ${image}`);
 
+            for (const missingId of selection.missing) {
+                const shortId = missingId.slice(0, 12);
+                this.updateLog.log(`RECREATE SKIP ${shortId}: not found, or no longer uses ${image}`);
+                emit({
+                    type: 'recreate_error',
+                    container: shortId,
+                    message: `Container ${shortId} was not recreated: it no longer exists or does not use ${image}`,
+                });
+            }
+
             for (const container of matching) {
-                const name = stripLeadingSlash(container.Names?.[0] ?? '');
-                const id = container.Id;
+                const { name, id } = container;
 
                 emit({ type: 'recreating', container: name, message: `Recreating ${name}...` });
 
@@ -915,8 +969,47 @@ export class UpdatesService {
         } catch (error) {
             const message = errorMessage(error);
             this.updateLog.log(`RECREATE ERROR ${image}: ${message}`);
-            emit({ type: 'recreate_error', container: '', message: `Auto-recreate failed: ${message}` });
+            emit({ type: 'recreate_error', container: '', message: `Recreate failed: ${message}` });
         }
+    }
+
+    /**
+     * Each container's image, id => reference, resolved the way the container
+     * list and PHP's `DockerClient::listContainers()` resolve it. Docker's list
+     * carries no `Config`, so a container listed under a bare `sha256:` id with
+     * no Unraid template is inspected for its `Config.Image`. Those are only
+     * the containers whose tag already moved, so a settled server inspects
+     * none.
+     */
+    private async resolveListImages(containers: DockerListContainer[]): Promise<Map<string, string>> {
+        const entries = await Promise.all(
+            containers.map(async (container): Promise<[string, string]> => {
+                const name = stripLeadingSlash(container.Names?.[0] ?? '');
+                const listImage = container.Image ?? '';
+                let image = resolveImageTag(listImage, name);
+                if (image.startsWith('sha256:')) {
+                    try {
+                        const inspect = await this.docker.getContainer(container.Id).inspect();
+                        image = resolveImageTag(listImage, name, inspect.Config?.Image ?? '');
+                    } catch (error) {
+                        this.logger.warn(`Could not inspect container ${name}: ${errorMessage(error)}`);
+                    }
+                }
+                return [container.Id, image];
+            })
+        );
+        return new Map(entries);
+    }
+
+    /** Every container, with its image resolved by `resolveListImages()`. */
+    private async recreateCandidates(): Promise<RecreateCandidate[]> {
+        const containers = await this.docker.listContainers({ all: true });
+        const resolved = await this.resolveListImages(containers);
+        return containers.map((container) => ({
+            id: container.Id,
+            name: stripLeadingSlash(container.Names?.[0] ?? ''),
+            image: resolved.get(container.Id) ?? container.Image ?? '',
+        }));
     }
 
     /**

@@ -11,7 +11,8 @@ import type {
     DockerFoldersPort,
 } from './container.model.js';
 import { DOCKER_CLIENT_TOKEN, type DockerClient, type DockerListContainer } from './docker-client.js';
-import { imageFromTemplate, readAutostartMap } from './unraid-templates.js';
+import { isImageOutdated, resolveImageTag } from '../updates/docker-refs.js';
+import { readAutostartMap } from './unraid-templates.js';
 
 /**
  * The container list, ported from `DockerClient::listContainers`.
@@ -38,7 +39,7 @@ import { imageFromTemplate, readAutostartMap } from './unraid-templates.js';
  * In memory rather than in a file, which is where the PHP has to keep it. The
  * API is one long-running process, so a Map survives between requests and
  * PHP-FPM's does not. That also keeps the plugin off
- * `/tmp/unraid-docker-container-facts-v3.json`, which PHP rewrites on its own
+ * `/tmp/unraid-docker-container-facts-v4.json`, which PHP rewrites on its own
  * list calls - two writers on one JSON file, with no locking on either side,
  * would eventually truncate it for both.
  */
@@ -47,6 +48,12 @@ interface CachedFacts extends ContainerFacts {
     imageUser: string;
     /** Which image to ask for that, recorded while the container was inspected. */
     imageId: string;
+    /**
+     * `Config.Image`, the reference the container was created from. Fixed for
+     * the life of the id, unlike the list's `Image`, which turns into a bare
+     * `sha256:` id once that reference moves to a newer image.
+     */
+    configImage: string;
 }
 
 @Injectable()
@@ -66,11 +73,14 @@ export class ContainerListService {
             const name = stripLeadingSlash(container.Names?.[0] ?? '');
             const labels = container.Labels ?? {};
             const known = facts.get(container.Id);
+            const listImage = container.Image ?? '';
+            const configImage = known?.configImage ?? '';
 
             return {
                 id: container.Id,
                 name,
-                image: this.resolveImageTag(container.Image ?? '', name),
+                image: resolveImageTag(listImage, name, configImage),
+                imageOutdated: isImageOutdated(listImage, configImage),
                 state: container.State ?? '',
                 status: container.Status ?? '',
                 command: container.Command ?? '',
@@ -128,6 +138,7 @@ export class ContainerListService {
                 ...extractFacts(inspect),
                 imageUser: '',
                 imageId: asString(inspect.Image),
+                configImage: asString(inspect.Config?.Image),
             });
         } catch (error) {
             // One container that cannot be inspected must not empty the whole
@@ -170,20 +181,6 @@ export class ContainerListService {
                 }
             })
         );
-    }
-
-    /**
-     * Prefer the Unraid template's image reference over Docker's.
-     *
-     * Docker reports a bare `sha256:` digest once the tag a container was
-     * pulled under points at a newer image, which is every container whose
-     * image has been updated. Showing a digest in the UI is useless, and the
-     * template records what the user actually chose.
-     */
-    private resolveImageTag(imageRef: string, containerName: string): string {
-        if (!imageRef.startsWith('sha256:')) return imageRef;
-
-        return imageFromTemplate(containerName) ?? imageRef;
     }
 }
 

@@ -503,8 +503,11 @@ class FolderManager
   /**
    * Sync Docker Compose stacks into folders automatically.
    *
-   * Groups containers by their com.docker.compose.project label,
-   * creates missing folders, and assigns unassigned containers.
+   * Groups containers by their com.docker.compose.project label and
+   * assigns unassigned containers to the stack's folder, creating it when
+   * the first of them needs it. A stack whose containers are all in other
+   * folders, or all excluded, gets no folder: it would sit empty, and the
+   * user could never delete it for good.
    *
    * @param array $containers List of container data from DockerClient
    * @return bool True if any changes were made
@@ -550,8 +553,32 @@ class FolderManager
       $excluded[$row['container_name']] = true;
     }
 
+    $composeManager = new ComposeManager();
+
     foreach ($projects as $projectName => $projectContainers) {
-      // Create folder if it doesn't exist for this compose project
+      // Upsert compose_stacks metadata from Docker labels
+      $firstContainer = $projectContainers[0];
+      $labels = $firstContainer['labels'] ?? [];
+      $workingDir = $labels['com.docker.compose.project.working_dir'] ?? null;
+      $configFiles = $labels['com.docker.compose.project.config_files'] ?? null;
+      $composeFile = $configFiles ? explode(',', $configFiles)[0] : null;
+
+      $composeManager->upsertStack($projectName, $workingDir, $composeFile);
+
+      // Containers that are in no folder and that the user has not taken out of one
+      $pending = [];
+      foreach ($projectContainers as $container) {
+        $containerName = ltrim($container['name'], '/');
+        if (!isset($assignmentMap[$containerName]) && !isset($excluded[$containerName])) {
+          $pending[] = [$container['id'], $containerName];
+        }
+      }
+      if (empty($pending)) {
+        // Every container already has a home, so a stack folder would sit
+        // empty, and deleting it would only bring it back on the next sync.
+        continue;
+      }
+
       if (!isset($foldersByProject[$projectName])) {
         $folder = $this->createFolder([
           'name' => $projectName,
@@ -564,22 +591,10 @@ class FolderManager
         $folderId = (int) $foldersByProject[$projectName]['id'];
       }
 
-      // Upsert compose_stacks metadata from Docker labels
-      $firstContainer = $projectContainers[0];
-      $labels = $firstContainer['labels'] ?? [];
-      $workingDir = $labels['com.docker.compose.project.working_dir'] ?? null;
-      $configFiles = $labels['com.docker.compose.project.config_files'] ?? null;
-      $composeFile = $configFiles ? explode(',', $configFiles)[0] : null;
-
-      $composeManager = new ComposeManager();
-      $composeManager->upsertStack($projectName, $workingDir, $composeFile);
-
-      // Assign unassigned containers to the compose folder
-      foreach ($projectContainers as $container) {
-        $containerId = $container['id'];
-        $containerName = ltrim($container['name'], '/');
-        if (!isset($assignmentMap[$containerName]) && !isset($excluded[$containerName])) {
-          $this->addContainerToFolder($folderId, $containerId, $containerName);
+      foreach ($pending as [$containerId, $containerName]) {
+        // A failed insert (logged inside) leaves the container pending, so
+        // the next sync tries again. Do not report a change that did not happen.
+        if ($this->addContainerToFolder($folderId, $containerId, $containerName)) {
           $assignmentMap[$containerName] = $folderId;
           $changed = true;
         }

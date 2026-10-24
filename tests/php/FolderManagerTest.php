@@ -240,6 +240,83 @@ final class FolderManagerTest extends TestCase
     }
 
     #[Test]
+    public function composeSyncMakesNoFolderWhenTheStackAlreadyLivesInAnotherFolder(): void
+    {
+        $games = $this->manager->createFolder(['name' => 'Games']);
+        $this->manager->addContainerToFolder($games['id'], 'id-valheim', 'valheim');
+
+        $this->manager->syncComposeStacks([self::composeContainer('valheim', 'valheim')]);
+
+        self::assertSame(0, (int) $this->db->fetchValue('SELECT COUNT(*) FROM folders WHERE compose_project = ?', ['valheim']));
+        self::assertSame(['valheim'], $this->folderMembers((int) $games['id']));
+        // The stack still gets its metadata, so the compose editor can find it.
+        self::assertSame(1, (int) $this->db->fetchValue('SELECT COUNT(*) FROM compose_stacks WHERE project_name = ?', ['valheim']));
+    }
+
+    #[Test]
+    public function composeSyncMakesNoFolderForAStackWhoseContainersTheUserRemoved(): void
+    {
+        $this->manager->excludeFromComposeSync('db');
+
+        $this->manager->syncComposeStacks([self::composeContainer('db', 'app')]);
+
+        self::assertSame(0, (int) $this->db->fetchValue('SELECT COUNT(*) FROM folders WHERE compose_project = ?', ['app']));
+        self::assertSame(1, (int) $this->db->fetchValue('SELECT COUNT(*) FROM compose_stacks WHERE project_name = ?', ['app']));
+    }
+
+    #[Test]
+    public function composeSyncGroupsOnlyTheStackContainersThatHaveNoFolder(): void
+    {
+        $games = $this->manager->createFolder(['name' => 'Games']);
+        $this->manager->addContainerToFolder($games['id'], 'id-web', 'web');
+
+        $this->manager->syncComposeStacks([self::composeContainer('web', 'app'), self::composeContainer('db', 'app')]);
+
+        $folderId = (int) $this->db->fetchValue('SELECT id FROM folders WHERE compose_project = ?', ['app']);
+        self::assertSame(['db'], $this->folderMembers($folderId));
+        self::assertSame(['web'], $this->folderMembers((int) $games['id']));
+    }
+
+    #[Test]
+    public function composeSyncLeavesAnExistingStackFolderAloneWhenItsContainersMoved(): void
+    {
+        $this->manager->syncComposeStacks([self::composeContainer('db', 'app')]);
+        $folderId = (int) $this->db->fetchValue('SELECT id FROM folders WHERE compose_project = ?', ['app']);
+        $games = $this->manager->createFolder(['name' => 'Games']);
+        $this->manager->addContainerToFolder($games['id'], 'id-db', 'db');
+
+        self::assertFalse($this->manager->syncComposeStacks([self::composeContainer('db', 'app')]));
+
+        self::assertSame([], $this->folderMembers($folderId));
+        self::assertSame(['db'], $this->folderMembers((int) $games['id']));
+    }
+
+    #[Test]
+    public function composeSyncReportsNoChangeWhenTheContainerInsertFails(): void
+    {
+        $this->manager->syncComposeStacks([self::composeContainer('web', 'app')]);
+        $this->db->exec(
+            "CREATE TRIGGER refuse_db BEFORE INSERT ON container_folders WHEN NEW.container_name = 'db'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END"
+        );
+
+        // The failed insert warns (SQLite3) and logs (FolderManager) on purpose;
+        // keep both out of the run.
+        $log = ini_set('error_log', '/dev/null');
+        set_error_handler(static fn (): bool => true, E_WARNING);
+        try {
+            $changed = $this->manager->syncComposeStacks([self::composeContainer('web', 'app'), self::composeContainer('db', 'app')]);
+        } finally {
+            restore_error_handler();
+            ini_set('error_log', $log === false ? '' : $log);
+        }
+
+        self::assertFalse($changed);
+        $folderId = (int) $this->db->fetchValue('SELECT id FROM folders WHERE compose_project = ?', ['app']);
+        self::assertSame(['web'], $this->folderMembers($folderId));
+    }
+
+    #[Test]
     public function addingTheContainerBackLetsComposeSyncManageItAgain(): void
     {
         $containers = [self::composeContainer('db', 'app')];

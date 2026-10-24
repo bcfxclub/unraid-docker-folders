@@ -362,7 +362,7 @@ const CONTAINER_LIST = `
   query DockerFoldersContainerList {
     dockerFoldersContainerList {
       containers {
-        id name image state status command created networkMode
+        id name image imageOutdated state status command created networkMode
         privileged capAdd exposedPorts user imageUser puid pgid umask
         icon managed webui autostart autostartDelay
         ports { ip privatePort publicPort type }

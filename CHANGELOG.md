@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.10.22-dev1
+### New
+- Container cards show Not Applied when a pulled image was never applied, and Apply Update in the card menu recreates the container on it. (#20)
+
+### Fixed
+- The "Pull + offer recreate" option (formerly "Pull + offer restart") now offers a Recreate button in the pull and batch pull windows once the pull finishes, instead of doing nothing on Unraid. (#20)
+- Apply Update and Recreate use the image already pulled instead of pulling again, so locally built images can be applied and the build you chose is the one used. (#20)
+- Containers created outside Unraid are updated, force-updated and checked for updates under their image tag after an earlier pull, instead of failing or never showing the next update. (#20)
+- A container that a pull fails to recreate is reported as an error instead of showing Pull complete. (#20)
+
 ## 2026.10.19
 ### New
 - A new memory calculation setting under Settings > Docker Folders > Display switches container memory usage between the Docker CLI method (the default) and the raw cgroup number. (#19)

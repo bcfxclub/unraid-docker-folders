@@ -28,6 +28,11 @@
           class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning"
         >Update</span>
         <span
+          v-else-if="needsRecreate"
+          class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning"
+          :title="needsRecreateTitle"
+        >Not Applied</span>
+        <span
           v-if="checkingUpdates"
           class="shrink-0 inline-flex items-center gap-1 text-[10px] text-text-secondary"
           title="Checking for image updates"
@@ -170,6 +175,11 @@
             v-else-if="hasUpdate"
             class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning"
           >Update</span>
+          <span
+            v-else-if="needsRecreate"
+            class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning"
+            :title="needsRecreateTitle"
+          >Not Applied</span>
           <span
             v-if="checkingUpdates"
             class="shrink-0 inline-flex items-center gap-1 text-[10px] text-text-secondary"
@@ -406,7 +416,7 @@ async function handleToggleAutostart() {
   await dockerStore.toggleAutostart(props.container.name, !props.container.autostart);
 }
 
-const confirmAction = ref<'stop' | 'restart' | 'remove' | 'force-update' | null>(null);
+const confirmAction = ref<'stop' | 'restart' | 'remove' | 'force-update' | 'recreate' | null>(null);
 const removeImageToo = ref(false);
 const showDelayModal = ref(false);
 
@@ -479,6 +489,8 @@ const confirmModalConfig = computed(() => {
       return { title: 'Remove Container', message: `Remove "${props.container.name}"? This cannot be undone.`, label: 'Remove', variant: 'danger' as const };
     case 'force-update':
       return { title: 'Force Update', message: `Pull "${props.container.image}" and recreate "${props.container.name}" even if no update is available?`, label: 'Force Update', variant: 'default' as const };
+    case 'recreate':
+      return { title: 'Apply Update', message: `Recreate "${props.container.name}" so it runs the pulled "${props.container.image}" image? A restart keeps the old image.`, label: 'Recreate', variant: 'default' as const };
     default:
       return { title: '', message: '', label: '', variant: 'default' as const };
   }
@@ -489,6 +501,12 @@ function pullPayload(force = false): PullRequest {
   return force ? { image, name, managed, id, force } : { image, name, managed, id };
 }
 
+/** Apply the image already on disk: recreate, with no pull. */
+function recreatePayload(): PullRequest {
+  const { image, name, managed, id } = props.container;
+  return { image, name, managed, id, recreateOnly: true };
+}
+
 function handleConfirm() {
   const action = confirmAction.value;
   confirmAction.value = null;
@@ -496,6 +514,9 @@ function handleConfirm() {
   else if (action === 'restart') emit('restart', props.container.id);
   else if (action === 'remove') emit('remove', props.container.id, removeImageToo.value);
   else if (action === 'force-update') emit('pull', pullPayload(true));
+  // No pull: the newer image is already on disk. Pulling again would fail for
+  // an image built locally.
+  else if (action === 'recreate') emit('pull', recreatePayload());
   removeImageToo.value = false;
 }
 
@@ -579,6 +600,13 @@ const securityAriaLabel = computed(() => {
 });
 
 const hasUpdate = computed(() => settingsStore.enableUpdateChecks && updatesStore.hasUpdate(props.container.image));
+
+/**
+ * A newer image for the container's tag is on disk, but the container still
+ * runs the old one. A pull with no recreate leaves it like this, and the
+ * update check no longer reports it, so this is the only sign left.
+ */
+const needsRecreate = computed(() => !hasUpdate.value && !!props.container.imageOutdated);
 // The kebab item that starts the check closes with the menu, so the running
 // state needs a home on the card itself.
 const checkingUpdates = computed(
@@ -791,6 +819,10 @@ const composeProject = computed(() => composeProjectOf(props.container) ?? '');
 
 const isCompose = computed(() => !!composeProject.value);
 
+const needsRecreateTitle = computed(() => isCompose.value
+  ? 'A newer image is pulled but not running. Run Stack Up or Recompose from the stack folder menu to apply it.'
+  : 'A newer image is pulled but not running. Recreate the container to apply it.');
+
 const isManaged = computed(() => props.container.managed === 'dockerman');
 
 /**
@@ -866,6 +898,7 @@ const onMobileList = computed(() => props.view === 'list' && isMobile.value);
  */
 const menuItems = computed<KebabMenuItem[]>(() => [
   { label: 'Apply Update', icon: DOWNLOAD_ICON, action: 'update', class: 'text-warning', show: hasUpdate.value },
+  { label: 'Apply Update', icon: DOWNLOAD_ICON, action: 'recreate', class: 'text-warning', show: needsRecreate.value && !isCompose.value },
   { divider: true },
   { label: 'Actions', icon: PLAY_ICON, children: actionMenuItems.value },
   { label: 'Autostart', icon: AUTOSTART_ICON, children: autostartMenuItems.value },
@@ -938,6 +971,8 @@ async function handleMenuAction(action: string) {
     emit('pull', pullPayload());
   } else if (action === 'force-update') {
     confirmAction.value = 'force-update';
+  } else if (action === 'recreate') {
+    confirmAction.value = 'recreate';
   } else if (action === 'check-updates') {
     if (!updatesStore.isCheckingImage(props.container.image)) {
       await updatesStore.checkImagesForUpdates([props.container.image]);
