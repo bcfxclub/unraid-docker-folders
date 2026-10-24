@@ -16,6 +16,8 @@ class DockerClient
   private $lastError = '';
   /** HTTP status behind the last failure, or 0 if it wasn't an HTTP error. */
   private $lastErrorCode = 0;
+  /** The daemon's own message behind the last HTTP failure, or ''. */
+  private $lastErrorReason = '';
   private $imageInfoCache = [];
   /** Cached result of readHostMemoryTotal(), null until first read. */
   private $hostMemoryTotal = null;
@@ -72,6 +74,18 @@ class DockerClient
   public function getLastError()
   {
     return $this->lastError;
+  }
+
+  /**
+   * The last failure in the daemon's own words, without the "Docker API
+   * HTTP 500: " prefix request() adds, for text a user reads. A failure with
+   * no message from the daemon falls back to getLastError().
+   *
+   * @return string
+   */
+  public function getLastErrorReason()
+  {
+    return $this->lastErrorReason !== '' ? $this->lastErrorReason : $this->lastError;
   }
 
   /**
@@ -1878,6 +1892,7 @@ class DockerClient
   {
     // This path does not go through request(), which is what resets it.
     $this->lastError = '';
+    $this->lastErrorReason = '';
 
     if (!file_exists($this->socketPath)) {
       $this->lastError = "Docker socket not found: {$this->socketPath}";
@@ -1955,6 +1970,7 @@ class DockerClient
     }
 
     if ($httpCode < 200 || $httpCode >= 300) {
+      $this->lastErrorReason = $apiMessage;
       $this->lastError = "Docker API HTTP {$httpCode}" . ($apiMessage !== '' ? ": {$apiMessage}" : '');
       error_log("Docker pull error: {$this->lastError}");
       return false;
@@ -2355,6 +2371,7 @@ class DockerClient
   {
     $this->lastError = '';
     $this->lastErrorCode = 0;
+    $this->lastErrorReason = '';
 
     if (!file_exists($this->socketPath)) {
       $this->lastError = "Docker socket not found: {$this->socketPath}";
@@ -2411,6 +2428,7 @@ class DockerClient
   {
     $this->lastError = '';
     $this->lastErrorCode = 0;
+    $this->lastErrorReason = '';
 
     if (!file_exists($this->socketPath)) {
       $this->lastError = "Docker socket not found: {$this->socketPath}";
@@ -2458,14 +2476,14 @@ class DockerClient
     // Extract error message from Docker API response
     if ($httpCode < 200 || $httpCode >= 300) {
       $this->lastErrorCode = $httpCode;
-      $errorMsg = "Docker API HTTP {$httpCode}";
       $decoded = json_decode($response, true);
       if ($decoded && isset($decoded['message'])) {
-        $errorMsg .= ': ' . $decoded['message'];
+        $this->lastErrorReason = (string) $decoded['message'];
       } elseif ($response) {
-        $errorMsg .= ': ' . substr($response, 0, 500);
+        $this->lastErrorReason = substr($response, 0, 500);
       }
-      $this->lastError = $errorMsg;
+      $this->lastError = "Docker API HTTP {$httpCode}"
+        . ($this->lastErrorReason !== '' ? ": {$this->lastErrorReason}" : '');
       error_log($this->lastError);
       return false;
     }

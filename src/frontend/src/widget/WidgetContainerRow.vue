@@ -34,6 +34,9 @@
           :title="failedTitle"
         >Failed</span>
       </span>
+      <!-- A failed start, resume or stop shows whatever the tag setting, with
+           Docker's reason on hover. Clicking dismisses it. -->
+      <ActionFailureLine :container="container" class="max-w-full mt-0.5" />
     </span>
     <WidgetStatGauges
       v-if="showStats && isRunning"
@@ -86,6 +89,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import ContainerIcon from '@/components/docker/ContainerIcon.vue';
+import ActionFailureLine from '@/components/docker/ActionFailureLine.vue';
 import WidgetStatGauges from './WidgetStatGauges.vue';
 import IconGlobe from '@/components/icons/IconGlobe.vue';
 import KebabMenu, { type KebabMenuItem } from '@/components/KebabMenu.vue';

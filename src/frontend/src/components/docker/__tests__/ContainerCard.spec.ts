@@ -1410,3 +1410,21 @@ describe('ContainerCard', () => {
   });
 
 });
+
+describe('ContainerCard – failed action', () => {
+  const REASON = 'Could not start container: endpoint with name web already exists in network bridge';
+
+  for (const view of ['grid', 'list'] as const) {
+    it(`shows Docker's reason in the ${view} view, and dismisses it on click`, async () => {
+      const wrapper = mountCard({ name: 'web', state: 'exited' }, { view });
+      const docker = useDockerStore();
+      docker.actionFailures.set('web', { action: 'start', error: REASON, state: 'exited' });
+      await flushPromises();
+
+      const line = wrapper.findAll('button').find((b) => b.text() === REASON);
+      expect(line).toBeTruthy();
+      await line!.trigger('click');
+      expect(docker.actionFailures.has('web')).toBe(false);
+    });
+  }
+});

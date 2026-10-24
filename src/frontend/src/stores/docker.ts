@@ -7,6 +7,7 @@ import { ref, computed } from 'vue';
 import { useFolderStore } from './folders';
 import { useSettingsStore } from './settings';
 import { useBackend } from '@/backends';
+import type { ContainerAction } from '@/backends/types';
 import { naturalNameCompare, sortByMode } from '@/utils/sortMode';
 import { containerMatchesSearch } from '@/utils/search';
 import { composeProjectOf } from '@/utils/updateUnits';
@@ -149,6 +150,14 @@ export interface Container {
   labels: Record<string, string>;
   autostart: boolean;
   autostartDelay: number;
+}
+
+export interface ContainerActionFailure {
+  action: ContainerAction;
+  /** The backend's message, with Docker's own reason in it. */
+  error: string;
+  /** The state the failed action left the container in. */
+  state: string;
 }
 
 export const useDockerStore = defineStore('docker', () => {
@@ -369,6 +378,7 @@ export const useDockerStore = defineStore('docker', () => {
 
       containers.value = (data.containers || []).map(withStableOrder);
       securityDismissals.value = data.dismissals || [];
+      pruneActionFailures();
       initialLoadDone = true;
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Unknown error';
@@ -378,100 +388,71 @@ export const useDockerStore = defineStore('docker', () => {
     }
   }
 
-  async function startContainer(id: string): Promise<boolean> {
-    try {
-      const { ok } = await useBackend().containers.action('start', id);
+  /**
+   * The last failed start, resume, stop, restart or remove on each container,
+   * keyed by name so it survives a recreate. Holds the daemon's own reason
+   * (for example "endpoint with name X already exists in network bridge"),
+   * which the card shows until it is dismissed or stops being true.
+   */
+  const actionFailures = ref(new Map<string, ContainerActionFailure>());
 
-      if (!ok) {
-        throw new Error(`Failed to start container`);
-      }
+  function actionFailureFor(container: Container): ContainerActionFailure | undefined {
+    return actionFailures.value.get(container.name);
+  }
 
-      // Refresh container list
-      await fetchContainers();
-
-      return true;
-    } catch (e) {
-      console.error('Error starting container:', e);
-      return false;
+  /**
+   * Drop each failure whose container is gone or has left the state the
+   * failed action left it in, from the plugin or from outside it. Runs on
+   * every fetch, so a stale failure never comes back when the container
+   * later returns to that state.
+   */
+  function pruneActionFailures() {
+    if (actionFailures.value.size === 0) return;
+    const stateByName = new Map(containers.value.map((c) => [c.name, c.state]));
+    for (const [name, failure] of actionFailures.value) {
+      if (stateByName.get(name) !== failure.state) actionFailures.value.delete(name);
     }
   }
 
-  async function resumeContainer(id: string): Promise<boolean> {
-    try {
-      const { ok } = await useBackend().containers.action('resume', id);
-
-      if (!ok) {
-        throw new Error(`Failed to resume container`);
-      }
-
-      // Refresh container list
-      await fetchContainers();
-
-      return true;
-    } catch (e) {
-      console.error('Error resuming container:', e);
-      return false;
-    }
+  function dismissActionFailure(name: string) {
+    actionFailures.value.delete(name);
   }
 
-  async function stopContainer(id: string): Promise<boolean> {
+  async function runContainerAction(action: ContainerAction, id: string, body?: { remove_image: true }): Promise<boolean> {
+    const container = containers.value.find((c) => c.id === id);
+    if (container) actionFailures.value.delete(container.name);
+
+    let failure: string | undefined;
     try {
-      const { ok } = await useBackend().containers.action('stop', id);
-
-      if (!ok) {
-        throw new Error(`Failed to stop container`);
-      }
-
-      // Refresh container list
-      await fetchContainers();
-
-      return true;
+      const result = await useBackend().containers.action(action, id, body);
+      if (!result.ok) failure = result.error || `Could not ${action} container`;
     } catch (e) {
-      console.error('Error stopping container:', e);
+      failure = e instanceof Error ? e.message : String(e);
+    }
+    if (failure !== undefined) {
+      console.error(`Error running ${action} on container:`, failure);
+      if (container) {
+        // Record the state the failed action left, not the one before it: a
+        // failed restart leaves a running container exited.
+        await fetchContainers(true);
+        const after = containers.value.find((c) => c.name === container.name);
+        actionFailures.value.set(container.name, { action, error: failure, state: after?.state ?? container.state });
+      }
       return false;
     }
+
+    // A remove also drops the container's folder rows on the backend.
+    if (action === 'remove') await Promise.all([fetchContainers(), useFolderStore().fetchFolders()]);
+    else await fetchContainers();
+    return true;
   }
 
-  async function restartContainer(id: string): Promise<boolean> {
-    try {
-      const { ok } = await useBackend().containers.action('restart', id);
-
-      if (!ok) {
-        throw new Error(`Failed to restart container`);
-      }
-
-      // Refresh container list
-      await fetchContainers();
-
-      return true;
-    } catch (e) {
-      console.error('Error restarting container:', e);
-      return false;
-    }
-  }
-
-  async function removeContainer(id: string, removeImage = false): Promise<boolean> {
-    try {
-      const { ok } = await useBackend().containers.action(
-        'remove',
-        id,
-        removeImage ? { remove_image: true } : undefined,
-      );
-
-      if (!ok) {
-        throw new Error(`Failed to remove container`);
-      }
-
-      // Refresh containers and folders (backend cleans up associations)
-      const { useFolderStore } = await import('./folders');
-      await Promise.all([fetchContainers(), useFolderStore().fetchFolders()]);
-
-      return true;
-    } catch (e) {
-      console.error('Error removing container:', e);
-      return false;
-    }
-  }
+  const startContainer = (id: string) => runContainerAction('start', id);
+  const resumeContainer = (id: string) => runContainerAction('resume', id);
+  const stopContainer = (id: string) => runContainerAction('stop', id);
+  const restartContainer = (id: string) => runContainerAction('restart', id);
+  const removeContainer = (id: string, removeImage = false) =>
+    runContainerAction('remove', id, removeImage ? { remove_image: true } : undefined);
 
   async function toggleAutostart(name: string, enabled: boolean, delay?: number): Promise<boolean> {
     try {
@@ -520,6 +501,9 @@ export const useDockerStore = defineStore('docker', () => {
 
     // Actions
     fetchContainers,
+    actionFailures,
+    actionFailureFor,
+    dismissActionFailure,
     startContainer,
     resumeContainer,
     stopContainer,

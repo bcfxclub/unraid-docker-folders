@@ -49,6 +49,18 @@ try {
 }
 
 /**
+ * A failed container action's message, with Docker's reason in it, for
+ * example "Could not start container: failed to set up container networking:
+ * endpoint with name X already exists in network bridge". The card shows it,
+ * and the GraphQL backend words its failures the same way.
+ */
+function actionFailureMessage($verb, DockerClient $dockerClient)
+{
+  $reason = $dockerClient->getLastErrorReason();
+  return $reason !== '' ? "Could not {$verb} container: {$reason}" : "Could not {$verb} container";
+}
+
+/**
  * Handle GET requests
  */
 function handleGet($dockerClient)
@@ -294,22 +306,22 @@ function handlePost($dockerClient)
     case 'start':
       // DockerClient::startContainer resumes a paused container itself.
       $success = $dockerClient->startContainer($id);
-      $message = $success ? 'Container started successfully' : 'Failed to start container';
+      $message = $success ? 'Container started successfully' : actionFailureMessage('start', $dockerClient);
       break;
 
     case 'resume':
       $success = $dockerClient->unpauseContainer($id);
-      $message = $success ? 'Container resumed successfully' : 'Failed to resume container';
+      $message = $success ? 'Container resumed successfully' : actionFailureMessage('resume', $dockerClient);
       break;
 
     case 'stop':
       $success = $dockerClient->stopContainer($id);
-      $message = $success ? 'Container stopped successfully' : 'Failed to stop container';
+      $message = $success ? 'Container stopped successfully' : actionFailureMessage('stop', $dockerClient);
       break;
 
     case 'restart':
       $success = $dockerClient->restartContainer($id);
-      $message = $success ? 'Container restarted successfully' : 'Failed to restart container';
+      $message = $success ? 'Container restarted successfully' : actionFailureMessage('restart', $dockerClient);
       break;
 
     case 'remove':
@@ -320,7 +332,7 @@ function handlePost($dockerClient)
       $containerImage = $containerInfo['Image'] ?? null;
 
       $success = $dockerClient->removeContainer($id, $force);
-      $message = $success ? 'Container removed successfully' : 'Failed to remove container';
+      $message = $success ? 'Container removed successfully' : actionFailureMessage('remove', $dockerClient);
 
       if ($success && $containerName) {
         // Clean up folder associations
