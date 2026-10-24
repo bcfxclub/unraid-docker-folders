@@ -68,6 +68,7 @@ import type { Folder } from '@/types/folder';
 import { effectiveSortMode, sortByMode } from '@/utils/sortMode';
 import { safeLocalStorageGet, safeLocalStorageSet } from '@/utils/safeStorage';
 import { isAliveContainer } from '@/utils/containerDisplay';
+import { containerMatchesSearch } from '@/utils/search';
 import FolderHeader from './FolderHeader.vue';
 import ContainerCard from '@/components/docker/ContainerCard.vue';
 
@@ -106,9 +107,8 @@ const hideStopped = ref(safeLocalStorageGet(`docker-folders-hide-stopped-${props
 watch(hideStopped, (v) => safeLocalStorageSet(storageKey.value, v ? '1' : '0'));
 
 
-const isSearching = computed(() => dockerStore.searchQuery.trim().length > 0);
-
-const isExpanded = computed(() => !props.folder.collapsed || isSearching.value);
+// A search or a stack filter opens every folder it leaves on screen.
+const isExpanded = computed(() => !props.folder.collapsed || dockerStore.isFiltering);
 
 // Overflow on the expand container must stay hidden while the height
 // transition runs (see .expand-settled in main.css), so mark the folder as
@@ -136,15 +136,8 @@ const existingAssociations = computed(() =>
 
 const folderContainers = computed(() => {
   let list = existingAssociations.value;
-  if (isSearching.value) {
-    const q = dockerStore.searchQuery.trim().toLowerCase();
-    list = list.filter((assoc) => {
-      const container = getContainer(assoc.container_name);
-      if (container) {
-        return container.name.toLowerCase().includes(q) || container.image.toLowerCase().includes(q);
-      }
-      return assoc.container_name.toLowerCase().includes(q);
-    });
+  if (dockerStore.isFiltering) {
+    list = list.filter((assoc) => dockerStore.containerPassesFilters(getContainer(assoc.container_name), assoc.container_name));
   }
   if (hideStopped.value) {
     list = list.filter((assoc) => {
@@ -169,6 +162,7 @@ const folderContainers = computed(() => {
 // to stored container_folders rows if we have no stack metadata yet.
 const previewAssociations = computed(() => {
   if (!props.folder.compose_project) return [];
+  if (dockerStore.stackFilter !== null && !dockerStore.stackFilterKeepsDownStackFolder(props.folder.compose_project)) return [];
   const stack = composeStore.getStackByProject(props.folder.compose_project);
   let names: string[];
   if (stack?.service_names && stack.service_names.length > 0) {
@@ -176,10 +170,7 @@ const previewAssociations = computed(() => {
   } else {
     names = (props.folder.containers || []).map((a) => a.container_name);
   }
-  if (isSearching.value) {
-    const q = dockerStore.searchQuery.trim().toLowerCase();
-    names = names.filter((name) => name.toLowerCase().includes(q));
-  }
+  names = names.filter((name) => containerMatchesSearch(dockerStore.searchQuery, name));
   return names;
 });
 

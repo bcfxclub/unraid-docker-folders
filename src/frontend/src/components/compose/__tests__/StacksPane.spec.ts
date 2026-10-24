@@ -1,0 +1,119 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mount, flushPromises } from '@vue/test-utils';
+import { createPinia, setActivePinia, type Pinia } from 'pinia';
+import StacksPane from '../StacksPane.vue';
+import { useDockerStore } from '@/stores/docker';
+import { useFolderStore } from '@/stores/folders';
+import { useComposeStore } from '@/stores/compose';
+import { makeContainer, makeFolder } from '@/test/fixtures';
+import type { ComposeStack } from '@/types/compose';
+
+const PROJECT = 'com.docker.compose.project';
+
+function makeStack(project_name: string): ComposeStack {
+  return {
+    project_name,
+    working_dir: null,
+    compose_file: null,
+    env_file: null,
+    autostart: false,
+    autostart_force_recreate: false,
+    description: null,
+    imported_from: null,
+    services_running: 0,
+    services_total: 0,
+  };
+}
+
+// The component must share the pinia the test writes to.
+let pinia: Pinia;
+
+function mountPane() {
+  return mount(StacksPane, { global: { plugins: [pinia] } });
+}
+
+const rowFor = (wrapper: ReturnType<typeof mountPane>, project: string) =>
+  wrapper.findAll('button[aria-pressed]').find((b) => b.text().includes(project))!;
+
+describe('StacksPane', () => {
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    const docker = useDockerStore();
+    docker.containers = [
+      makeContainer({ id: 's', name: 'sonarr', labels: { [PROJECT]: 'arr' } }),
+      makeContainer({ id: 'r', name: 'radarr', state: 'exited', labels: { [PROJECT]: 'arr' } }),
+      makeContainer({ id: 'p', name: 'prowlarr', labels: { [PROJECT]: 'arr' } }),
+      makeContainer({ id: 'g', name: 'grafana', labels: { [PROJECT]: 'monitoring' } }),
+      makeContainer({ id: 'x', name: 'plex' }),
+    ];
+    useFolderStore().folders = [
+      makeFolder(['sonarr', 'radarr', 'plex'], { id: 1, name: 'Media' }),
+      makeFolder(['prowlarr'], { id: 2, name: 'Downloads' }),
+    ];
+    const compose = useComposeStore();
+    compose.stacks = [makeStack('arr'), makeStack('paperless')];
+    // Compose actions stay disabled until the status check says they work.
+    compose.status = { ...compose.status, compose_available: true, management_enabled: true };
+    compose.statusChecked = true;
+  });
+
+  it('lists known stacks and label-only projects, sorted, but not plain containers', () => {
+    const names = mountPane().findAll('button[aria-pressed] .text-sm').map((el) => el.text());
+    expect(names).toEqual(['arr', 'monitoring', 'paperless']);
+  });
+
+  it('counts running members from docker state', () => {
+    expect(rowFor(mountPane(), 'arr').text()).toContain('2/3');
+  });
+
+  it('names every folder the members live in', () => {
+    const wrapper = mountPane();
+    expect(rowFor(wrapper, 'arr').text()).toContain('In Media, Downloads');
+    expect(rowFor(wrapper, 'monitoring').text()).toContain('In Unfoldered');
+    expect(rowFor(wrapper, 'paperless').text()).toContain('Not created');
+  });
+
+  it('picks a stack, and clicking it again clears the filter', async () => {
+    const wrapper = mountPane();
+    const docker = useDockerStore();
+    await rowFor(wrapper, 'arr').trigger('click');
+    expect(docker.stackFilter).toBe('arr');
+    expect(rowFor(wrapper, 'arr').attributes('aria-pressed')).toBe('true');
+    await rowFor(wrapper, 'arr').trigger('click');
+    expect(docker.stackFilter).toBeNull();
+  });
+
+  it('emits the stack actions from its kebab', async () => {
+    const wrapper = mountPane();
+    await wrapper.findAll('button').find((b) => b.attributes('title') === 'Actions for arr')!.trigger('click');
+    const item = (label: string) => wrapper.findAll('.kebab-menu-item').find((el) => el.text().trim() === label);
+    // Same rule as the folder kebab: a running stack offers stop, not up.
+    expect(item('Stack Up')).toBeUndefined();
+    expect(item('Stop All')).toBeTruthy();
+    await item('Pull Latest Images')!.trigger('click');
+    expect(wrapper.emitted('compose-pull')).toEqual([['arr']]);
+  });
+
+  it('offers no Stack Down for a stack with no containers', async () => {
+    const wrapper = mountPane();
+    await wrapper.findAll('button').find((b) => b.attributes('title') === 'Actions for paperless')!.trigger('click');
+    const labels = wrapper.findAll('.kebab-menu-item').map((el) => el.text().trim());
+    expect(labels).toContain('Stack Up');
+    expect(labels).not.toContain('Stack Down');
+    expect(labels).not.toContain('Stop All');
+  });
+
+  it('shows a failed stop on the row instead of dropping it', async () => {
+    const compose = useComposeStore();
+    compose.stackStop = async () => ({ success: false, error: 'compose stop failed' });
+    const docker = useDockerStore();
+    docker.fetchContainers = async () => {};
+    useFolderStore().fetchFolders = async () => {};
+    const wrapper = mountPane();
+    await wrapper.findAll('button').find((b) => b.attributes('title') === 'Actions for arr')!.trigger('click');
+    await wrapper.findAll('.kebab-menu-item').find((el) => el.text().trim() === 'Stop All')!.trigger('click');
+    await flushPromises();
+    expect(rowFor(wrapper, 'arr').text()).toContain('compose stop failed');
+  });
+});

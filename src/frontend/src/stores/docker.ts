@@ -8,6 +8,8 @@ import { useFolderStore } from './folders';
 import { useSettingsStore } from './settings';
 import { useBackend } from '@/backends';
 import { naturalNameCompare, sortByMode } from '@/utils/sortMode';
+import { containerMatchesSearch } from '@/utils/search';
+import { composeProjectOf } from '@/utils/updateUnits';
 
 export interface ContainerPort {
   IP: string;
@@ -156,6 +158,12 @@ export const useDockerStore = defineStore('docker', () => {
   const error = ref<string | null>(null);
   const searchQuery = ref('');
   /**
+   * The compose project picked in the stacks pane, or null for no filter.
+   * Applied with the search box everywhere the Folders page lists containers,
+   * through `containerPassesFilters`.
+   */
+  const stackFilter = ref<string | null>(null);
+  /**
    * Security findings the user accepted, as sent with the container list.
    * Held here rather than fetched separately so the security store converges
    * on every refresh path without a second request.
@@ -259,6 +267,50 @@ export const useDockerStore = defineStore('docker', () => {
       return (stateOrder[a.state] ?? 3) - (stateOrder[b.state] ?? 3);
     });
   });
+
+  const isFiltering = computed(() => searchQuery.value.trim().length > 0 || stackFilter.value !== null);
+
+  /**
+   * Whether a container passes both the search box and the stack filter.
+   * `name` is the folder association's name, used when the container itself
+   * is gone (a stale association): it can still match a search, but it has
+   * no labels, so it never matches a stack.
+   */
+  function containerPassesFilters(container: Container | undefined, name: string): boolean {
+    if (stackFilter.value !== null && (!container || composeProjectOf(container) !== stackFilter.value)) {
+      return false;
+    }
+    return containerMatchesSearch(searchQuery.value, container?.name ?? name, container?.image);
+  }
+
+  /** Containers grouped by compose project, from their labels. */
+  const containersByProject = computed(() => {
+    const map = new Map<string, Container[]>();
+    for (const c of containers.value) {
+      const project = composeProjectOf(c);
+      if (!project) continue;
+      const list = map.get(project);
+      if (list) list.push(c);
+      else map.set(project, [c]);
+    }
+    return map;
+  });
+
+  /** The containers of a compose project. */
+  function containersInStack(project: string): Container[] {
+    return containersByProject.value.get(project) ?? [];
+  }
+
+  /**
+   * Whether the stack filter keeps a compose folder that none of its
+   * containers would keep: the picked stack's own folder while the stack has
+   * no containers at all, so it can preview its services and be started.
+   * Once any container exists, the containers decide, as for every folder.
+   */
+  function stackFilterKeepsDownStackFolder(folderProject: string | null): boolean {
+    const project = stackFilter.value;
+    return project !== null && folderProject === project && containersInStack(project).length === 0;
+  }
 
   const unfolderedContainers = computed(() => {
     // Membership is keyed on name (stable across recreations); the folder
@@ -448,8 +500,14 @@ export const useDockerStore = defineStore('docker', () => {
     loading,
     error,
     searchQuery,
+    stackFilter,
 
     // Getters
+    isFiltering,
+    containerPassesFilters,
+    containersByProject,
+    containersInStack,
+    stackFilterKeepsDownStackFolder,
     containerCount,
     getContainerById,
     containersByName,

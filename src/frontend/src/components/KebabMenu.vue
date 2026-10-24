@@ -14,7 +14,7 @@
       v-if="menuOpen"
       ref="dropdownRef"
       class="absolute right-0 bg-bg border border-border rounded-lg shadow-lg py-1.5 min-w-[160px] z-[100]"
-      :class="resolvedPosition === 'below' ? 'top-full mt-1' : 'bottom-full mb-1'"
+      :class="[resolvedPosition === 'below' ? 'top-full mt-1' : 'bottom-full mb-1', { 'whitespace-nowrap': noWrap }]"
       :style="maxHeight === null ? undefined : { maxHeight: `${maxHeight}px`, overflowY: 'auto' }"
     >
       <template v-for="(item, idx) in visibleItems" :key="item.label ?? `div-${idx}`">
@@ -106,6 +106,11 @@ interface Props {
    * the iframe to hold the menu instead (the dashboard widget does).
    */
   fitViewport?: boolean;
+  /**
+   * Keep each label on one line and let the menu grow to fit. For a kebab in
+   * a narrow column (the stacks pane), where the 160px minimum would wrap them.
+   */
+  noWrap?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -114,6 +119,7 @@ const props = withDefaults(defineProps<Props>(), {
   buttonClass: 'p-1.5 rounded cursor-pointer text-text-secondary hover:text-text transition',
   iconSize: 16,
   fitViewport: true,
+  noWrap: false,
 });
 
 const emit = defineEmits<{

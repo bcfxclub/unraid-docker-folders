@@ -316,3 +316,26 @@ describe('FolderContainer sort order', () => {
     expect(cardNames('name-desc', 'status')).toEqual(['zeta-stopped', 'mid-running', 'alpha-running']);
   });
 });
+
+describe('FolderContainer stack filter', () => {
+  const assoc = (name: string, i: number) => ({ id: i + 1, container_id: `id-${name}`, container_name: name, folder_id: 1, position: i });
+
+  it('lists only the picked stack\'s containers and opens a collapsed folder', () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const docker = useDockerStore();
+    docker.containers = [
+      makeContainer({ id: 'p', name: 'plex' }),
+      makeContainer({ id: 's', name: 'sonarr', labels: { 'com.docker.compose.project': 'arr' } }),
+    ];
+    docker.stackFilter = 'arr';
+    const wrapper = mount(FolderContainer, {
+      props: { folder: makeFolder({ collapsed: true, containers: ['plex', 'sonarr'].map(assoc) }) },
+      global: { plugins: [pinia] },
+    });
+    const list = wrapper.find('.container-list');
+    expect(list.text()).toContain('sonarr');
+    expect(list.text()).not.toContain('plex');
+    expect(wrapper.find('.expand-grid').classes()).toContain('expand-expanded');
+  });
+});

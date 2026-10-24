@@ -30,7 +30,7 @@
         class="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 bg-info/15 text-info rounded text-[11px] font-medium tracking-wide uppercase mr-1"
         :title="`Auto-grouped from compose project: ${folder.compose_project}`"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>
+        <IconComposeStack :size="12" />
         Compose
       </span>
       <ComposeControls
@@ -123,11 +123,13 @@ import KebabMenu from '@/components/KebabMenu.vue';
 import type { KebabMenuItem } from '@/components/KebabMenu.vue';
 import { byLabel } from '@/utils/menu';
 import { AUTOSTART_ICON, DOWNLOAD_ICON, EDIT_ICON, GEAR_ICON, PLAY_ICON, REFRESH_ICON, STOPWATCH_ICON, TRASH_ICON } from '@/utils/menuIcons';
+import { stackActionItems } from '@/utils/stackMenu';
 import ComposeControls from '@/components/compose/ComposeControls.vue';
 import StatsBar from '@/components/common/StatsBar.vue';
 import DragHandle from '@/components/common/DragHandle.vue';
 import ChevronIcon from '@/components/common/ChevronIcon.vue';
 import IconAutostart from '@/components/icons/IconAutostart.vue';
+import IconComposeStack from '@/components/icons/IconComposeStack.vue';
 import InputModal from '@/components/InputModal.vue';
 import type { Folder } from '@/types/folder';
 import { SORT_MODE_OPTIONS } from '@/types/folder';
@@ -279,23 +281,14 @@ const actionItems = computed<KebabMenuItem[]>(() => {
     });
   }
 
-  // Compose stack actions.
-  //
-  // Gated only on the folder actually being a compose project. Compose
-  // availability is an async check, so these are disabled rather than hidden;
-  // hiding them made the menu reflow once the status landed.
-  //
-  // `show` is still used for genuinely state-dependent entries (up vs stop),
-  // which depend on container state we already have, not on the status check.
   if (props.folder.compose_project) {
     const { composeDisabled, composeReason } = composeAvailability();
-    items.push(
-      { label: 'Stack Up', icon: PLAY_ICON, action: 'compose-up', show: !isRunning.value, disabled: composeDisabled, title: composeReason },
-      { label: 'Stop All', icon: 'M6 4h4v16H6zM14 4h4v16h-4z', action: 'compose-stop', show: isRunning.value, disabled: composeDisabled, title: composeReason },
-      { label: 'Pull Latest Images', icon: DOWNLOAD_ICON, action: 'compose-pull', disabled: composeDisabled, title: composeReason },
-      { label: 'Recompose', icon: REFRESH_ICON, action: 'compose-recompose', show: isRunning.value, disabled: composeDisabled, title: composeReason },
-      { label: composeStore.composePluginInstalled ? 'View Stack' : 'Edit Stack', icon: EDIT_ICON, action: 'compose-edit' },
-    );
+    items.push(...stackActionItems({
+      running: isRunning.value,
+      disabled: composeDisabled,
+      reason: composeReason,
+      pluginInstalled: composeStore.composePluginInstalled,
+    }));
   }
 
   return byLabel(items);
