@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026.10.24-dev3
+### New
+- Containers that crash on their own are now marked as crashed on the card and list row, with the exit code on hover, a crashed count on the folder header, and a Crashed tag and counts in the dashboard widget.
+- Containers killed for running out of memory show as "Crashed (out of memory)" and count as crashed.
+- A once-a-minute check catches containers Docker still lists as running after their process has exited, and warns on the card, list row and widget when a published port stops listening or a host port is not published.
+- An Unraid notification is sent when a container crashes, is killed for memory or becomes unreachable, without repeating for restart loops or flapping ports.
+- Stack Down and Recompose now open a confirm dialog explaining what is kept and what is lost, with a "Don't ask again" box and toggles for each under Settings > Docker Folders > Docker Compose.
+
+### Improved
+- "Hide stopped" keeps crashed containers visible on the Folders page and in the widget.
+- The folder header's Stack Down button now reads "Stack Down (delete containers)" with a trash icon.
+- While a stack stop or Stack Down runs, all other compose actions on that stack are disabled in the folder header, folder menu and stacks pane.
+
+### Fixed
+- A failed container start, stop or remove now shows Docker's own reason on the card, list row and dashboard widget instead of silently stopping the spinner.
+- A failed Stack Down or Stop All from the folder header or menu now shows the error until dismissed.
+- Folders can be collapsed again while a search or stack filter is active.
+- The "Also delete the image" checkbox in the container Remove dialog now appears on Unraid.
+
 ## 2026.10.24-dev2
 ### New
 - Filter the Folders page by compose stack
