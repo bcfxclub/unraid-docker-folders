@@ -2,8 +2,8 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "unraid-docker-folders-modern">
 <!ENTITY author "rizowski">
-<!ENTITY version "2026.10.19">
-<!ENTITY md5 "1e4faba787e5048873ec67fd24cbde49">
+<!ENTITY version "2026.10.24">
+<!ENTITY md5 "3bf6eab890bbcffa460df4f075f3d2f3">
 <!ENTITY launch "Docker">
 <!ENTITY plugdir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY github "rizowski/unraid-docker-folders">
@@ -147,6 +147,14 @@
 
 
 
+
+###2026.10.24
+- Fixed: Stop rewriting unchanged stack rows on every sync
+- Fixed: Stop recreating empty stack folders (#21)
+- Fixed: Apply a pulled update without pulling again (#20)
+- Fixed: Check moved-tag containers under their tag in GraphQL mode (#20)
+- Fixed: Recreate after a pull instead of offering a restart (#20)
+- Internal fixes and performance improvements.
 ###2026.10.22-dev1
 - New: Container cards show Not Applied when a pulled image was never applied, and Apply Update in the card menu recreates the container on it. (#20)
 - Fixed: The "Pull + offer recreate" option (formerly "Pull + offer restart") now offers a Recreate button in the pull and batch pull windows once the pull finishes, instead of doing nothing on Unraid. (#20)

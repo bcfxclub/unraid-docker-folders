@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.10.24
+### Fixed
+- Stop rewriting unchanged stack rows on every sync
+- Stop recreating empty stack folders (#21)
+- Apply a pulled update without pulling again (#20)
+- Check moved-tag containers under their tag in GraphQL mode (#20)
+- Recreate after a pull instead of offering a restart (#20)
+
+### Internal
+- Internal fixes and performance improvements.
+
 ## 2026.10.22-dev1
 ### New
 - Container cards show Not Applied when a pulled image was never applied, and Apply Update in the card menu recreates the container on it. (#20)
