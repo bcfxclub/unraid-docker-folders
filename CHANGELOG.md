@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.10.24-dev1
+### Fixed
+- Compose sync no longer recreates an empty stack folder after you move the stack's containers elsewhere or delete the folder. (#21)
+
 ## 2026.10.22-dev1
 ### New
 - Container cards show Not Applied when a pulled image was never applied, and Apply Update in the card menu recreates the container on it. (#20)
