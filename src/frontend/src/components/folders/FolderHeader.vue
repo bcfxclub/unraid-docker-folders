@@ -47,6 +47,10 @@
       <span class="shrink-0 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold ml-1" :class="runningCount > 0 ? 'bg-primary text-primary-text' : 'bg-border text-text-secondary'" :title="`${runningCount} running / ${existingContainerCount} total`">
         {{ runningCount }}/{{ existingContainerCount }}
       </span>
+      <span v-if="crashedCount > 0" class="shrink-0 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold ml-1 bg-error/15 text-error" :title="crashedTitle">
+        <span class="hidden sm:inline">{{ crashedCount }} crashed</span>
+        <span class="sm:hidden">{{ crashedCount }}</span>
+      </span>
       <span v-if="folderUpdateCount > 0" class="shrink-0 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold ml-1 bg-warning/20 text-warning" :title="`${folderUpdateCount} update(s) available`">
         <span class="hidden sm:inline">{{ folderUpdateCount }} update{{ folderUpdateCount > 1 ? 's' : '' }}</span>
         <span class="sm:hidden">{{ folderUpdateCount }}</span>
@@ -213,9 +217,13 @@ const folderCheckingUpdates = computed(() =>
 const {
   existingContainers,
   runningCount,
+  crashedContainers,
   totalCount: existingContainerCount,
   isRunning,
 } = useFolderRunningState(() => props.folder);
+
+const crashedCount = computed(() => crashedContainers.value.length);
+const crashedTitle = computed(() => crashedContainers.value.map((c) => `${c.name}: ${c.status}`).join('\n'));
 
 const allAutostart = computed(() => {
   if (existingContainers.value.length === 0) return false;

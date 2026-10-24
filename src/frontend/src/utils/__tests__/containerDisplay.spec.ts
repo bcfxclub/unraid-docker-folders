@@ -1,11 +1,21 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { containerStatus, containerEditUrl, containerWebuiUrl, isAliveContainer, openContainerTerminal } from '../containerDisplay';
+import {
+  containerStatus,
+  containerEditUrl,
+  containerExitCode,
+  containerWebuiUrl,
+  isAliveContainer,
+  isCrashedContainer,
+  isShownWhenHidingStopped,
+  openContainerTerminal,
+} from '../containerDisplay';
 
 describe('containerStatus', () => {
   it('marks a healthy running container as success', () => {
     expect(containerStatus({ state: 'running', status: 'Up 2 hours (healthy)' }, true)).toEqual({
       halo: 'status-halo-success',
       tooltip: 'Running (healthy)',
+      crashed: false,
     });
   });
 
@@ -17,6 +27,7 @@ describe('containerStatus', () => {
     expect(containerStatus({ state: 'running', status: 'Up 2 hours' }, false)).toEqual({
       halo: 'status-halo-success',
       tooltip: 'Running',
+      crashed: false,
     });
   });
 
@@ -24,9 +35,63 @@ describe('containerStatus', () => {
     ['paused', 'status-halo-warning', 'Paused'],
     ['exited', 'status-halo-error', 'Exited'],
     ['created', 'status-halo-muted', 'Created'],
-    ['restarting', 'status-halo-muted', 'Restarting'],
   ])('maps %s', (state, halo, tooltip) => {
-    expect(containerStatus({ state, status: '' }, true)).toEqual({ halo, tooltip });
+    expect(containerStatus({ state, status: '' }, true)).toEqual({ halo, tooltip, crashed: false });
+  });
+});
+
+describe('exit codes', () => {
+  it('reads the code from an exited or restarting status line', () => {
+    expect(containerExitCode({ status: 'Exited (1) 12 hours ago' })).toBe(1);
+    expect(containerExitCode({ status: 'Restarting (255) 5 seconds ago' })).toBe(255);
+    expect(containerExitCode({ status: 'Up 2 hours' })).toBeNull();
+    expect(containerExitCode({ status: '' })).toBeNull();
+  });
+
+  it.each([
+    ['exited', 'Exited (1) 12 hours ago', true],
+    ['restarting', 'Restarting (1) 5 seconds ago', true],
+    ['exited', 'Exited (0) 2 days ago', false],
+    ['exited', 'Exited (137) 2 days ago', false],
+    ['exited', 'Exited (143) 2 days ago', false],
+    ['exited', 'Exited (130) 2 days ago', false],
+    ['exited', 'Exited (2) 2 days ago', true],
+    ['restarting', 'Restarting (137) 3 seconds ago', true],
+    ['restarting', 'Restarting (0) 3 seconds ago', true],
+    ['dead', 'Dead', true],
+    ['running', 'Up 2 hours', false],
+    ['exited', '', false],
+  ])('%s "%s" crashed: %s', (state, status, crashed) => {
+    expect(isCrashedContainer({ state, status })).toBe(crashed);
+  });
+
+  it('keeps crashed containers in view while hiding stopped ones', () => {
+    expect(isShownWhenHidingStopped({ state: 'running', status: 'Up 2 hours' })).toBe(true);
+    expect(isShownWhenHidingStopped({ state: 'exited', status: 'Exited (1) 12 hours ago' })).toBe(true);
+    expect(isShownWhenHidingStopped({ state: 'exited', status: 'Exited (0) 2 days ago' })).toBe(false);
+    expect(isShownWhenHidingStopped(undefined)).toBe(false);
+  });
+
+  it('marks a dead container as crashed, with no code', () => {
+    expect(containerStatus({ state: 'dead', status: 'Dead' }, true)).toEqual({ halo: 'status-halo-error', tooltip: 'Dead', crashed: true });
+  });
+
+  it('says crashed, with the code, in the tooltip', () => {
+    expect(containerStatus({ state: 'exited', status: 'Exited (1) 12 hours ago' }, true)).toEqual({
+      halo: 'status-halo-error',
+      tooltip: 'Crashed (exit code 1)',
+      crashed: true,
+    });
+    expect(containerStatus({ state: 'restarting', status: 'Restarting (1) 5 seconds ago' }, true)).toEqual({
+      halo: 'status-halo-error',
+      tooltip: 'Crashing, restarting (exit code 1)',
+      crashed: true,
+    });
+    expect(containerStatus({ state: 'exited', status: 'Exited (0) 2 days ago' }, true)).toEqual({
+      halo: 'status-halo-error',
+      tooltip: 'Exited',
+      crashed: false,
+    });
   });
 });
 

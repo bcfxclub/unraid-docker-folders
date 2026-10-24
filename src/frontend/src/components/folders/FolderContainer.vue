@@ -67,7 +67,7 @@ import { useSettingsStore } from '@/stores/settings';
 import type { Folder } from '@/types/folder';
 import { effectiveSortMode, sortByMode } from '@/utils/sortMode';
 import { safeLocalStorageGet, safeLocalStorageSet } from '@/utils/safeStorage';
-import { isAliveContainer } from '@/utils/containerDisplay';
+import { isShownWhenHidingStopped } from '@/utils/containerDisplay';
 import { containerMatchesSearch } from '@/utils/search';
 import FolderHeader from './FolderHeader.vue';
 import ContainerCard from '@/components/docker/ContainerCard.vue';
@@ -150,7 +150,7 @@ const folderContainers = computed(() => {
   if (hideStopped.value) {
     list = list.filter((assoc) => {
       const container = getContainer(assoc.container_name);
-      return isAliveContainer(container);
+      return isShownWhenHidingStopped(container);
     });
   }
   return sortByMode(list, effectiveSortMode(props.folder.sort_mode, settingsStore.sortMode), (assoc) => {
@@ -184,7 +184,7 @@ const previewAssociations = computed(() => {
 
 const hiddenCount = computed(() => {
   if (!hideStopped.value) return 0;
-  return existingAssociations.value.filter((assoc) => !isAliveContainer(getContainer(assoc.container_name))).length;
+  return existingAssociations.value.filter((assoc) => !isShownWhenHidingStopped(getContainer(assoc.container_name))).length;
 });
 
 function getContainer(name: string) {

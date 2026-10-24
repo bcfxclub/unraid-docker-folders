@@ -70,7 +70,7 @@
         <p class="flex-1 text-[11px] text-text-secondary font-mono truncate min-w-0">
           <ImageLink :image="container.image" :href="imageLink" />
         </p>
-        <span class="text-[11px] text-text shrink-0">{{ container.status }}</span>
+        <span class="text-[11px] shrink-0" :class="status.crashed ? 'text-error' : 'text-text'" :title="status.tooltip">{{ container.status }}</span>
         <ChevronIcon :expanded="expanded" />
       </div>
 
@@ -212,7 +212,7 @@
               {{ securityFindings.length }}
             </span>
           </button>
-          <span class="hidden sm:inline text-[11px] text-text-secondary truncate">{{ container.status }}</span>
+          <span class="hidden sm:inline text-[11px] truncate" :class="status.crashed ? 'text-error' : 'text-text-secondary'" :title="status.tooltip">{{ container.status }}</span>
         </div>
         <span class="text-[11px] text-text-secondary font-mono truncate">
           <ImageLink :image="container.image" :href="imageLink" />

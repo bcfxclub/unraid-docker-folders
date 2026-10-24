@@ -73,6 +73,12 @@
           <div class="relative flex items-center gap-2 w-full min-w-0">
             <ChevronIcon :expanded="isExpanded(group)" :size="12" />
             <span class="flex-1 min-w-0 text-sm font-semibold truncate">{{ group.name }}</span>
+            <!-- A crash is state, not a tag, so it shows whatever the tag setting. -->
+            <span
+              v-if="group.crashed > 0"
+              class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-error/15 text-error"
+              :title="`${group.crashed} container${group.crashed > 1 ? 's' : ''} that crashed`"
+            >{{ group.crashed }} crashed</span>
             <template v-if="prefs.showTags">
               <span
                 v-if="group.updates > 0"
@@ -126,7 +132,7 @@ import { useScheduleStore } from '@/stores/schedules';
 import type { Schedule } from '@/types/schedule';
 import { initLiveUpdates } from '@/composables/useLiveUpdates';
 import { containerMatchesSearch } from '@/utils/search';
-import { isAliveContainer } from '@/utils/containerDisplay';
+import { isCrashedContainer, isShownWhenHidingStopped } from '@/utils/containerDisplay';
 import { composeProjectOf } from '@/utils/updateUnits';
 import { effectiveSortMode, sortByMode } from '@/utils/sortMode';
 import { reportHeightToParent } from '@/utils/iframeHost';
@@ -158,6 +164,8 @@ interface Group {
   updates: number;
   /** Members with a failed scheduled run. */
   failed: number;
+  /** Members that exited with an error (isCrashedContainer). */
+  crashed: number;
 }
 
 const dockerStore = useDockerStore();
@@ -229,7 +237,8 @@ function makeGroup(key: string, name: string, color: string, members: Container[
   const checkUpdates = settingsStore.enableUpdateChecks;
   const updates = checkUpdates ? members.filter((c) => updatesStore.hasUpdate(c.image)).length : 0;
   const failed = members.filter((c) => failedSchedules.value.has(c.name)).length;
-  return { key, name, color, containers: members, running, total: members.length, updates, failed };
+  const crashed = members.filter(isCrashedContainer).length;
+  return { key, name, color, containers: members, running, total: members.length, updates, failed, crashed };
 }
 
 const prefs = ref(loadWidgetSettings());
@@ -301,6 +310,7 @@ const tileSummary = computed(() => ({
   type: 'docker-folders-summary',
   running: runningIds.value.length,
   total: dockerStore.containers.length,
+  crashed: dockerStore.containers.filter(isCrashedContainer).length,
   cpu: runningTotal.value?.cpuPercent ?? null,
   memory: runningTotal.value?.memPercent ?? null,
 }));
@@ -315,7 +325,7 @@ const groups = computed<Group[]>(() => {
   const searching = isSearching.value;
   const hide = hideStopped.value;
   if (!searching && !hide) return allGroups.value.filter((g) => g.containers.length > 0);
-  const shown = (c: Container) => (!hide || isAliveContainer(c)) && (!searching || containerMatchesSearch(q, c.name, c.image));
+  const shown = (c: Container) => (!hide || isShownWhenHidingStopped(c)) && (!searching || containerMatchesSearch(q, c.name, c.image));
   return allGroups.value
     .map((g) => ({ ...g, containers: g.containers.filter(shown) }))
     .filter((g) => g.containers.length > 0);

@@ -496,6 +496,9 @@ toggles collapse. Left to right:
 - the running count pill, `h-6 rounded-full text-xs font-semibold`:
   `bg-primary text-primary-text` while anything runs, else
   `bg-border text-text-secondary`;
+- a crashed pill, `bg-error/15 text-error`, "N crashed", when members died
+  on their own (`isCrashedContainer` in `utils/containerDisplay.ts`), each
+  one's name and status in its tooltip;
 - an update pill, `bg-warning/20 text-warning`, when images are outdated.
 
 Right side: hide-stopped eye, autostart indicator (`text-success` when every
@@ -504,7 +507,8 @@ tint (§2), 40% opacity collapsed, full expanded.
 
 **Container card** (grid view). `bg-bg-card` card with the icon in a
 `.status-halo`, name, the image on a monospace line led by a link icon, an
-uptime/state line with a chevron to details, ports, CPU/MEM bars, and an action
+uptime/state line (`text-error` once the container crashed) with a chevron to
+details, ports, CPU/MEM bars, and an action
 row of 32px icon buttons coloured by intent: stop `text-error`, start
 `text-success`, restart `text-primary`, pull `text-warning`, each filling with
 its colour on hover.
@@ -512,7 +516,8 @@ its colour on hover.
 **Container row** (list view, `.container-row`). `px-4 py-3`,
 `border-b border-border/50`, `rounded`, 5% hover tint. Chevron (12px), the
 haloed icon, then a two-line block: name `text-xs font-semibold` plus pills and
-the state in `text-text-secondary`, and the image line. Right side: ports in
+the state in `text-text-secondary` (`text-error` for a crashed container, as
+on the card's uptime/state line), and the image line. Right side: ports in
 monospace, a CPU/MEM pair of inline stats bars, and the same 32px action buttons,
 which in a row get the 6% `.action-btn` fill.
 

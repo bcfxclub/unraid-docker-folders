@@ -13,26 +13,34 @@
          of squeezing it. -->
     <span class="flex-1 min-w-0 flex flex-col items-start">
       <span class="max-w-full text-sm text-text truncate" :title="container.name">{{ container.name }}</span>
-      <span v-if="showTags && hasTags" class="flex flex-wrap items-center gap-1 mt-0.5">
-        <a
-          v-if="hasUpdate && releaseNotesUrl"
-          :href="releaseNotesUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning hover:bg-warning/30"
-          title="View release notes"
-        >Update</a>
-        <span v-else-if="hasUpdate" class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning">Update</span>
+      <!-- Crashed is state, not a tag, so it shows whatever the tag setting. -->
+      <span v-if="(showTags && hasTags) || status.crashed" class="flex flex-wrap items-center gap-1 mt-0.5">
         <span
-          v-if="restartCount >= RESTART_TAG_MIN"
-          class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold font-mono rounded bg-error/15 text-error"
-          :title="`${restartCount} restarts`"
-        >{{ restartCount }} rst</span>
-        <span
-          v-if="failedSchedules.length"
+          v-if="status.crashed"
           class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-error/15 text-error"
-          :title="failedTitle"
-        >Failed</span>
+          :title="status.tooltip"
+        >Crashed</span>
+        <template v-if="showTags">
+          <a
+            v-if="hasUpdate && releaseNotesUrl"
+            :href="releaseNotesUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning hover:bg-warning/30"
+            title="View release notes"
+          >Update</a>
+          <span v-else-if="hasUpdate" class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning">Update</span>
+          <span
+            v-if="restartCount >= RESTART_TAG_MIN"
+            class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold font-mono rounded bg-error/15 text-error"
+            :title="`${restartCount} restarts`"
+          >{{ restartCount }} rst</span>
+          <span
+            v-if="failedSchedules.length"
+            class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-error/15 text-error"
+            :title="failedTitle"
+          >Failed</span>
+        </template>
       </span>
       <!-- A failed start, resume or stop shows whatever the tag setting, with
            Docker's reason on hover. Clicking dismisses it. -->

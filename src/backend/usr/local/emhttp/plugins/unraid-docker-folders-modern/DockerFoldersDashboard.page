@@ -43,6 +43,7 @@ $tile = <<<'EOT'
           <span class="switch">
             <span class="dfm-summary">
               <span id="dfm-summary-count">-- running</span>
+              <span id="dfm-summary-crashed" style="color:#f0000c" hidden></span>
               <span class="dfm-summary-item">CPU <span class="dfm-summary-cpu">--</span><span class="dfm-summary-track"><span id="dfm-summary-cpu"></span></span></span>
               <span class="dfm-summary-item">RAM <span class="dfm-summary-memory">--</span><span class="dfm-summary-track"><span id="dfm-summary-memory"></span></span></span>
             </span>
@@ -120,6 +121,9 @@ $tile = <<<'EOT'
       if (e.data.type === 'docker-folders-widget-ready' && e.origin === location.origin) sendCollapsed();
       if (e.data.type === 'docker-folders-summary' && e.origin === location.origin) {
         document.getElementById('dfm-summary-count').textContent = e.data.running + ' / ' + e.data.total + ' running';
+        var crashed = document.getElementById('dfm-summary-crashed');
+        crashed.textContent = e.data.crashed + ' crashed';
+        crashed.hidden = !(e.data.crashed > 0);
         loadBar('cpu', e.data.cpu);
         loadBar('memory', e.data.memory);
       }

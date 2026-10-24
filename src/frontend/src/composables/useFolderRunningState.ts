@@ -1,6 +1,7 @@
 import { computed, type MaybeRefOrGetter, toValue } from 'vue';
 import { useDockerStore } from '@/stores/docker';
 import type { Folder } from '@/types/folder';
+import { isCrashedContainer } from '@/utils/containerDisplay';
 
 /**
  * Derive a folder's running state from actual docker container states.
@@ -24,11 +25,12 @@ export function useFolderRunningState(folder: MaybeRefOrGetter<Folder | undefine
   const runningCount = computed(
     () => existingContainers.value.filter((c) => c.state === 'running').length,
   );
+  const crashedContainers = computed(() => existingContainers.value.filter(isCrashedContainer));
   const totalCount = computed(() => existingContainers.value.length);
   const isRunning = computed(() => runningCount.value > 0);
   const isFullyRunning = computed(
     () => totalCount.value > 0 && runningCount.value >= totalCount.value,
   );
 
-  return { existingContainers, runningCount, totalCount, isRunning, isFullyRunning };
+  return { existingContainers, runningCount, crashedContainers, totalCount, isRunning, isFullyRunning };
 }

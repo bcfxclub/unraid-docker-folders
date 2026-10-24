@@ -200,11 +200,12 @@ describe('FolderContainer concurrent action loading', () => {
     expect(wrapper.find('.animate-spin').exists()).toBe(false);
   });
 
-  it('keeps a paused container visible when "hide stopped" is on', () => {
+  it('keeps paused and crashed containers visible when "hide stopped" is on', () => {
     const containers = [
       makeContainer({ id: 'c1', name: 'running-one', state: 'running' }),
       makeContainer({ id: 'c2', name: 'paused-one', state: 'paused' }),
       makeContainer({ id: 'c3', name: 'exited-one', state: 'exited' }),
+      makeContainer({ id: 'c4', name: 'crashed-one', state: 'exited', status: 'Exited (1) 12 hours ago' }),
     ];
     const dockerStore = useDockerStore();
     dockerStore.containers = containers;
@@ -216,6 +217,7 @@ describe('FolderContainer concurrent action loading', () => {
         { id: 1, folder_id: 1, container_name: 'running-one', container_id: 'c1', position: 0 },
         { id: 2, folder_id: 1, container_name: 'paused-one', container_id: 'c2', position: 1 },
         { id: 3, folder_id: 1, container_name: 'exited-one', container_id: 'c3', position: 2 },
+        { id: 4, folder_id: 1, container_name: 'crashed-one', container_id: 'c4', position: 3 },
       ],
     });
 
@@ -229,6 +231,8 @@ describe('FolderContainer concurrent action loading', () => {
     expect(names).toContain('running-one');
     expect(names).toContain('paused-one');
     expect(names).not.toContain('exited-one');
+    // A crash stays in view: it is what the user most needs to see.
+    expect(names).toContain('crashed-one');
 
     localStorage.removeItem('docker-folders-hide-stopped-1');
   });

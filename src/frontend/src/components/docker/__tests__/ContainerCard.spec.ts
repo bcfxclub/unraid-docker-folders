@@ -1428,3 +1428,20 @@ describe('ContainerCard – failed action', () => {
     });
   }
 });
+
+describe('ContainerCard – crashed', () => {
+  for (const view of ['grid', 'list'] as const) {
+    it(`colors a crash's status line as an error in the ${view} view`, () => {
+      const wrapper = mountCard({ state: 'exited', status: 'Exited (1) 12 hours ago' }, { view });
+      const line = wrapper.findAll('span').find((s) => s.text() === 'Exited (1) 12 hours ago');
+      expect(line?.classes()).toContain('text-error');
+      expect(line?.attributes('title')).toBe('Crashed (exit code 1)');
+    });
+  }
+
+  it('leaves a stopped container\'s status line alone', () => {
+    const wrapper = mountCard({ state: 'exited', status: 'Exited (0) 2 days ago' });
+    const line = wrapper.findAll('span').find((s) => s.text() === 'Exited (0) 2 days ago');
+    expect(line?.classes()).not.toContain('text-error');
+  });
+});

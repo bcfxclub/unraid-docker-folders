@@ -377,6 +377,25 @@ describe('WidgetApp', () => {
       expect(wrapper.find('section [role="button"]').text()).toContain('2 failed');
     });
 
+    it('shows Crashed for a container that exited with an error, not one that was stopped', async () => {
+      const pg = makeContainer({ id: 'c5', name: 'pg', state: 'exited', status: 'Exited (1) 12 hours ago' });
+      const web = makeContainer({ id: 'c6', name: 'web', state: 'exited', status: 'Exited (0) 2 days ago' });
+      const { wrapper } = await mountWidget([pg, web], [makeFolder(['pg', 'web'])]);
+      expect(rowText(wrapper, 'pg')).toContain('Crashed');
+      expect(rowText(wrapper, 'web')).not.toContain('Crashed');
+      expect(wrapper.find('section [role="button"]').text()).toContain('1 crashed');
+    });
+
+    it('keeps a crash in view with tags off and stopped containers hidden', async () => {
+      saveSettings({ startCollapsed: false, showTags: false, hideStopped: true });
+      const pg = makeContainer({ id: 'c5', name: 'pg', state: 'exited', status: 'Exited (1) 12 hours ago' });
+      const web = makeContainer({ id: 'c6', name: 'web', state: 'exited', status: 'Exited (0) 2 days ago' });
+      const { wrapper } = await mountWidget([pg, web], [makeFolder(['pg', 'web'])]);
+      expect(rowNames(wrapper)).toEqual(['pg']);
+      expect(rowText(wrapper, 'pg')).toContain('Crashed');
+      expect(wrapper.find('section [role="button"]').text()).toContain('1 crashed');
+    });
+
     it('loads schedules and updates only while tags are on', async () => {
       saveSettings({ startCollapsed: false, showTags: false });
       const { wrapper, scheduleStore, updatesStore } = await mountWidget(containers, [], { enableUpdateChecks: true });
