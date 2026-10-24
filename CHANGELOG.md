@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.24-dev4
+### New
+- Expanding a stopped container now shows its last 200 log lines on the card, so you can see why it stopped.
+
+### Improved
+- The Compose stacks pane now slides in and out smoothly, with the animation turned off when reduced motion is preferred.
+- The container details panel hides Block I/O, Net I/O, PIDs and Uptime for a stopped container.
+
 ## 2026.10.24-dev3
 ### New
 - Containers that crash on their own are now marked as crashed on the card and list row, with the exit code on hover, a crashed count on the folder header, and a Crashed tag and counts in the dashboard widget.
