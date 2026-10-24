@@ -503,8 +503,11 @@ class FolderManager
   /**
    * Sync Docker Compose stacks into folders automatically.
    *
-   * Groups containers by their com.docker.compose.project label,
-   * creates missing folders, and assigns unassigned containers.
+   * Groups containers by their com.docker.compose.project label and
+   * assigns unassigned containers to the stack's folder, creating it when
+   * the first of them needs it. A stack whose containers are all in other
+   * folders, or all excluded, gets no folder: it would sit empty, and the
+   * user could never delete it for good.
    *
    * @param array $containers List of container data from DockerClient
    * @return bool True if any changes were made
