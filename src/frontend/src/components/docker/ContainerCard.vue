@@ -292,14 +292,10 @@
       :message="confirmModalConfig.message"
       :confirm-label="confirmModalConfig.label"
       :variant="confirmModalConfig.variant"
+      :checkbox-label="confirmAction === 'remove' ? `Also delete the image (${container.image})` : undefined"
       @confirm="handleConfirm"
-      @cancel="confirmAction = null; removeImageToo = false"
-    >
-      <label v-if="confirmAction === 'remove'" class="flex items-center gap-2 mt-3 text-sm text-text-secondary cursor-pointer">
-        <input type="checkbox" v-model="removeImageToo" class="cursor-pointer" />
-        Also delete the image ({{ container.image }})
-      </label>
-    </ConfirmModal>
+      @cancel="confirmAction = null"
+    />
     <InputModal
       :is-open="showDelayModal"
       title="Autostart Delay"
@@ -417,7 +413,6 @@ async function handleToggleAutostart() {
 }
 
 const confirmAction = ref<'stop' | 'restart' | 'remove' | 'force-update' | 'recreate' | null>(null);
-const removeImageToo = ref(false);
 const showDelayModal = ref(false);
 
 // Folder picker: the menu-driven twin of drag and drop, through the same store
@@ -507,17 +502,16 @@ function recreatePayload(): PullRequest {
   return { image, name, managed, id, recreateOnly: true };
 }
 
-function handleConfirm() {
+function handleConfirm(removeImageToo: boolean) {
   const action = confirmAction.value;
   confirmAction.value = null;
   if (action === 'stop') emit('stop', props.container.id);
   else if (action === 'restart') emit('restart', props.container.id);
-  else if (action === 'remove') emit('remove', props.container.id, removeImageToo.value);
+  else if (action === 'remove') emit('remove', props.container.id, removeImageToo);
   else if (action === 'force-update') emit('pull', pullPayload(true));
   // No pull: the newer image is already on disk. Pulling again would fail for
   // an image built locally.
   else if (action === 'recreate') emit('pull', recreatePayload());
-  removeImageToo.value = false;
 }
 
 const expanded = ref(false);

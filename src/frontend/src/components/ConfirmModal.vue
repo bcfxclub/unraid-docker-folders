@@ -24,12 +24,15 @@
       <div>
         <h3 class="text-base font-semibold text-text">{{ title }}</h3>
         <p class="text-sm text-text-secondary mt-1">{{ message }}</p>
-        <slot />
+        <label v-if="checkboxLabel" class="flex items-center gap-2 mt-3 text-sm text-text-secondary cursor-pointer">
+          <input v-model="checked" type="checkbox" class="cursor-pointer" />
+          {{ checkboxLabel }}
+        </label>
       </div>
     </div>
     <div class="flex justify-end gap-2 p-4 sm:p-6 pt-4">
       <button ref="cancelBtn" type="button" @click="$emit('cancel')" class="nav-btn">Cancel</button>
-      <button ref="confirmBtn" type="button" @click="$emit('confirm')" class="nav-btn" :class="variant === 'danger' ? 'warning' : 'active'">{{ confirmLabel }}</button>
+      <button ref="confirmBtn" type="button" @click="$emit('confirm', checked)" class="nav-btn" :class="variant === 'danger' ? 'warning' : 'active'">{{ confirmLabel }}</button>
     </div>
   </BaseModal>
 </template>
@@ -45,6 +48,13 @@ interface Props {
   message: string;
   confirmLabel?: string;
   variant?: 'danger' | 'default';
+  /**
+   * One optional checkbox under the message, such as "Don't ask again". Its
+   * state comes back as the confirm event's argument. There is no slot for
+   * other content: inside Unraid the dialog is drawn in the parent page,
+   * which only sees these props.
+   */
+  checkboxLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -53,16 +63,23 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  confirm: [];
+  confirm: [checked: boolean];
   cancel: [];
 }>();
 
 const confirmBtn = ref<HTMLButtonElement | null>(null);
+const checked = ref(false);
+
+/** The parent-page field id for the checkbox. */
+const CHECKBOX_FIELD = 'checkbox';
 
 const parentModal = useParentModal({
-  onAction({ actionId }) {
-    if (actionId === 'confirm') emit('confirm');
-    else emit('cancel');
+  onAction({ actionId, values }) {
+    if (actionId !== 'confirm') {
+      emit('cancel');
+      return;
+    }
+    emit('confirm', values[CHECKBOX_FIELD] === true);
   },
 });
 
@@ -75,6 +92,9 @@ function openParent() {
     size: 'sm',
     fields: [
       { type: 'text', text: props.message },
+      ...(props.checkboxLabel
+        ? [{ type: 'checkbox' as const, id: CHECKBOX_FIELD, label: props.checkboxLabel, checked: false }]
+        : []),
     ],
     actions: [
       { id: 'cancel', label: 'Cancel', variant: 'default' },
@@ -84,6 +104,7 @@ function openParent() {
 }
 
 watch(() => props.isOpen, (open) => {
+  if (open) checked.value = false;
   if (inIframe) {
     if (open) openParent();
     else parentModal.close();

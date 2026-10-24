@@ -26,12 +26,12 @@
     <button
       v-if="isRunning || actionInProgress === 'down'"
       :disabled="composeStore.composeActionsDisabled || actionInProgress !== null"
-      :title="buttonTitle('Stop stack')"
+      :title="buttonTitle('Stack Down (delete containers)')"
       class="p-1 rounded cursor-pointer transition text-text-secondary hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed"
-      @click="handleDown"
+      @click="downConfirm.request(projectName)"
     >
       <svg v-if="actionInProgress === 'down'" class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-      <svg v-else xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+      <svg v-else xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
     </button>
 
     <!-- Schedules -->
@@ -51,6 +51,7 @@
     >
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
     </button>
+    <StackActionConfirmModal v-if="downConfirm.pending.value" :pending="downConfirm.pending.value" @confirm="downConfirm.confirm" @cancel="downConfirm.cancel" />
   </div>
 </template>
 
@@ -61,6 +62,8 @@ import { useDockerStore } from '@/stores/docker';
 import { useFolderStore } from '@/stores/folders';
 import { useFolderRunningState } from '@/composables/useFolderRunningState';
 import type { Folder } from '@/types/folder';
+import StackActionConfirmModal from '@/components/compose/StackActionConfirmModal.vue';
+import { useStackActionConfirm } from '@/composables/useStackActionConfirm';
 
 const props = defineProps<{
   projectName: string;
@@ -86,6 +89,8 @@ const { isRunning, isFullyRunning } = useFolderRunningState(() => props.folder);
 function buttonTitle(defaultTitle: string): string {
   return composeStore.composeDisabledReason ?? defaultTitle;
 }
+
+const downConfirm = useStackActionConfirm('down', () => handleDown());
 
 async function handleDown() {
   actionInProgress.value = 'down';

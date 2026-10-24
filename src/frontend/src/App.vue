@@ -261,7 +261,7 @@
       :read-only="composeStore.composePluginInstalled && composeEditorMode !== 'create'"
       :mode="composeEditorMode"
       @close="composeEditorOpen = false"
-      @recompose="openComposeRecompose"
+      @recompose="startComposeRecompose"
     />
 
     <!-- Compose Start / Recompose / Pull Progress -->
@@ -312,6 +312,7 @@
       @confirm="confirmDeleteFolder"
       @cancel="deletingFolderId = null"
     />
+    <StackActionConfirmModal v-if="recomposeConfirm.pending.value" :pending="recomposeConfirm.pending.value" @confirm="recomposeConfirm.confirm" @cancel="recomposeConfirm.cancel" />
     <UpdateConfirmModal
       :is-open="showBatchConfirm"
       :units="pendingUnits"
@@ -344,6 +345,8 @@ import ComposeProgressModal from '@/components/compose/ComposeProgressModal.vue'
 import StacksPane from '@/components/compose/StacksPane.vue';
 import IconComposeStack from '@/components/icons/IconComposeStack.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
+import StackActionConfirmModal from '@/components/compose/StackActionConfirmModal.vue';
+import { useStackActionConfirm } from '@/composables/useStackActionConfirm';
 import ContainerCard from '@/components/docker/ContainerCard.vue';
 import ChevronIcon from '@/components/common/ChevronIcon.vue';
 import LoadingSkeleton from '@/components/common/LoadingSkeleton.vue';
@@ -491,7 +494,16 @@ function openComposeUp(project: string) {
   composeProgressOpen.value = true;
 }
 
+// Every Recompose button lands here, so this is the one place it asks. The
+// editor's Save & Recompose skips it: the user just chose it in that dialog,
+// and asking again would replace the editor with the confirm on Unraid.
+const recomposeConfirm = useStackActionConfirm('recompose', startComposeRecompose);
+
 function openComposeRecompose(project: string) {
+  recomposeConfirm.request(project);
+}
+
+function startComposeRecompose(project: string) {
   composeProgressProject.value = project;
   composeProgressMode.value = 'up';
   composeProgressForceRecreate.value = true;

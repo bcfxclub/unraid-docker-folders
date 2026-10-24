@@ -8,6 +8,14 @@ import { useBackend } from '@/backends';
 import { SORT_MODE_OPTIONS, type SortMode } from '@/types/folder';
 import { formatTimestamp } from '@/utils/format';
 
+/** A stack action that deletes containers, so it asks first unless turned off. */
+export type DestructiveStackAction = 'down' | 'recompose';
+
+const CONFIRM_SETTING_KEYS: Record<DestructiveStackAction, string> = {
+  down: 'confirm_stack_down',
+  recompose: 'confirm_recompose',
+};
+
 /** Matches the settings page default for `stats_refresh_interval`. */
 export const DEFAULT_STATS_REFRESH_INTERVAL = 2;
 
@@ -23,6 +31,8 @@ export const useSettingsStore = defineStore('settings', () => {
   /** Offer to hand a CLI-created container over to Unraid's container manager. */
   const enableAdopt = ref(true);
   const enableSecurityAdvisor = ref(true);
+  /** Whether each destructive stack action asks first. Both default on. */
+  const confirmStackActions = ref<Record<DestructiveStackAction, boolean>>({ down: true, recompose: true });
   const logRefreshInterval = ref(10);
   /** Seconds between live stats pushes when the backend streams them (GraphQL mode). */
   const statsRefreshInterval = ref(DEFAULT_STATS_REFRESH_INTERVAL);
@@ -73,6 +83,9 @@ export const useSettingsStore = defineStore('settings', () => {
       }
       if ('enable_security_advisor' in settings) {
         enableSecurityAdvisor.value = settings.enable_security_advisor !== '0';
+      }
+      for (const [action, key] of Object.entries(CONFIRM_SETTING_KEYS) as [DestructiveStackAction, string][]) {
+        if (key in settings) confirmStackActions.value[action] = settings[key] !== '0';
       }
       if ('log_refresh_interval' in settings) {
         const parsed = parseInt(settings.log_refresh_interval, 10);
@@ -183,6 +196,17 @@ export const useSettingsStore = defineStore('settings', () => {
 
     try {
       await useBackend().settings.set('enable_adopt', value ? '1' : '0');
+    } catch (e) {
+      console.error('Error saving setting:', e);
+    }
+  }
+
+  async function setConfirmStackAction(action: DestructiveStackAction, value: boolean) {
+    confirmStackActions.value[action] = value;
+
+    try {
+      const { ok } = await useBackend().settings.set(CONFIRM_SETTING_KEYS[action], value ? '1' : '0');
+      if (!ok) console.error(`Setting ${CONFIRM_SETTING_KEYS[action]} was not saved`);
     } catch (e) {
       console.error('Error saving setting:', e);
     }
@@ -315,6 +339,8 @@ export const useSettingsStore = defineStore('settings', () => {
     showInlineLogs,
     enableAdopt,
     enableSecurityAdvisor,
+    confirmStackActions,
+    setConfirmStackAction,
     logRefreshInterval,
     statsRefreshInterval,
     enableUpdateChecks,

@@ -110,6 +110,7 @@ function handlePost()
     'stats_refresh_interval',
     'compose_export_dir',
     'compose_auto_install',
+    'confirm_stack_down', 'confirm_recompose',
     'backup_destination',
     'default_retention_count',
     'sort_mode', 'sort_folders',
@@ -132,6 +133,12 @@ function handlePost()
   // setting that then reads as on.
   if ($key === 'compose_auto_install' && !in_array($value, ['0', '1'], true)) {
     errorResponse('compose_auto_install must be "0" or "1"', 400);
+  }
+
+  // The settings page reads these as on only for '1', and the Vue app as on
+  // for anything but '0', so any other value would show the two disagreeing.
+  if (in_array($key, ['confirm_stack_down', 'confirm_recompose'], true) && !in_array($value, ['0', '1'], true)) {
+    errorResponse($key . ' must be "0" or "1"', 400);
   }
 
   // Validate sort_mode against the known set of modes.

@@ -46,15 +46,7 @@
         @select="(action) => handleSelect(row.project, action)"
       />
     </div>
-    <ConfirmModal
-      :is-open="!!downProject"
-      title="Stack Down"
-      :message="`Run docker compose down for &quot;${downProject}&quot;? Its containers and networks are removed. Volumes and the compose file are kept.`"
-      confirm-label="Stack Down"
-      variant="danger"
-      @confirm="confirmDown"
-      @cancel="downProject = null"
-    />
+    <StackActionConfirmModal v-if="downConfirm.pending.value" :pending="downConfirm.pending.value" @confirm="downConfirm.confirm" @cancel="downConfirm.cancel" />
   </nav>
 </template>
 
@@ -65,7 +57,8 @@ import { useDockerStore, type Container } from '@/stores/docker';
 import { useFolderStore } from '@/stores/folders';
 import KebabMenu from '@/components/KebabMenu.vue';
 import type { KebabMenuItem } from '@/components/KebabMenu.vue';
-import ConfirmModal from '@/components/ConfirmModal.vue';
+import StackActionConfirmModal from '@/components/compose/StackActionConfirmModal.vue';
+import { useStackActionConfirm } from '@/composables/useStackActionConfirm';
 import { byLabel } from '@/utils/menu';
 import { STOPWATCH_ICON, TRASH_ICON } from '@/utils/menuIcons';
 import { stackActionItems } from '@/utils/stackMenu';
@@ -101,7 +94,7 @@ const MAX_LISTED_FOLDERS = 2;
  * stack.
  */
 const statuses = ref(new Map<string, { text: string; failed: boolean }>());
-const downProject = ref<string | null>(null);
+const downConfirm = useStackActionConfirm('down', (project) => runStackAction(project, 'Removing…', composeStore.stackDown));
 
 function isSelected(project: string): boolean {
   return dockerStore.stackFilter === project;
@@ -184,12 +177,6 @@ async function runStackAction(
   }
 }
 
-function confirmDown() {
-  const project = downProject.value;
-  downProject.value = null;
-  if (project) runStackAction(project, 'Removing…', composeStore.stackDown);
-}
-
 function handleSelect(project: string, action: string) {
   // A new action clears an old failure, never a stop or down still running.
   if (!isBusy(project)) statuses.value.delete(project);
@@ -199,6 +186,6 @@ function handleSelect(project: string, action: string) {
   else if (action === 'compose-edit') emit('edit-compose', project);
   else if (action === 'schedules') emit('schedules', 'stack', project);
   else if (action === 'compose-stop') runStackAction(project, 'Stopping…', composeStore.stackStop);
-  else if (action === 'compose-down') downProject.value = project;
+  else if (action === 'compose-down') downConfirm.request(project);
 }
 </script>

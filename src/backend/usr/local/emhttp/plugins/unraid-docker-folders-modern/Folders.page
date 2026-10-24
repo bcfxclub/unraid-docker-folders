@@ -770,6 +770,20 @@ $dbStatus = file_exists(DB_PATH) ? 'exists' : 'missing';
     return { root: wrap, refs: { select: sel } };
   }
 
+  function renderCheckboxField(field) {
+    var row = document.createElement('label');
+    styleObj(row, { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', opacity: '0.85' });
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!field.checked;
+    cb.style.cursor = 'pointer';
+    row.appendChild(cb);
+    var text = document.createElement('span');
+    text.textContent = field.label;
+    row.appendChild(text);
+    return { root: row, refs: { checkbox: cb } };
+  }
+
   // Dispatch table
   var RENDERERS = {
     html: renderHtmlField,
@@ -778,6 +792,7 @@ $dbStatus = file_exists(DB_PATH) ? 'exists' : 'missing';
     input: renderInputField,
     textarea: renderTextareaField,
     color: renderColorField,
+    checkbox: renderCheckboxField,
     'checkbox-list': renderCheckboxListField,
     'progress-list': renderProgressListField,
     log: renderLogField,
@@ -923,6 +938,7 @@ $dbStatus = file_exists(DB_PATH) ? 'exists' : 'missing';
       else if (refs.textarea) values[fid] = refs.textarea.value;
       else if (refs.select) values[fid] = refs.select.value;
       else if (refs.color) values[fid] = refs.text ? refs.text.value : refs.color.value;
+      else if (refs.checkbox) values[fid] = refs.checkbox.checked;
       else if (refs.checkboxes) {
         var selected = [];
         Object.keys(refs.checkboxes).forEach(function(cid) {
