@@ -253,11 +253,16 @@ export const useFolderStore = defineStore('folders', () => {
    * backend also drops the row from the source folder. So the source is cleared
    * here first. Without that, the container shows in both folders until the
    * refetch lands, or until a reload if the refetch fails.
+   *
+   * The backend adds at the end. A drop passes `beforeName`, the container it
+   * landed in front of, and the folder is then reordered to put it there. The
+   * caller passes it only for a folder in manual order.
    */
   async function moveContainerToFolder(
     folderId: number | null,
     containerId: string,
     containerName: string,
+    beforeName?: string,
   ): Promise<boolean> {
     if (folderId === null) {
       const ok = await removeContainerFromFolder(containerName);
@@ -279,6 +284,8 @@ export const useFolderStore = defineStore('folders', () => {
         const containers = snapshot.get(folder.id);
         if (containers) folder.containers = containers;
       }
+    } else if (beforeName) {
+      await placeBefore(folderId, containerName, beforeName);
     }
     await fetchFolders(true);
     return ok;
@@ -328,6 +335,19 @@ export const useFolderStore = defineStore('folders', () => {
 
     await fetchFolders(true);
     return ok;
+  }
+
+  /** Move `name` in front of `beforeName` in the folder's saved order. */
+  async function placeBefore(folderId: number, name: string, beforeName: string): Promise<void> {
+    const folder = folders.value.find((f) => f.id === folderId);
+    if (!folder) return;
+    const ordered = [...folder.containers].sort((a, b) => a.position - b.position);
+    const moved = ordered.find((c) => c.container_name === name);
+    const rest = ordered.filter((c) => c.container_name !== name);
+    const at = rest.findIndex((c) => c.container_name === beforeName);
+    if (!moved || at === -1) return;
+    rest.splice(at, 0, moved);
+    await reorderContainers(folderId, rest.map((c) => c.container_id));
   }
 
   async function reorderContainers(folderId: number, containerIds: string[]): Promise<boolean> {

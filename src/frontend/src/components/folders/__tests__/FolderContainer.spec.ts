@@ -371,3 +371,49 @@ describe('FolderContainer stack filter', () => {
     expect(grid()).toContain('expand-expanded');
   });
 });
+
+describe('FolderContainer stack-down preview', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('leaves out a service whose container was moved into another folder', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const { useComposeStore } = await import('@/stores/compose');
+    const compose = useComposeStore();
+    compose.stacks = [{ project_name: 'grafana', service_names: ['grafana', 'loki', 'mimir'] } as never];
+    const docker = useDockerStore();
+    docker.containers = [
+      makeContainer({
+        id: 'm1',
+        name: 'grafana-mimir-1',
+        state: 'running',
+        labels: { 'com.docker.compose.project': 'grafana', 'com.docker.compose.service': 'mimir' },
+      }),
+    ];
+    const folders = useFolderStore();
+    folders.folders = [
+      makeFolder({ id: 1, name: 'grafana', compose_project: 'grafana' }),
+      makeFolder({
+        id: 2,
+        name: 'Databases',
+        containers: [
+          { id: 1, folder_id: 2, container_name: 'loki', container_id: 'l1', position: 0 },
+          { id: 2, folder_id: 2, container_name: 'grafana-mimir-1', container_id: 'm1', position: 1 },
+        ],
+      }),
+    ];
+
+    const wrapper = mount(FolderContainer, {
+      props: { folder: folders.folders[0] },
+      global: { plugins: [pinia], stubs: { Teleport: true } },
+    });
+    await nextTick();
+
+    const text = wrapper.find('.opacity-40').text();
+    expect(text).toContain('grafana');
+    expect(text).not.toContain('loki');
+    expect(text).not.toContain('mimir');
+  });
+});

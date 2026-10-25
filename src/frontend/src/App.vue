@@ -709,7 +709,7 @@ function initializeDragAndDrop() {
           const containerName = dockerStore.getContainerById(containerId!)?.name || '';
 
           if (containerId) {
-            await folderStore.moveContainerToFolder(folderId, containerId, containerName);
+            await folderStore.moveContainerToFolder(folderId, containerId, containerName, beforeName);
           }
         },
         onUpdate: async () => {
@@ -733,6 +733,12 @@ function initializeDragAndDrop() {
         onStart: dragAutoScroll.start,
         onEnd: dragAutoScroll.stop,
         onAdd: async (evt) => {
+          // The card it landed in front of, read before the revert below. A
+          // folder in automatic order sorts it anyway, so it passes none.
+          const manual = effectiveSortMode(folderStore.getFolderById(folderId)?.sort_mode ?? 'manual', settingsStore.sortMode) === 'manual';
+          const beforeId = manual ? (evt.item.nextElementSibling as HTMLElement | null)?.dataset.containerId : undefined;
+          const beforeName = beforeId ? dockerStore.getContainerById(beforeId)?.name : undefined;
+
           // Revert SortableJS DOM move — let Vue reactivity handle rendering
           evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex ?? 0] || null);
 

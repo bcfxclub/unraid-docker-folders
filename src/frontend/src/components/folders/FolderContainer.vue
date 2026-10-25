@@ -178,7 +178,21 @@ const previewAssociations = computed(() => {
   } else {
     names = (props.folder.containers || []).map((a) => a.container_name);
   }
-  names = names.filter((name) => containerMatchesSearch(dockerStore.searchQuery, name));
+  // A service whose container was moved into another folder is shown there,
+  // so it leaves this preview. It stays in the compose project.
+  const elsewhere = new Set(
+    folderStore.folders
+      .filter((f) => f.id !== props.folder.id)
+      .flatMap((f) => f.containers.map((c) => c.container_name)),
+  );
+  const project = props.folder.compose_project;
+  const movedService = (name: string) =>
+    elsewhere.has(name) ||
+    dockerStore.containers.some((c) =>
+      elsewhere.has(c.name) &&
+      c.labels?.['com.docker.compose.project'] === project &&
+      c.labels?.['com.docker.compose.service'] === name);
+  names = names.filter((name) => !movedService(name) && containerMatchesSearch(dockerStore.searchQuery, name));
   return names;
 });
 
