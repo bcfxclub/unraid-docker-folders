@@ -2,8 +2,8 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "unraid-docker-folders-modern">
 <!ENTITY author "rizowski">
-<!ENTITY version "2026.10.24-dev4">
-<!ENTITY md5 "e637cf9a9219cc3f93c4d4c7b994254f">
+<!ENTITY version "2026.10.25-dev1">
+<!ENTITY md5 "1a99027bbc1e082cff6a2e3953dc2b09">
 <!ENTITY launch "Docker">
 <!ENTITY plugdir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY github "rizowski/unraid-docker-folders">
@@ -151,6 +151,11 @@
 
 
 
+
+###2026.10.25-dev1
+- Improved: The folders column now slides smoothly when the stacks pane opens or closes, unless reduced motion is turned on.
+- Fixed: A container dropped into a manually ordered folder now stays where it was dropped instead of jumping to the end.
+- Fixed: A stack folder's preview of stopped services no longer lists services whose container was moved to another folder.
 ###2026.10.24-dev4
 - New: Expanding a stopped container now shows its last 200 log lines on the card, so you can see why it stopped.
 - Improved: The Compose stacks pane now slides in and out smoothly, with the animation turned off when reduced motion is preferred.
