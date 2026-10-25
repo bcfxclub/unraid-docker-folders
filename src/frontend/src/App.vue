@@ -369,6 +369,7 @@ import { SHIELD_ICON } from '@/utils/menuIcons';
 import type { Folder, FolderCreateData, FolderUpdateData, FolderContainerSelection } from '@/types/folder';
 import { effectiveSortMode } from '@/utils/sortMode';
 import Sortable from 'sortablejs';
+import { createDropRevert } from '@/utils/dropRevert';
 import { useDragAutoScroll } from '@/composables/useDragAutoScroll';
 
 const dockerStore = useDockerStore();
@@ -644,6 +645,12 @@ let sortableInstances: Sortable[] = [];
 // Scrolls the parent page during a drag, which SortableJS cannot do from the iframe.
 const dragAutoScroll = useDragAutoScroll();
 
+const dropRevert = createDropRevert();
+function startContainerDrag(evt: Sortable.SortableEvent) {
+  dropRevert.remember(evt.item);
+  dragAutoScroll.start();
+}
+
 onMounted(async () => {
   await loadData();
   initializeDragAndDrop();
@@ -733,7 +740,7 @@ function initializeDragAndDrop() {
         sort: effectiveSortMode(folderStore.getFolderById(folderId)?.sort_mode ?? 'manual', settingsStore.sortMode) === 'manual',
         handle: '.drag-handle',
         animation: 150,
-        onStart: dragAutoScroll.start,
+        onStart: startContainerDrag,
         onEnd: dragAutoScroll.stop,
         onAdd: async (evt) => {
           // The card it landed in front of, read before the revert below. A
@@ -743,7 +750,7 @@ function initializeDragAndDrop() {
           const beforeName = beforeId ? dockerStore.getContainerById(beforeId)?.name : undefined;
 
           // Revert SortableJS DOM move — let Vue reactivity handle rendering
-          evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex ?? 0] || null);
+          dropRevert.revert(evt.from, evt.item);
 
           const containerId = evt.item.dataset.containerId;
           const containerName = dockerStore.getContainerById(containerId!)?.name || '';
@@ -752,8 +759,11 @@ function initializeDragAndDrop() {
             await folderStore.moveContainerToFolder(folderId, containerId, containerName, beforeName);
           }
         },
-        onUpdate: async () => {
+        onUpdate: async (evt) => {
           const containerIds = Array.from(el.children).map((child) => (child as HTMLElement).dataset.containerId || '');
+          // Put the card back, as for a drop between lists; the store saves
+          // the new order to state first, so Vue moves it straight back.
+          dropRevert.revert(evt.from, evt.item);
           await folderStore.reorderContainers(folderId, containerIds);
         },
       })
@@ -770,11 +780,11 @@ function initializeDragAndDrop() {
         sort: settingsStore.sortMode === 'manual',
         handle: '.drag-handle',
         animation: 150,
-        onStart: dragAutoScroll.start,
+        onStart: startContainerDrag,
         onEnd: dragAutoScroll.stop,
         onAdd: async (evt) => {
           // Revert SortableJS DOM move — let Vue reactivity handle rendering
-          evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex ?? 0] || null);
+          dropRevert.revert(evt.from, evt.item);
 
           const containerId = evt.item.dataset.containerId;
           const containerName = dockerStore.getContainerById(containerId!)?.name || '';
@@ -783,10 +793,11 @@ function initializeDragAndDrop() {
             await folderStore.moveContainerToFolder(null, containerId ?? '', containerName);
           }
         },
-        onUpdate: async () => {
+        onUpdate: async (evt) => {
           const names = Array.from(unfolderedEl.children)
             .map((child) => dockerStore.getContainerById((child as HTMLElement).dataset.containerId || '')?.name)
             .filter((n): n is string => !!n);
+          dropRevert.revert(evt.from, evt.item);
           await folderStore.reorderUnfoldered(names);
         },
       })

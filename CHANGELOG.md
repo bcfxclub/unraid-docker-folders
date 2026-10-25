@@ -26,6 +26,14 @@
 ### Internal
 - Internal fixes and performance improvements.
 
+## 2026.10.25-dev1
+### Improved
+- The folders column now slides smoothly when the stacks pane opens or closes, unless reduced motion is turned on.
+
+### Fixed
+- A container dropped into a manually ordered folder now stays where it was dropped instead of jumping to the end.
+- A stack folder's preview of stopped services no longer lists services whose container was moved to another folder.
+
 ## 2026.10.24-dev4
 ### New
 - Expanding a stopped container now shows its last 200 log lines on the card, so you can see why it stopped.

@@ -167,6 +167,10 @@
 - Fixed: The "Also delete the image" box in the container Remove dialog now shows on Unraid.
 - Fixed: A failed folder assignment during compose sync no longer marks the container as assigned.
 - Internal fixes and performance improvements.
+###2026.10.25-dev1
+- Improved: The folders column now slides smoothly when the stacks pane opens or closes, unless reduced motion is turned on.
+- Fixed: A container dropped into a manually ordered folder now stays where it was dropped instead of jumping to the end.
+- Fixed: A stack folder's preview of stopped services no longer lists services whose container was moved to another folder.
 ###2026.10.24-dev4
 - New: Expanding a stopped container now shows its last 200 log lines on the card, so you can see why it stopped.
 - Improved: The Compose stacks pane now slides in and out smoothly, with the animation turned off when reduced motion is preferred.
