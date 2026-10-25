@@ -449,6 +449,13 @@
   transform: translateX(-16px);
 }
 
+/* Out of the flow while it fades, so the folders column moves at once. */
+.stacks-pane-leave-active {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
 /* Container state change pulse */
 @keyframes state-change-pulse {
   0%, 100% { border-color: var(--border-color, #e0e0e0); }

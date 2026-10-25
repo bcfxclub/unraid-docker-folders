@@ -146,8 +146,8 @@
       <BackendNotice />
       <ComposeSetupBanner />
       <!-- Pane and content wrap, so on a phone the pane sits above the folders. -->
-      <div class="flex flex-wrap gap-4 items-start">
-        <Transition name="stacks-pane">
+      <div class="relative flex flex-wrap gap-4 items-start">
+        <Transition name="stacks-pane" @before-leave="pinPaneWidth">
           <StacksPane
             v-if="stacksPaneOpen"
             id="stacks-pane"
@@ -160,7 +160,7 @@
             @schedules="openSchedules"
           />
         </Transition>
-        <div class="flex-[999_1_560px] min-w-0">
+        <div ref="foldersColumn" class="flex-[999_1_560px] min-w-0">
           <LoadingSkeleton v-if="isLoading" :view="viewMode" />
 
           <div v-else-if="error" class="text-center py-8 px-6 text-error">
@@ -432,6 +432,40 @@ watch(stacksPaneOpen, (open) => {
   if (!open) dockerStore.stackFilter = null;
 });
 
+// The folders column moves when the pane takes or frees its space. It slides
+// there with a transform (FLIP: measure before and after, then animate the
+// difference away), since DESIGN.md §6 allows no width transitions. A leaving
+// pane goes out of the flow at once (`.stacks-pane-leave-active`), so the
+// column moves with it instead of after the fade.
+const foldersColumn = ref<HTMLElement | null>(null);
+watch(stacksPaneOpen, async () => {
+  const el = foldersColumn.value;
+  if (!el || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const first = el.getBoundingClientRect();
+  await nextTick();
+  const last = el.getBoundingClientRect();
+  const dx = first.left - last.left;
+  const dy = first.top - last.top;
+  if (!dx && !dy) return;
+  el.style.transition = 'none';
+  el.style.transform = `translate(${dx}px, ${dy}px)`;
+  void el.offsetWidth;
+  el.style.transition = 'transform 200ms ease';
+  el.style.transform = '';
+  // A child's own transition bubbles up too, so wait for the column's.
+  const done = (e: TransitionEvent) => {
+    if (e.target !== el) return;
+    el.style.transition = '';
+    el.removeEventListener('transitionend', done);
+  };
+  el.addEventListener('transitionend', done);
+}, { flush: 'pre' });
+
+/** Keep the leaving pane's width once it is out of the flow. */
+function pinPaneWidth(el: Element) {
+  (el as HTMLElement).style.width = `${(el as HTMLElement).offsetWidth}px`;
+}
+
 // `.expand-inner` is overflow:hidden so the collapse transition can animate, and
 // that clips a kebab menu opening off the bottom of the section — visible as
 // soon as the last row is near the edge, e.g. when a search matches one
@@ -702,6 +736,12 @@ function initializeDragAndDrop() {
         onStart: dragAutoScroll.start,
         onEnd: dragAutoScroll.stop,
         onAdd: async (evt) => {
+          // The card it landed in front of, read before the revert below. A
+          // folder in automatic order sorts it anyway, so it passes none.
+          const manual = effectiveSortMode(folderStore.getFolderById(folderId)?.sort_mode ?? 'manual', settingsStore.sortMode) === 'manual';
+          const beforeId = manual ? (evt.item.nextElementSibling as HTMLElement | null)?.dataset.containerId : undefined;
+          const beforeName = beforeId ? dockerStore.getContainerById(beforeId)?.name : undefined;
+
           // Revert SortableJS DOM move — let Vue reactivity handle rendering
           evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex ?? 0] || null);
 
@@ -733,12 +773,6 @@ function initializeDragAndDrop() {
         onStart: dragAutoScroll.start,
         onEnd: dragAutoScroll.stop,
         onAdd: async (evt) => {
-          // The card it landed in front of, read before the revert below. A
-          // folder in automatic order sorts it anyway, so it passes none.
-          const manual = effectiveSortMode(folderStore.getFolderById(folderId)?.sort_mode ?? 'manual', settingsStore.sortMode) === 'manual';
-          const beforeId = manual ? (evt.item.nextElementSibling as HTMLElement | null)?.dataset.containerId : undefined;
-          const beforeName = beforeId ? dockerStore.getContainerById(beforeId)?.name : undefined;
-
           // Revert SortableJS DOM move — let Vue reactivity handle rendering
           evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex ?? 0] || null);
 
