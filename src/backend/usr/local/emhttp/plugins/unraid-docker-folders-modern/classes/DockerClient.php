@@ -16,6 +16,8 @@ class DockerClient
   private $lastError = '';
   /** HTTP status behind the last failure, or 0 if it wasn't an HTTP error. */
   private $lastErrorCode = 0;
+  /** The daemon's own message behind the last HTTP failure, or ''. */
+  private $lastErrorReason = '';
   private $imageInfoCache = [];
   /** Cached result of readHostMemoryTotal(), null until first read. */
   private $hostMemoryTotal = null;
@@ -58,6 +60,18 @@ class DockerClient
   // never report that the pulled image is waiting to be applied.
   const FACTS_CACHE_PATH = '/tmp/unraid-docker-container-facts-v4.json';
 
+  // State.OOMKilled for containers whose last exit was 137, exited or
+  // restarting. That code is both a `docker stop` that timed out and a kill
+  // for running out of memory, and only inspect tells them apart. It changes
+  // with every run, so each answer is tied to the exit it describes
+  // (State.FinishedAt): the list's "Exited (137) 5 minutes ago" says when the
+  // last exit was, and an exit newer than the saved one is inspected again.
+  // So each exit costs one inspect, whatever the server's size. See
+  // planOomChecks().
+  const OOM_CACHE_PATH = '/tmp/unraid-docker-oom-killed-v2.json';
+  // A failed inspect is retried after this, not on every list.
+  const OOM_RETRY_SECONDS = 300;
+
   public function __construct($socketPath = DOCKER_SOCKET, $apiVersion = DOCKER_API_VERSION)
   {
     $this->socketPath = $socketPath;
@@ -72,6 +86,18 @@ class DockerClient
   public function getLastError()
   {
     return $this->lastError;
+  }
+
+  /**
+   * The last failure in the daemon's own words, without the "Docker API
+   * HTTP 500: " prefix request() adds, for text a user reads. A failure with
+   * no message from the daemon falls back to getLastError().
+   *
+   * @return string
+   */
+  public function getLastErrorReason()
+  {
+    return $this->lastErrorReason !== '' ? $this->lastErrorReason : $this->lastError;
   }
 
   /**
@@ -126,9 +152,12 @@ class DockerClient
    * List all containers
    *
    * @param bool $all Include stopped containers
+   * @param bool $withOomCheck Read State.OOMKilled for containers that exited
+   *   with 137 (getOomKilledMap). Only the Folders list shows it, so schedule,
+   *   backup and update runs skip the inspects.
    * @return array Array of container objects
    */
-  public function listContainers($all = true)
+  public function listContainers($all = true, $withOomCheck = false)
   {
     $params = $all ? '?all=1' : '';
     $response = $this->request('GET', "/containers/json{$params}");
@@ -147,6 +176,7 @@ class DockerClient
     // data, cached by ID.
     $ids = array_column($response, 'Id');
     $factsMap = $this->getContainerFactsMap($ids);
+    $oomMap = $withOomCheck ? $this->getOomKilledMap($response) : [];
 
     // Transform Docker API response to our format
     $containers = [];
@@ -167,6 +197,7 @@ class DockerClient
       $formatted['puid'] = $facts['puid'] ?? '';
       $formatted['pgid'] = $facts['pgid'] ?? '';
       $formatted['umask'] = $facts['umask'] ?? '';
+      $formatted['oomKilled'] = $oomMap[$container['Id']] ?? false;
       $containers[] = $formatted;
     }
 
@@ -264,6 +295,135 @@ class DockerClient
     }
 
     return $cache;
+  }
+
+  /**
+   * id => State.OOMKilled for the listed containers whose last exit was 137.
+   * See OOM_CACHE_PATH.
+   *
+   * @param array $response Raw /containers/json list
+   * @return array id => bool
+   */
+  private function getOomKilledMap(array $response)
+  {
+    // Most lists have no exit-137 container: skip the cache file entirely. An
+    // entry left in it is dropped or checked again by the next list with one.
+    $candidates = array_filter($response, [self::class, 'isOomCandidate']);
+    if (empty($candidates)) return [];
+
+    $now = time();
+    $cache = $this->loadJsonCache(self::OOM_CACHE_PATH);
+    $plan = self::planOomChecks($candidates, $cache, $now);
+
+    $results = $this->inspectMany($plan['inspect']);
+    foreach ($plan['inspect'] as $id) {
+      $state = $results[$id]['State'] ?? null;
+      if (!is_array($state)) {
+        // Keep the old answer, and wait OOM_RETRY_SECONDS before trying again.
+        $plan['cache'][$id] = ['oom' => !empty($cache[$id]['oom']), 'finished' => 0, 'failedAt' => $now];
+        continue;
+      }
+      $finished = strtotime((string) ($state['FinishedAt'] ?? ''));
+      $plan['cache'][$id] = ['oom' => !empty($state['OOMKilled']), 'finished' => $finished > 0 ? $finished : 0];
+    }
+
+    if ($plan['cache'] !== $cache) {
+      $this->saveJsonCache(self::OOM_CACHE_PATH, $plan['cache']);
+    }
+
+    $map = [];
+    foreach ($plan['cache'] as $id => $entry) {
+      $map[$id] = !empty($entry['oom']);
+    }
+    return $map;
+  }
+
+  /** Exited, or restarting, after an exit with 137. */
+  public static function isOomCandidate(array $container)
+  {
+    $state = $container['State'] ?? '';
+    return ($state === 'exited' || $state === 'restarting')
+      && preg_match('/^(?:Exited|Restarting) \(137\)/', (string) ($container['Status'] ?? '')) === 1;
+  }
+
+  /**
+   * Which candidates to inspect, and the cache with every other entry
+   * dropped: a container gone, or seen in another state, has nothing to say.
+   * Pure, so the rule can be tested without a socket.
+   *
+   * A saved answer stands until the list shows a later exit. The status age
+   * is rounded ("5 minutes", "2 hours"), so the exit is only known to be
+   * newer once the saved FinishedAt falls before the oldest time the age
+   * allows, less a minute for clock skew. Fine-grained where it matters: a
+   * container that ran again a minute later shows "Exited (137) 30 seconds
+   * ago".
+   *
+   * @param array $candidates Listed containers that pass isOomCandidate()
+   * @param array $cache      id => {oom: bool, finished: int, failedAt?: int}
+   * @param int   $now
+   * @return array {inspect: string[], cache: array}
+   */
+  public static function planOomChecks(array $candidates, array $cache, $now)
+  {
+    $kept = [];
+    $inspect = [];
+    foreach ($candidates as $container) {
+      $id = (string) ($container['Id'] ?? '');
+      if ($id === '') continue;
+      $entry = $cache[$id] ?? null;
+      if (!is_array($entry)) {
+        $inspect[] = $id;
+        continue;
+      }
+      $kept[$id] = $entry;
+      if (isset($entry['failedAt'])) {
+        if ($now - (int) $entry['failedAt'] >= self::OOM_RETRY_SECONDS) $inspect[] = $id;
+        continue;
+      }
+      $maxAge = self::statusAgeUpperBound((string) ($container['Status'] ?? ''));
+      if ($maxAge !== null && (int) ($entry['finished'] ?? 0) < $now - $maxAge - 60) {
+        $inspect[] = $id;
+      }
+    }
+    return ['inspect' => $inspect, 'cache' => $kept];
+  }
+
+  /**
+   * The most seconds ago the exit in a status line can have been, from
+   * Docker's HumanDuration wording ("Exited (1) About an hour ago"), or null
+   * when the line has no age Docker would write.
+   *
+   * @param string $status
+   * @return int|null
+   */
+  public static function statusAgeUpperBound($status)
+  {
+    return preg_match('/\) (.+) ago$/', $status, $m) ? self::durationUpperBound($m[1]) : null;
+  }
+
+  /**
+   * The most seconds a running container can have been up, from a status
+   * line such as "Up 19 hours (healthy)", or null for any other line.
+   *
+   * @param string $status
+   * @return int|null
+   */
+  public static function uptimeUpperBound($status)
+  {
+    return preg_match('/^Up (.+?)(?: \([^)]*\))?$/', $status, $m) ? self::durationUpperBound($m[1]) : null;
+  }
+
+  /** Docker's HumanDuration wording ("About an hour", "5 minutes") as its most seconds. */
+  private static function durationUpperBound($age)
+  {
+    if ($age === 'Less than a second') return 1;
+    if ($age === 'About a minute') return 120;
+    if ($age === 'About an hour') return 5400;
+    if (!preg_match('/^(\d+) (second|minute|hour|day|week|month|year)s?$/', $age, $n)) return null;
+    $count = (int) $n[1];
+    $unit = ['second' => 1, 'minute' => 60, 'hour' => 3600, 'day' => 86400, 'week' => 604800, 'month' => 2592000, 'year' => 31536000][$n[2]];
+    // Hours are rounded to the nearest, the rest are whole units.
+    return $n[2] === 'hour' ? (int) (($count + 0.5) * $unit) : ($count + 1) * $unit;
   }
 
   /**
@@ -404,7 +564,7 @@ class DockerClient
    * @param mixed $portBindings
    * @return array List of {hostIp, hostPort, containerPort, type}
    */
-  private static function parsePortBindings($portBindings)
+  public static function parsePortBindings($portBindings)
   {
     if (!is_array($portBindings)) {
       return [];
@@ -1473,6 +1633,33 @@ class DockerClient
   }
 
   /**
+   * Docker's own list of every container, or null when the request failed,
+   * so a failure is never read as "every container is gone".
+   *
+   * @return array|null
+   */
+  public function listContainersRaw()
+  {
+    $response = $this->request('GET', '/containers/json?all=1');
+    return is_array($response) ? $response : null;
+  }
+
+  /**
+   * Inspect several containers in parallel.
+   *
+   * @param string[] $ids
+   * @return array id => inspect payload, or null for one that failed
+   */
+  public function inspectMany(array $ids)
+  {
+    $requests = [];
+    foreach ($ids as $id) {
+      $requests[$id] = '/containers/' . rawurlencode($id) . '/json';
+    }
+    return $this->requestMulti($requests);
+  }
+
+  /**
    * Get raw container inspect data (full Docker API response)
    *
    * @param string $id Container ID or name
@@ -1878,6 +2065,7 @@ class DockerClient
   {
     // This path does not go through request(), which is what resets it.
     $this->lastError = '';
+    $this->lastErrorReason = '';
 
     if (!file_exists($this->socketPath)) {
       $this->lastError = "Docker socket not found: {$this->socketPath}";
@@ -1955,6 +2143,7 @@ class DockerClient
     }
 
     if ($httpCode < 200 || $httpCode >= 300) {
+      $this->lastErrorReason = $apiMessage;
       $this->lastError = "Docker API HTTP {$httpCode}" . ($apiMessage !== '' ? ": {$apiMessage}" : '');
       error_log("Docker pull error: {$this->lastError}");
       return false;
@@ -2355,6 +2544,7 @@ class DockerClient
   {
     $this->lastError = '';
     $this->lastErrorCode = 0;
+    $this->lastErrorReason = '';
 
     if (!file_exists($this->socketPath)) {
       $this->lastError = "Docker socket not found: {$this->socketPath}";
@@ -2411,6 +2601,7 @@ class DockerClient
   {
     $this->lastError = '';
     $this->lastErrorCode = 0;
+    $this->lastErrorReason = '';
 
     if (!file_exists($this->socketPath)) {
       $this->lastError = "Docker socket not found: {$this->socketPath}";
@@ -2458,14 +2649,14 @@ class DockerClient
     // Extract error message from Docker API response
     if ($httpCode < 200 || $httpCode >= 300) {
       $this->lastErrorCode = $httpCode;
-      $errorMsg = "Docker API HTTP {$httpCode}";
       $decoded = json_decode($response, true);
       if ($decoded && isset($decoded['message'])) {
-        $errorMsg .= ': ' . $decoded['message'];
+        $this->lastErrorReason = (string) $decoded['message'];
       } elseif ($response) {
-        $errorMsg .= ': ' . substr($response, 0, 500);
+        $this->lastErrorReason = substr($response, 0, 500);
       }
-      $this->lastError = $errorMsg;
+      $this->lastError = "Docker API HTTP {$httpCode}"
+        . ($this->lastErrorReason !== '' ? ": {$this->lastErrorReason}" : '');
       error_log($this->lastError);
       return false;
     }

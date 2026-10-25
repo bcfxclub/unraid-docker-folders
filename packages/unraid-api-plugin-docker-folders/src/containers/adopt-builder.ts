@@ -137,7 +137,7 @@ function toEntrypointArray(value: string | string[]): string[] {
  * own. The preview needs this so it does not promise a published port that
  * will not be.
  */
-function publishesPorts(network: string, driver: string): boolean {
+export function publishesPorts(network: string, driver: string): boolean {
     if (network.startsWith('container:')) return false;
     if (network === 'none') return false;
     if (driver === '') return true;

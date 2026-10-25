@@ -3,7 +3,7 @@ import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import ContainerDetails from '../ContainerDetails.vue';
-import { makeContainer, makeSchedule as baseSchedule } from '@/test/fixtures';
+import { makeContainer, makeContainerStats, makeSchedule as baseSchedule } from '@/test/fixtures';
 import { useScheduleStore } from '@/stores/schedules';
 import type { Schedule } from '@/types/schedule';
 
@@ -75,6 +75,42 @@ describe('ContainerDetails log pane', () => {
 
     expect(wrapper.text()).toContain('Loading logs...');
     expect(wrapper.text()).not.toContain('stale error');
+  });
+});
+
+describe('ContainerDetails columns', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  const stats = makeContainerStats();
+
+  function metadataSpansFullRow(props: Record<string, unknown>): boolean {
+    const wrapper = mountDetails(props);
+    const metadata = wrapper.findAll('div').find((d) => d.classes().includes('grid-cols-[auto_1fr]'));
+    return metadata!.classes().includes('md:col-span-2');
+  }
+
+  it('keeps a stopped container with stats in two columns', () => {
+    expect(metadataSpansFullRow({ isRunning: false, containerStats: stats })).toBe(false);
+  });
+
+  it('spans the full row when there is no stats column', () => {
+    expect(metadataSpansFullRow({ isRunning: false, containerStats: null })).toBe(true);
+  });
+
+  it('hides uptime and live counters for a stopped container', () => {
+    const text = mountDetails({ isRunning: false, containerStats: stats }).text();
+
+    expect(text).not.toContain('Uptime');
+    expect(text).not.toContain('PIDs');
+    expect(text).not.toContain('Net I/O');
+    expect(text).toContain('Restarts');
+    expect(text).toContain('Log Size');
+  });
+
+  it('leaves room for stats a running container is still loading', () => {
+    expect(metadataSpansFullRow({ isRunning: true, showStats: true, containerStats: null })).toBe(false);
   });
 });
 

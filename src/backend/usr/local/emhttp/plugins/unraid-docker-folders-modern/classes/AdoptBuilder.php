@@ -150,7 +150,7 @@ class AdoptBuilder
    * and joining another container's namespace leaves no ports of its own. The
    * preview needs this so it does not promise a published port that will not be.
    */
-  private static function publishesPorts($network, $driver)
+  public static function publishesPorts($network, $driver)
   {
     if (strpos($network, 'container:') === 0) return false;
     if ($network === 'none') return false;

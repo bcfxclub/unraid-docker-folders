@@ -58,6 +58,7 @@ describe('SchedulerService', () => {
     let db: DatabaseService;
     let events: EventBusService;
     let runDue: ReturnType<typeof vi.fn>;
+    let watchRun: ReturnType<typeof vi.fn>;
     let schedules: ScheduleService;
     let service: SchedulerService;
     let realFs: typeof import('node:fs');
@@ -82,7 +83,8 @@ describe('SchedulerService', () => {
         runDue = vi.fn(async (): Promise<RunResult[]> => []);
         schedules = { runDue } as unknown as ScheduleService;
         runScheduledCheck = vi.fn().mockResolvedValue(undefined);
-        service = new SchedulerService(schedules, db, events, { runScheduledCheck } as never);
+        watchRun = vi.fn().mockResolvedValue(undefined);
+        service = new SchedulerService(schedules, db, events, { runScheduledCheck } as never, { run: watchRun } as never);
 
         // Defaults: PHP has not defined the gate (so ownsBackgroundWork() is
         // false out of the box), and the Docker socket is present. Each test
@@ -152,6 +154,7 @@ describe('SchedulerService', () => {
             await service.tick(now);
 
             expect(runDue).toHaveBeenCalledWith(now);
+            expect(watchRun).toHaveBeenCalledWith(now);
             // The heartbeat file did not exist (existsSync only returns true
             // for the Docker socket in this suite's default), so touch() takes
             // the create-a-new-file branch.
@@ -183,8 +186,9 @@ describe('SchedulerService', () => {
 
             await service.tick();
 
-            expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith(RUNNER_ALIVE_FILE, 'schedules update-checks\n');
+            expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith(RUNNER_ALIVE_FILE, 'schedules update-checks container-watch\n');
             expect(runDue).not.toHaveBeenCalled();
+            expect(watchRun).not.toHaveBeenCalled();
         });
 
         it('does not run due schedules when the Docker socket is absent, even though it still touches the heartbeat', async () => {
@@ -308,7 +312,7 @@ describe('SchedulerService', () => {
 
                 service.onModuleInit();
 
-                expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith(RUNNER_ALIVE_FILE, 'schedules update-checks\n');
+                expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith(RUNNER_ALIVE_FILE, 'schedules update-checks container-watch\n');
                 expect(runDue).not.toHaveBeenCalled();
             } finally {
                 service.onModuleDestroy();

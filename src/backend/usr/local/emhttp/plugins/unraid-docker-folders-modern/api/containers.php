@@ -13,6 +13,7 @@ require_once dirname(__DIR__) . '/classes/DockerClient.php';
 require_once dirname(__DIR__) . '/classes/FolderManager.php';
 require_once dirname(__DIR__) . '/classes/AdoptBuilder.php';
 require_once dirname(__DIR__) . '/classes/SecurityAdvisor.php';
+require_once dirname(__DIR__) . '/classes/ContainerWatch.php';
 require_once dirname(__DIR__) . '/classes/WebSocketPublisher.php';
 
 // Set JSON content type
@@ -46,6 +47,18 @@ try {
 } catch (Exception $e) {
   error_log('Containers API error: ' . $e->getMessage());
   errorResponse($e->getMessage(), 500);
+}
+
+/**
+ * A failed container action's message, with Docker's reason in it, for
+ * example "Could not start container: failed to set up container networking:
+ * endpoint with name X already exists in network bridge". The card shows it,
+ * and the GraphQL backend words its failures the same way.
+ */
+function actionFailureMessage($verb, DockerClient $dockerClient)
+{
+  $reason = $dockerClient->getLastErrorReason();
+  return $reason !== '' ? "Could not {$verb} container: {$reason}" : "Could not {$verb} container";
 }
 
 /**
@@ -140,7 +153,7 @@ function handleGet($dockerClient)
     ]);
   } else {
     // List all containers
-    $containers = $dockerClient->listContainers(true);
+    $containers = $dockerClient->listContainers(true, true);
 
     // listContainers() answers [] both for a server with no containers and for
     // a request that failed. Only the failure sets lastError. Report it,
@@ -149,6 +162,10 @@ function handleGet($dockerClient)
     if (empty($containers) && $dockerClient->getLastError() !== '') {
       errorResponse('Cannot reach Docker: ' . $dockerClient->getLastError(), 503);
     }
+
+    // What the once-a-minute container watch found: a process that exited
+    // while Docker still lists it running, and ports gone dark.
+    $containers = ContainerWatch::annotate($containers, ContainerWatch::loadSweep(ContainerWatch::STATE_PATH, time()), time());
 
     // Reconcile container IDs (handles container recreate/update)
     $folderManager = new FolderManager();
@@ -294,22 +311,22 @@ function handlePost($dockerClient)
     case 'start':
       // DockerClient::startContainer resumes a paused container itself.
       $success = $dockerClient->startContainer($id);
-      $message = $success ? 'Container started successfully' : 'Failed to start container';
+      $message = $success ? 'Container started successfully' : actionFailureMessage('start', $dockerClient);
       break;
 
     case 'resume':
       $success = $dockerClient->unpauseContainer($id);
-      $message = $success ? 'Container resumed successfully' : 'Failed to resume container';
+      $message = $success ? 'Container resumed successfully' : actionFailureMessage('resume', $dockerClient);
       break;
 
     case 'stop':
       $success = $dockerClient->stopContainer($id);
-      $message = $success ? 'Container stopped successfully' : 'Failed to stop container';
+      $message = $success ? 'Container stopped successfully' : actionFailureMessage('stop', $dockerClient);
       break;
 
     case 'restart':
       $success = $dockerClient->restartContainer($id);
-      $message = $success ? 'Container restarted successfully' : 'Failed to restart container';
+      $message = $success ? 'Container restarted successfully' : actionFailureMessage('restart', $dockerClient);
       break;
 
     case 'remove':
@@ -320,7 +337,7 @@ function handlePost($dockerClient)
       $containerImage = $containerInfo['Image'] ?? null;
 
       $success = $dockerClient->removeContainer($id, $force);
-      $message = $success ? 'Container removed successfully' : 'Failed to remove container';
+      $message = $success ? 'Container removed successfully' : actionFailureMessage('remove', $dockerClient);
 
       if ($success && $containerName) {
         // Clean up folder associations

@@ -363,7 +363,7 @@ const CONTAINER_LIST = `
     dockerFoldersContainerList {
       containers {
         id name image imageOutdated state status command created networkMode
-        privileged capAdd exposedPorts user imageUser puid pgid umask
+        privileged capAdd exposedPorts user imageUser puid pgid umask oomKilled processExited closedPorts unpublishedPorts
         icon managed webui autostart autostartDelay
         ports { ip privatePort publicPort type }
         hostPorts { hostIp hostPort containerPort type }

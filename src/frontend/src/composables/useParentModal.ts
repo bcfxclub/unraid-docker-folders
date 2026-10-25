@@ -71,6 +71,13 @@ export type ModalField = ModalFieldBase & (
       caption?: string;
     }
   | {
+      /** One inline checkbox. Its value comes back as a boolean. */
+      type: 'checkbox';
+      id: string;
+      label: string;
+      checked: boolean;
+    }
+  | {
       type: 'checkbox-list';
       id: string;
       label?: string;

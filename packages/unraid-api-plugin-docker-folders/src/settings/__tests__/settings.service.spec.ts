@@ -93,6 +93,12 @@ describe('SettingsService', () => {
             expect(() => service.set('compose_auto_install', 'true')).toThrow('compose_auto_install must be');
         });
 
+        it('accepts the confirm settings as "0" or "1" only', () => {
+            expect(service.set('confirm_stack_down', '0').value).toBe('0');
+            expect(service.set('confirm_recompose', '1').value).toBe('1');
+            expect(() => service.set('confirm_recompose', 'true')).toThrow('confirm_recompose must be');
+        });
+
         it('normalizes and accepts a compose_export_dir under /mnt', () => {
             const setting = service.set('compose_export_dir', '/mnt/user/appdata/../appdata/compose');
             expect(setting.value).toBe('/mnt/user/appdata/compose');

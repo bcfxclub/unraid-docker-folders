@@ -167,6 +167,26 @@ export class DockerFoldersContainer {
     @Field(() => String, { description: 'UMASK from Config.Env.' })
     umask!: string;
 
+    @Field(() => Boolean, {
+        description: 'State.OOMKilled, read only for a container whose last exit was 137, so a kill for memory is told from a timed-out stop.',
+    })
+    oomKilled!: boolean;
+
+    @Field(() => Boolean, {
+        description: "The container watch found the process exited while Docker still lists the container as running.",
+    })
+    processExited!: boolean;
+
+    @Field(() => [Int], {
+        description: 'Container ports seen listening earlier in this run that nothing listens on now, on two sweeps in a row.',
+    })
+    closedPorts!: number[];
+
+    @Field(() => [Int], {
+        description: 'Host ports the container asks for that Docker has not published, on two sweeps in a row.',
+    })
+    unpublishedPorts!: number[];
+
     @Field(() => [DockerFoldersLabel])
     labels!: DockerFoldersLabel[];
 

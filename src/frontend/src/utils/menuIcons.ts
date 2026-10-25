@@ -1,6 +1,7 @@
 // SVG path data for kebab menu icons shared by the container and folder menus.
 // A "|" separates the paths of one icon (see KebabMenuRow).
 export const PLAY_ICON = 'M5 3l14 9-14 9V3z';
+export const STOP_ICON = 'M6 4h4v16H6zM14 4h4v16h-4z';
 export const EDIT_ICON = 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7|M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z';
 export const REFRESH_ICON = 'M23 4v6h-6|M1 20v-6h6|M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15';
 export const DOWNLOAD_ICON = 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4|M7 10l5 5 5-5|M12 15V3';

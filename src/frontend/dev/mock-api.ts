@@ -533,6 +533,10 @@ async function handleContainers(req: any, res: any, params: Record<string, strin
       puid: (c as any).puid ?? '',
       pgid: (c as any).pgid ?? '',
       umask: (c as any).umask ?? '',
+      oomKilled: (c as any).oomKilled ?? false,
+      processExited: (c as any).processExited ?? false,
+      closedPorts: (c as any).closedPorts ?? [],
+      unpublishedPorts: (c as any).unpublishedPorts ?? [],
     }));
     return json(res, {
       containers: containersWithAutostart,

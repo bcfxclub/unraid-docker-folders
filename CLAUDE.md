@@ -587,7 +587,12 @@ Rules that are easy to break:
   heartbeat, and `run-schedules.php` and `check-updates.php` exit while it is
   fresh (`dfmPluginRunnerOwns()` in `config.php`). Both runners also claim
   each due slot with a compare-and-set on `next_run_at` before they run it.
-  Keep both halves.
+  Keep both halves. The container watch (`classes/ContainerWatch.php`, the
+  plugin's `container-watch.ts`) follows the same rule under the job name
+  `container-watch`: a once-a-minute sweep that marks a process that exited
+  while Docker still lists it running, and ports gone dark, and sends the
+  crash notifications. Each backend keeps its own sweep, PHP in
+  `/var/run/...container-watch.json`, the plugin in memory.
 - **The backend runs only on tested API versions.** `include/api-compat.json`
   holds the range (`min`, `maxExclusive`). The settings page, `settings.php`
   and `api-plugin.sh install` refuse a version outside it, and the watchdog

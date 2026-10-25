@@ -69,6 +69,8 @@ export const ALLOWED_SETTING_KEYS = [
     'stats_refresh_interval',
     'compose_export_dir',
     'compose_auto_install',
+    'confirm_stack_down',
+    'confirm_recompose',
     'backup_destination',
     'default_retention_count',
     'sort_mode',

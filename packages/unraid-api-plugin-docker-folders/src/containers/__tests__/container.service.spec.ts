@@ -235,6 +235,18 @@ describe('ContainerService', () => {
             await expect(service.stop('abc')).rejects.toThrow(/conflict: container is paused/);
         });
 
+        it("words Docker's reason like PHP, without docker-modem's HTTP prefix", async () => {
+            const { service, docker } = build();
+            docker.fail.start = Object.assign(
+                new Error('(HTTP code 500) server error - endpoint with name pg already exists in network bridge '),
+                { statusCode: 500, json: { message: 'endpoint with name pg already exists in network bridge' } },
+            );
+
+            await expect(service.start('abc')).rejects.toThrow(
+                /^Could not start container: endpoint with name pg already exists in network bridge$/,
+            );
+        });
+
         it('stays quiet when the action failed', async () => {
             const { service, docker } = build();
             docker.fail.start = new Error('nope');

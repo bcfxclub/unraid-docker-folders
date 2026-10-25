@@ -1,9 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import FolderContainer from '../FolderContainer.vue';
+import FolderHeader from '../FolderHeader.vue';
 import type { Folder } from '@/types/folder';
 import { useDockerStore } from '@/stores/docker';
+import { useFolderStore } from '@/stores/folders';
 import { useSettingsStore } from '@/stores/settings';
 import { makeContainer } from '@/test/fixtures';
 
@@ -197,11 +200,12 @@ describe('FolderContainer concurrent action loading', () => {
     expect(wrapper.find('.animate-spin').exists()).toBe(false);
   });
 
-  it('keeps a paused container visible when "hide stopped" is on', () => {
+  it('keeps paused and crashed containers visible when "hide stopped" is on', () => {
     const containers = [
       makeContainer({ id: 'c1', name: 'running-one', state: 'running' }),
       makeContainer({ id: 'c2', name: 'paused-one', state: 'paused' }),
       makeContainer({ id: 'c3', name: 'exited-one', state: 'exited' }),
+      makeContainer({ id: 'c4', name: 'crashed-one', state: 'exited', status: 'Exited (1) 12 hours ago' }),
     ];
     const dockerStore = useDockerStore();
     dockerStore.containers = containers;
@@ -213,6 +217,7 @@ describe('FolderContainer concurrent action loading', () => {
         { id: 1, folder_id: 1, container_name: 'running-one', container_id: 'c1', position: 0 },
         { id: 2, folder_id: 1, container_name: 'paused-one', container_id: 'c2', position: 1 },
         { id: 3, folder_id: 1, container_name: 'exited-one', container_id: 'c3', position: 2 },
+        { id: 4, folder_id: 1, container_name: 'crashed-one', container_id: 'c4', position: 3 },
       ],
     });
 
@@ -226,6 +231,8 @@ describe('FolderContainer concurrent action loading', () => {
     expect(names).toContain('running-one');
     expect(names).toContain('paused-one');
     expect(names).not.toContain('exited-one');
+    // A crash stays in view: it is what the user most needs to see.
+    expect(names).toContain('crashed-one');
 
     localStorage.removeItem('docker-folders-hide-stopped-1');
   });
@@ -314,5 +321,99 @@ describe('FolderContainer sort order', () => {
   it("a folder's own mode overrides the toolbar sort", () => {
     expect(cardNames('name-asc', 'status')).toEqual(['alpha-running', 'mid-running', 'zeta-stopped']);
     expect(cardNames('name-desc', 'status')).toEqual(['zeta-stopped', 'mid-running', 'alpha-running']);
+  });
+});
+
+describe('FolderContainer stack filter', () => {
+  const assoc = (name: string, i: number) => ({ id: i + 1, container_id: `id-${name}`, container_name: name, folder_id: 1, position: i });
+
+  it('lists only the picked stack\'s containers and opens a collapsed folder', () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const docker = useDockerStore();
+    docker.containers = [
+      makeContainer({ id: 'p', name: 'plex' }),
+      makeContainer({ id: 's', name: 'sonarr', labels: { 'com.docker.compose.project': 'arr' } }),
+    ];
+    docker.stackFilter = 'arr';
+    const wrapper = mount(FolderContainer, {
+      props: { folder: makeFolder({ collapsed: true, containers: ['plex', 'sonarr'].map(assoc) }) },
+      global: { plugins: [pinia] },
+    });
+    const list = wrapper.find('.container-list');
+    expect(list.text()).toContain('sonarr');
+    expect(list.text()).not.toContain('plex');
+    expect(wrapper.find('.expand-grid').classes()).toContain('expand-expanded');
+  });
+
+  it('still collapses from the header while filtered, without changing the saved state', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const docker = useDockerStore();
+    docker.containers = [makeContainer({ id: 's', name: 'sonarr', labels: { 'com.docker.compose.project': 'arr' } })];
+    docker.stackFilter = 'arr';
+    const folderStore = useFolderStore();
+    folderStore.toggleFolderCollapse = vi.fn();
+    const wrapper = mount(FolderContainer, {
+      props: { folder: makeFolder({ collapsed: false, containers: ['sonarr'].map(assoc) }) },
+      global: { plugins: [pinia] },
+    });
+    const grid = () => wrapper.find('.expand-grid').classes();
+    wrapper.findComponent(FolderHeader).vm.$emit('toggle-collapse');
+    await nextTick();
+    expect(grid()).not.toContain('expand-expanded');
+    expect(folderStore.toggleFolderCollapse).not.toHaveBeenCalled();
+    // Picking another stack opens it again.
+    docker.stackFilter = 'other';
+    await nextTick();
+    docker.stackFilter = 'arr';
+    await nextTick();
+    expect(grid()).toContain('expand-expanded');
+  });
+});
+
+describe('FolderContainer stack-down preview', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('leaves out a service whose container was moved into another folder', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const { useComposeStore } = await import('@/stores/compose');
+    const compose = useComposeStore();
+    compose.stacks = [{ project_name: 'grafana', service_names: ['grafana', 'loki', 'mimir'] } as never];
+    const docker = useDockerStore();
+    docker.containers = [
+      makeContainer({
+        id: 'm1',
+        name: 'grafana-mimir-1',
+        state: 'running',
+        labels: { 'com.docker.compose.project': 'grafana', 'com.docker.compose.service': 'mimir' },
+      }),
+    ];
+    const folders = useFolderStore();
+    folders.folders = [
+      makeFolder({ id: 1, name: 'grafana', compose_project: 'grafana' }),
+      makeFolder({
+        id: 2,
+        name: 'Databases',
+        containers: [
+          { id: 1, folder_id: 2, container_name: 'loki', container_id: 'l1', position: 0 },
+          { id: 2, folder_id: 2, container_name: 'grafana-mimir-1', container_id: 'm1', position: 1 },
+        ],
+      }),
+    ];
+
+    const wrapper = mount(FolderContainer, {
+      props: { folder: folders.folders[0] },
+      global: { plugins: [pinia], stubs: { Teleport: true } },
+    });
+    await nextTick();
+
+    const text = wrapper.find('.opacity-40').text();
+    expect(text).toContain('grafana');
+    expect(text).not.toContain('loki');
+    expect(text).not.toContain('mimir');
   });
 });

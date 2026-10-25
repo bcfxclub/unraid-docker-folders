@@ -1,6 +1,7 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { closeSync, existsSync, openSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 
+import { ContainerWatchService } from '../containers/container-watch.service.js';
 import { DOCKER_SOCKET_PATH } from '../containers/docker-client.js';
 import { DatabaseService } from '../db/database.service.js';
 import { EventBusService } from '../events/event-bus.service.js';
@@ -15,7 +16,7 @@ import { ScheduleService } from './schedule.service.js';
  * down for a job only when it is named here, so a job added later never makes
  * an older PHP stop, and a job removed here is picked back up by PHP.
  */
-export const RUNNER_JOBS = ['schedules', 'update-checks'] as const;
+export const RUNNER_JOBS = ['schedules', 'update-checks', 'container-watch'] as const;
 
 /**
  * The once-a-minute schedule runner, for GraphQL mode. Ported from
@@ -91,7 +92,8 @@ export class SchedulerService implements OnModuleInit, OnModuleDestroy {
         private readonly schedules: ScheduleService,
         private readonly db: DatabaseService,
         private readonly events: EventBusService,
-        private readonly updates: UpdatesService
+        private readonly updates: UpdatesService,
+        private readonly watch: ContainerWatchService
     ) {}
 
     onModuleInit(): void {
@@ -142,6 +144,11 @@ export class SchedulerService implements OnModuleInit, OnModuleDestroy {
         touch(SCHEDULER_TICK_FILE);
 
         if (!existsSync(DOCKER_SOCKET_PATH)) return;
+
+        // Apart from the schedule pass below, which a backup can hold for
+        // minutes: the watch has its own guard.
+        void this.watch.run(now);
+
         if (this.running) return;
 
         this.running = true;

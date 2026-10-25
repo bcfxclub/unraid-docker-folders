@@ -110,6 +110,7 @@ function handlePost()
     'stats_refresh_interval',
     'compose_export_dir',
     'compose_auto_install',
+    'confirm_stack_down', 'confirm_recompose',
     'backup_destination',
     'default_retention_count',
     'sort_mode', 'sort_folders',
@@ -127,11 +128,14 @@ function handlePost()
     errorResponse('Invalid backend mode', 400);
   }
 
-  // A checkbox stores '0' or '1' only. A JSON 1 or true would be stored as
-  // '1' but fail the === '1' test below, which deletes the flash copy of a
-  // setting that then reads as on.
-  if ($key === 'compose_auto_install' && !in_array($value, ['0', '1'], true)) {
-    errorResponse('compose_auto_install must be "0" or "1"', 400);
+  // These checkboxes store '0' or '1' only. For compose_auto_install a JSON 1
+  // or true would be stored as '1' but fail the === '1' test below, which
+  // deletes the flash copy of a setting that then reads as on. For the
+  // confirm settings, the settings page reads only '1' as on and the Vue app
+  // anything but '0', so any other value would show the two disagreeing.
+  $checkboxKeys = ['compose_auto_install', 'confirm_stack_down', 'confirm_recompose'];
+  if (in_array($key, $checkboxKeys, true) && !in_array($value, ['0', '1'], true)) {
+    errorResponse($key . ' must be "0" or "1"', 400);
   }
 
   // Validate sort_mode against the known set of modes.

@@ -14,6 +14,7 @@ import { ContainerListResolver } from './containers/container-list.resolver.js';
 import { ContainerLogsService } from './containers/container-logs.service.js';
 import { ContainerStatsService } from './containers/container-stats.service.js';
 import { ContainerListService } from './containers/container-list.service.js';
+import { ContainerWatchService } from './containers/container-watch.service.js';
 import { ContainerResolver } from './containers/container.resolver.js';
 import { ContainerService } from './containers/container.service.js';
 import { SecurityService } from './containers/security.service.js';
@@ -94,6 +95,7 @@ const scheduleExecutorsProvider = {
         ContainerService,
         ContainerResolver,
         ContainerListService,
+        ContainerWatchService,
         SecurityService,
         ContainerListResolver,
         ContainerLogsService,

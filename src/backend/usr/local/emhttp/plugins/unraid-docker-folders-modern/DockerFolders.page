@@ -25,6 +25,8 @@ $showFolderPorts = ($settings['show_folder_ports'] ?? '1') === '1';
 $showInlineLogs = ($settings['show_inline_logs'] ?? '0') === '1';
 $enableAdopt = ($settings['enable_adopt'] ?? '1') === '1';
 $composeAutoInstall = ($settings['compose_auto_install'] ?? '0') === '1';
+$confirmStackDown = ($settings['confirm_stack_down'] ?? '1') === '1';
+$confirmRecompose = ($settings['confirm_recompose'] ?? '1') === '1';
 $enableSecurityAdvisor = ($settings['enable_security_advisor'] ?? '1') === '1';
 $logRefreshInterval = $settings['log_refresh_interval'] ?? '10';
 $statsRefreshInterval = $settings['stats_refresh_interval'] ?? '2';
@@ -717,7 +719,7 @@ if (file_exists($changelogPath)) {
     <div class="setting-row">
       <div class="setting-info">
         <label for="show-inline-logs">Show inline logs</label>
-        <div class="description">When enabled, expanding a running container shows a live log panel alongside resource stats. <strong>Default: Off</strong></div>
+        <div class="description">When enabled, expanding a running container shows a live log panel alongside resource stats. A stopped container always shows its last 200 log lines, so you can see why it stopped. <strong>Default: Off</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="show-inline-logs" <?= $showInlineLogs ? 'checked' : '' ?> onchange="saveSetting('show_inline_logs', this.checked ? '1' : '0')" />
@@ -728,7 +730,7 @@ if (file_exists($changelogPath)) {
     <div class="setting-row">
       <div class="setting-info">
         <label for="log-refresh-interval">Log refresh interval</label>
-        <div class="description">How often to auto-refresh inline logs when the panel is open. Only applies when inline logs are enabled. <strong>Default: 10 seconds</strong></div>
+        <div class="description">How often to auto-refresh inline logs when the panel is open. Only applies to running containers, when inline logs are enabled. <strong>Default: 10 seconds</strong></div>
       </div>
       <div class="setting-control">
         <select id="log-refresh-interval" onchange="saveSetting('log_refresh_interval', this.value)">
@@ -896,6 +898,28 @@ if (file_exists($changelogPath)) {
       <div class="setting-control">
         <input type="checkbox" id="compose-auto-install" <?= $composeAutoInstall ? 'checked' : '' ?> onchange="saveSetting('compose_auto_install', this.checked ? '1' : '0')" />
         <span id="save-status-compose-auto-install" class="save-status">Saved</span>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <label for="confirm-stack-down">Confirm before Stack Down</label>
+        <div class="description">Asks first, and explains what happens, before <code>docker compose down</code> deletes a stack's containers and networks. Turned off when you tick "Don't ask again" in that dialog. <strong>Default: On</strong></div>
+      </div>
+      <div class="setting-control">
+        <input type="checkbox" id="confirm-stack-down" <?= $confirmStackDown ? 'checked' : '' ?> onchange="saveSetting('confirm_stack_down', this.checked ? '1' : '0')" />
+        <span id="save-status-confirm-stack-down" class="save-status">Saved</span>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <label for="confirm-recompose">Confirm before Recompose</label>
+        <div class="description">Asks first, and explains what happens, before Recompose deletes and rebuilds every container in a stack. Turned off when you tick "Don't ask again" in that dialog. <strong>Default: On</strong></div>
+      </div>
+      <div class="setting-control">
+        <input type="checkbox" id="confirm-recompose" <?= $confirmRecompose ? 'checked' : '' ?> onchange="saveSetting('confirm_recompose', this.checked ? '1' : '0')" />
+        <span id="save-status-confirm-recompose" class="save-status">Saved</span>
       </div>
     </div>
   </div>

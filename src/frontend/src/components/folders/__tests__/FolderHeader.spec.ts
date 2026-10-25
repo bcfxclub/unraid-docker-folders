@@ -32,7 +32,7 @@ let pinia: Pinia;
 
 function mountHeader(folder?: Partial<Folder>) {
   return mount(FolderHeader, {
-    props: { folder: makeFolder(folder) },
+    props: { folder: makeFolder(folder), collapsed: !!makeFolder(folder).collapsed },
     global: {
       plugins: [pinia],
     },
@@ -284,6 +284,24 @@ describe('FolderHeader', () => {
       expect(entry).toBeTruthy();
       expect(entry!.attributes('disabled')).toBeUndefined();
     });
+  });
+
+  it('counts crashed containers, and not ones that were stopped', () => {
+    useDockerStore().containers = [
+      makeContainer({ name: 'pg', state: 'exited', status: 'Exited (1) 12 hours ago' }),
+      makeContainer({ name: 'web', state: 'exited', status: 'Exited (0) 2 days ago' }),
+      makeContainer({ name: 'arr', state: 'running', status: 'Up 2 hours' }),
+    ];
+    const containers = ['pg', 'web', 'arr'].map((name) => ({ container_name: name }) as unknown as Folder['containers'][number]);
+    const pill = mountHeader({ containers }).findAll('span').find((s) => s.attributes('title')?.startsWith('pg:'));
+    expect(pill?.text()).toContain('1 crashed');
+    expect(pill?.attributes('title')).toBe('pg: Exited (1) 12 hours ago');
+  });
+
+  it('shows no crashed count when nothing crashed', () => {
+    useDockerStore().containers = [makeContainer({ name: 'web', state: 'exited', status: 'Exited (0) 2 days ago' })];
+    const wrapper = mountHeader({ containers: [{ container_name: 'web' } as unknown as Folder['containers'][number]] });
+    expect(wrapper.text()).not.toContain('crashed');
   });
 
   it('click outside closes the menu', async () => {

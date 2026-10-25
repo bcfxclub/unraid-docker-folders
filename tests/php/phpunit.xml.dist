@@ -14,9 +14,14 @@
     <testsuite name="BackendWatchdog">
       <file>BackendWatchdogTest.php</file>
     </testsuite>
+    <testsuite name="ContainerWatch">
+      <file>ContainerWatchTest.php</file>
+    </testsuite>
     <testsuite name="DockerClientStats">
       <file>DbCopyScriptTest.php</file>
       <file>DockerClientStatsTest.php</file>
+      <file>DockerClientErrorReasonTest.php</file>
+      <file>DockerClientOomPlanTest.php</file>
       <file>DockerClientLogsTest.php</file>
     </testsuite>
     <testsuite name="ImageReference">

@@ -322,3 +322,46 @@ describe('settings store – statsRefreshInterval', () => {
     expect(store.statsRefreshInterval).toBe(2);
   });
 });
+
+describe('settings store – confirmStackActions', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    mockApiFetch.mockReset();
+  });
+
+  it('asks before both actions by default', () => {
+    expect(useSettingsStore().confirmStackActions).toEqual({ down: true, recompose: true });
+  });
+
+  it('fetchSettings reads each action from its own key', async () => {
+    mockApiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ settings: { confirm_stack_down: '0', confirm_recompose: '1' } }),
+    } as Response);
+
+    const store = useSettingsStore();
+    await store.fetchSettings();
+
+    expect(store.confirmStackActions).toEqual({ down: false, recompose: true });
+  });
+
+  it('setConfirmStackAction saves that action\'s key', async () => {
+    mockApiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) } as Response);
+
+    const store = useSettingsStore();
+    await store.setConfirmStackAction('recompose', false);
+
+    expect(store.confirmStackActions.recompose).toBe(false);
+    const body = String(mockApiFetch.mock.calls[0][1]?.body ?? '');
+    expect(decodeURIComponent(body)).toContain('"key":"confirm_recompose","value":"0"');
+  });
+
+  it('setConfirmStackAction goes back to asking when the save fails', async () => {
+    mockApiFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ message: 'Invalid settings key' }) } as Response);
+
+    const store = useSettingsStore();
+    await store.setConfirmStackAction('down', false);
+
+    expect(store.confirmStackActions.down).toBe(true);
+  });
+});

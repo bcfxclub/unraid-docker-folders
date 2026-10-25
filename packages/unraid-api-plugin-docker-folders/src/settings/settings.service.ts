@@ -116,8 +116,12 @@ export class SettingsService {
         }
 
         // A checkbox: '0' or '1' only, as in settings.php.
-        if (key === 'compose_auto_install' && value !== '0' && value !== '1') {
-            throw new BadRequestException('compose_auto_install must be "0" or "1"');
+        if (
+            (key === 'compose_auto_install' || key === 'confirm_stack_down' || key === 'confirm_recompose') &&
+            value !== '0' &&
+            value !== '1'
+        ) {
+            throw new BadRequestException(`${key} must be "0" or "1"`);
         }
 
         if (value.length > MAX_VALUE_LENGTH) {

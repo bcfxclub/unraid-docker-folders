@@ -28,6 +28,19 @@ register_shutdown_function(function () {
   }
 });
 
+// The container watch (ContainerWatch.php). At shutdown, so a schedule's
+// flock or a long backup never holds it back, and after the watchdog above,
+// so a hung Docker socket never delays that. It takes its own lock and checks
+// its own ownership and socket.
+register_shutdown_function(function () {
+  try {
+    require_once dirname(__DIR__) . '/classes/ContainerWatch.php';
+    ContainerWatch::run();
+  } catch (Throwable $e) {
+    error_log('Container watch error: ' . $e->getMessage());
+  }
+});
+
 if (!file_exists(DOCKER_SOCKET)) {
   exit(0);
 }

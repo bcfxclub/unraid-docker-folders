@@ -70,9 +70,12 @@
         <p class="flex-1 text-[11px] text-text-secondary font-mono truncate min-w-0">
           <ImageLink :image="container.image" :href="imageLink" />
         </p>
-        <span class="text-[11px] text-text shrink-0">{{ container.status }}</span>
+        <span class="text-[11px] shrink-0" :class="status.crashed ? 'text-error' : 'text-text'" :title="status.tooltip">{{ container.status }}</span>
         <ChevronIcon :expanded="expanded" />
       </div>
+
+      <ActionFailureLine :container="container" class="px-4 sm:px-6 pb-1" />
+      <PortProblemLine :container="container" class="px-4 sm:px-6 pb-1" />
   
       <!-- Compact ports (collapsed) -->
       <div v-if="compactPorts && !expanded" class="px-4 sm:px-6 pb-0.5">
@@ -210,11 +213,13 @@
               {{ securityFindings.length }}
             </span>
           </button>
-          <span class="hidden sm:inline text-[11px] text-text-secondary truncate">{{ container.status }}</span>
+          <span class="hidden sm:inline text-[11px] truncate" :class="status.crashed ? 'text-error' : 'text-text-secondary'" :title="status.tooltip">{{ container.status }}</span>
         </div>
         <span class="text-[11px] text-text-secondary font-mono truncate">
           <ImageLink :image="container.image" :href="imageLink" />
         </span>
+        <ActionFailureLine :container="container" />
+        <PortProblemLine :container="container" />
       </div>
 
       <!-- Compact ports (list collapsed) -->
@@ -292,14 +297,10 @@
       :message="confirmModalConfig.message"
       :confirm-label="confirmModalConfig.label"
       :variant="confirmModalConfig.variant"
+      :checkbox-label="confirmAction === 'remove' ? `Also delete the image (${container.image})` : undefined"
       @confirm="handleConfirm"
-      @cancel="confirmAction = null; removeImageToo = false"
-    >
-      <label v-if="confirmAction === 'remove'" class="flex items-center gap-2 mt-3 text-sm text-text-secondary cursor-pointer">
-        <input type="checkbox" v-model="removeImageToo" class="cursor-pointer" />
-        Also delete the image ({{ container.image }})
-      </label>
-    </ConfirmModal>
+      @cancel="confirmAction = null"
+    />
     <InputModal
       :is-open="showDelayModal"
       title="Autostart Delay"
@@ -360,7 +361,7 @@ import ChevronIcon from '@/components/common/ChevronIcon.vue';
 import ImageLink from '@/components/common/ImageLink.vue';
 import ContainerDetails from '@/components/docker/ContainerDetails.vue';
 import ContainerIcon from '@/components/docker/ContainerIcon.vue';
-import { containerStatus, containerEditUrl, containerWebuiUrl, FALLBACK_CONTAINER_ICON, openContainerTerminal } from '@/utils/containerDisplay';
+import { containerStatus, containerEditUrl, containerWebuiUrl, FALLBACK_CONTAINER_ICON, isRunningContainer, openContainerTerminal } from '@/utils/containerDisplay';
 import { imageRegistryUrl } from '@/utils/imageRegistry';
 import IconPlay from '@/components/icons/IconPlay.vue';
 import IconStop from '@/components/icons/IconStop.vue';
@@ -370,6 +371,8 @@ import IconDownload from '@/components/icons/IconDownload.vue';
 import IconGlobe from '@/components/icons/IconGlobe.vue';
 import IconAutostart from '@/components/icons/IconAutostart.vue';
 import IconAdopt from '@/components/icons/IconAdopt.vue';
+import ActionFailureLine from '@/components/docker/ActionFailureLine.vue';
+import PortProblemLine from '@/components/docker/PortProblemLine.vue';
 
 const isMobile = useIsMobile();
 const dockerStore = useDockerStore();
@@ -417,7 +420,6 @@ async function handleToggleAutostart() {
 }
 
 const confirmAction = ref<'stop' | 'restart' | 'remove' | 'force-update' | 'recreate' | null>(null);
-const removeImageToo = ref(false);
 const showDelayModal = ref(false);
 
 // Folder picker: the menu-driven twin of drag and drop, through the same store
@@ -507,17 +509,16 @@ function recreatePayload(): PullRequest {
   return { image, name, managed, id, recreateOnly: true };
 }
 
-function handleConfirm() {
+function handleConfirm(removeImageToo: boolean) {
   const action = confirmAction.value;
   confirmAction.value = null;
   if (action === 'stop') emit('stop', props.container.id);
   else if (action === 'restart') emit('restart', props.container.id);
-  else if (action === 'remove') emit('remove', props.container.id, removeImageToo.value);
+  else if (action === 'remove') emit('remove', props.container.id, removeImageToo);
   else if (action === 'force-update') emit('pull', pullPayload(true));
   // No pull: the newer image is already on disk. Pulling again would fail for
   // an image built locally.
   else if (action === 'recreate') emit('pull', recreatePayload());
-  removeImageToo.value = false;
 }
 
 const expanded = ref(false);
@@ -627,16 +628,32 @@ const logsLoading = ref(false);
 const logError = ref('');
 const logRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null);
 // GraphQL mode pushes new lines instead of polling. The pane keeps at most
-// this many, newest first; polling shows the last 50.
+// this many, newest first; polling shows the last INLINE_LOG_TAIL.
 const MAX_STREAMED_LOG_LINES = 200;
+const INLINE_LOG_TAIL = 50;
 // After a log stream ends while the pane is still open, poll for this long
 // before opening a new stream.
 const LOG_STREAM_RETRY_MS = 15000;
 let closeLogStream: (() => void) | null = null;
 let logStreamRetryTimer: ReturnType<typeof setTimeout> | undefined;
 
+// A stopped container's logs no longer change, and they are the first place to
+// look for why it stopped, so its pane always shows, once, with a longer tail.
+// The setting only decides whether a running container streams or polls.
+// Unlike isRunning, this also counts a container whose process exited while
+// Docker still lists it as running: its logs end with the crash too. The card's
+// other controls keep isRunning, so that container can still be stopped. A
+// restarting container stays live: each attempt writes new output.
+const STOPPED_LOG_LINES = 200;
+const logsLive = computed(
+  () => isRunningContainer(props.container) || props.container.state === 'restarting',
+);
+// Each fetch takes a number, and only the latest one may write the pane, so a
+// 50-line poll sent before a stop cannot land after the 200-line fetch.
+let logFetchSeq = 0;
+
 const shouldShowInlineLogs = computed(
-  () => settingsStore.showInlineLogs && expanded.value && isRunning.value,
+  () => expanded.value && (!logsLive.value || settingsStore.showInlineLogs),
 );
 
 // Both view branches render the same details; only the padding differs.
@@ -654,9 +671,12 @@ const detailsProps = computed(() => ({
 }));
 
 async function fetchLogs() {
+  const seq = ++logFetchSeq;
   logsLoading.value = true;
   try {
-    const { ok, data } = await useBackend().containers.logs(props.container.name, 50);
+    const tail = logsLive.value ? INLINE_LOG_TAIL : STOPPED_LOG_LINES;
+    const { ok, data } = await useBackend().containers.logs(props.container.name, tail);
+    if (seq !== logFetchSeq) return;
     if (ok) {
       const raw = data.logs || '';
       const prevFirst = logLines.value[0] || '';
@@ -682,12 +702,13 @@ async function fetchLogs() {
       newLineCount.value = 0;
     }
   } catch (e) {
+    if (seq !== logFetchSeq) return;
     console.error('Error fetching logs:', e);
     logLines.value = [];
     logError.value = 'Failed to load logs.';
     newLineCount.value = 0;
   } finally {
-    logsLoading.value = false;
+    if (seq === logFetchSeq) logsLoading.value = false;
   }
 }
 
@@ -703,7 +724,7 @@ function startLogStream(): boolean {
 
   let first = true;
   logsLoading.value = true;
-  closeLogStream = live.logs(props.container.name, 50, {
+  closeLogStream = live.logs(props.container.name, INLINE_LOG_TAIL, {
     onData: (data) => {
       logsLoading.value = false;
       if (data.error) {
@@ -746,12 +767,17 @@ function startTimedLogPolling() {
 }
 
 /**
- * Start showing logs. A refresh interval of 0 means the user refreshes by
- * hand, so that fetches once in both modes. Otherwise GraphQL mode streams
- * and PHP mode polls at the interval.
+ * Start showing logs. A stopped container fetches its last lines once. For a
+ * running one, a refresh interval of 0 means the user refreshes by hand, so
+ * that fetches once in both modes. Otherwise GraphQL mode streams and PHP mode
+ * polls at the interval.
  */
 function startLogPolling() {
   stopLogPolling();
+  if (!logsLive.value) {
+    fetchLogs();
+    return;
+  }
   if (settingsStore.logRefreshInterval > 0 && startLogStream()) return;
   startTimedLogPolling();
 }
@@ -772,13 +798,16 @@ function refreshLogs() {
   else fetchLogs();
 }
 
-watch(shouldShowInlineLogs, (show) => {
+// One watcher for both, so a stop that also opens the pane fetches once. A
+// start or stop with the pane open switches between the live tail and the
+// one-time stopped tail.
+watch([shouldShowInlineLogs, logsLive], ([show]) => {
   if (show) startLogPolling();
   else stopLogPolling();
 });
 
 watch(() => settingsStore.logRefreshInterval, (next, prev) => {
-  if (!shouldShowInlineLogs.value) return;
+  if (!shouldShowInlineLogs.value || !logsLive.value) return;
   // A stream does not use the interval, so a change between two nonzero
   // values leaves it alone.
   if (closeLogStream && next > 0 && prev > 0) return;

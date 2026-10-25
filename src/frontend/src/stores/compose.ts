@@ -6,6 +6,19 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { ComposeStack, ComposeStatus, ComposeImportResult, ComposeFileVersion, ComposeFileVersionDetail, ComposeValidationError } from '@/types/compose';
 import { useBackend } from '@/backends';
+import { useDockerStore } from '@/stores/docker';
+import { useFolderStore } from '@/stores/folders';
+
+export interface StackActionStatus {
+  kind: 'stop' | 'down';
+  /** Set once it fails. Until then the action is still running. */
+  error?: string;
+}
+
+/** What a stack's row or header says about a stop or down. */
+export function stackActionText(status: StackActionStatus): string {
+  return status.error ?? (status.kind === 'down' ? 'Removing…' : 'Stopping…');
+}
 
 export const useComposeStore = defineStore('compose', () => {
   // State
@@ -176,6 +189,49 @@ export const useComposeStore = defineStore('compose', () => {
       const msg = e instanceof Error ? e.message : 'Unknown error';
       console.error('Error stopping stack:', e);
       return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * Stop and down run without a progress modal, so their state lives here,
+   * where the stacks pane row and the folder header both show it. While one
+   * runs the stack's actions are disabled, so a second click can't start an
+   * overlapping call. A failure stays until the next action on that stack.
+   */
+  const stackActionStatus = ref(new Map<string, StackActionStatus>());
+
+  function isStackBusy(project: string): boolean {
+    const status = stackActionStatus.value.get(project);
+    return !!status && status.error === undefined;
+  }
+
+  /** Compose is unavailable for this stack, or a stop or down is running on it. */
+  function stackActionsDisabled(project: string): boolean {
+    return composeActionsDisabled.value || isStackBusy(project);
+  }
+
+  /** Why stackActionsDisabled is true, for a button's title. */
+  function stackDisabledReason(project: string): string | undefined {
+    const status = stackActionStatus.value.get(project);
+    if (status && isStackBusy(project)) return stackActionText(status);
+    return composeDisabledReason.value ?? undefined;
+  }
+
+  /** Drop an old failure. Never clears a stop or down still running. */
+  function clearStackStatus(project: string) {
+    if (!isStackBusy(project)) stackActionStatus.value.delete(project);
+  }
+
+  async function runStackAction(project: string, kind: 'stop' | 'down') {
+    if (isStackBusy(project)) return;
+    stackActionStatus.value.set(project, { kind });
+    let result: { success: boolean; error?: string } = { success: false };
+    try {
+      result = await (kind === 'down' ? stackDown : stackStop)(project);
+      await Promise.all([useDockerStore().fetchContainers(), useFolderStore().fetchFolders()]);
+    } finally {
+      if (result.success) stackActionStatus.value.delete(project);
+      else stackActionStatus.value.set(project, { kind, error: result.error || 'Failed' });
     }
   }
 
@@ -454,6 +510,12 @@ export const useComposeStore = defineStore('compose', () => {
     stackUp,
     stackDown,
     stackStop,
+    stackActionStatus,
+    isStackBusy,
+    stackActionsDisabled,
+    stackDisabledReason,
+    clearStackStatus,
+    runStackAction,
     stackRestart,
     validateCompose,
     getComposeFile,

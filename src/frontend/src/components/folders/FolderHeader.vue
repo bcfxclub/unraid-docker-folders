@@ -11,12 +11,12 @@
          paint on top. -->
     <div
       class="absolute inset-0 rounded-sm pointer-events-none transition-opacity duration-200"
-      :class="folder.collapsed ? 'opacity-40' : 'opacity-100'"
+      :class="collapsed ? 'opacity-40' : 'opacity-100'"
       :style="{ background: `linear-gradient(to right, ${folderTint}, transparent)` }"
     ></div>
     <div class="relative flex items-center gap-2 flex-1 min-w-0">
       <DragHandle v-if="!dragLocked" handle-class="folder-drag-handle shrink-0 text-text-secondary cursor-grab active:cursor-grabbing" />
-      <ChevronIcon :expanded="!folder.collapsed" />
+      <ChevronIcon :expanded="!collapsed" />
       <div
         v-if="containerIcons.length > 0"
         class="hidden sm:grid shrink-0 gap-0.5 mr-2"
@@ -30,7 +30,7 @@
         class="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 bg-info/15 text-info rounded text-[11px] font-medium tracking-wide uppercase mr-1"
         :title="`Auto-grouped from compose project: ${folder.compose_project}`"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>
+        <IconComposeStack :size="12" />
         Compose
       </span>
       <ComposeControls
@@ -41,10 +41,15 @@
         @edit-compose="(p) => emit('edit-compose', p)"
         @compose-up="(p) => emit('compose-up', p)"
         @compose-recompose="(p) => emit('compose-recompose', p)"
+        @compose-down="(p) => emit('compose-down', p)"
         @schedules="(type, id) => emit('schedules', type, id)"
       />
       <span class="shrink-0 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold ml-1" :class="runningCount > 0 ? 'bg-primary text-primary-text' : 'bg-border text-text-secondary'" :title="`${runningCount} running / ${existingContainerCount} total`">
         {{ runningCount }}/{{ existingContainerCount }}
+      </span>
+      <span v-if="crashedCount > 0" class="shrink-0 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold ml-1 bg-error/15 text-error" :title="crashedTitle">
+        <span class="hidden sm:inline">{{ crashedCount }} crashed</span>
+        <span class="sm:hidden">{{ crashedCount }}</span>
       </span>
       <span v-if="folderUpdateCount > 0" class="shrink-0 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold ml-1 bg-warning/20 text-warning" :title="`${folderUpdateCount} update(s) available`">
         <span class="hidden sm:inline">{{ folderUpdateCount }} update{{ folderUpdateCount > 1 ? 's' : '' }}</span>
@@ -56,14 +61,14 @@
         <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
         <span class="hidden sm:inline">Checking…</span>
       </span>
-      <span v-if="folder.collapsed && collapsedPorts" class="hidden sm:inline text-[11px] text-text font-mono ml-2 truncate">Ports: {{ collapsedPorts }}</span>
+      <span v-if="collapsed && collapsedPorts" class="hidden sm:inline text-[11px] text-text font-mono ml-2 truncate">Ports: {{ collapsedPorts }}</span>
       <!-- Folder total stats loading -->
-      <div v-if="folder.collapsed && settingsStore.showStats && !folderStats && runningCount > 0" class="hidden md:block ml-auto mr-4 shrink-0 w-[140px] space-y-0.5">
+      <div v-if="collapsed && settingsStore.showStats && !folderStats && runningCount > 0" class="hidden md:block ml-auto mr-4 shrink-0 w-[140px] space-y-0.5">
         <StatsBar label="CPU" :percent="null" size="inline" />
         <StatsBar label="MEM" :percent="null" size="inline" />
       </div>
       <!-- Folder total stats, as a share of the host -->
-      <div v-if="folder.collapsed && settingsStore.showStats && folderStats" class="hidden md:block ml-auto mr-4 shrink-0 w-[140px] space-y-0.5" @click.stop>
+      <div v-if="collapsed && settingsStore.showStats && folderStats" class="hidden md:block ml-auto mr-4 shrink-0 w-[140px] space-y-0.5" @click.stop>
         <StatsBar label="CPU" :percent="folderStats.cpuPercent" size="inline" />
         <StatsBar label="MEM" :percent="folderStats.memPercent" size="inline" />
       </div>
@@ -123,11 +128,13 @@ import KebabMenu from '@/components/KebabMenu.vue';
 import type { KebabMenuItem } from '@/components/KebabMenu.vue';
 import { byLabel } from '@/utils/menu';
 import { AUTOSTART_ICON, DOWNLOAD_ICON, EDIT_ICON, GEAR_ICON, PLAY_ICON, REFRESH_ICON, STOPWATCH_ICON, TRASH_ICON } from '@/utils/menuIcons';
+import { stackActionItems } from '@/utils/stackMenu';
 import ComposeControls from '@/components/compose/ComposeControls.vue';
 import StatsBar from '@/components/common/StatsBar.vue';
 import DragHandle from '@/components/common/DragHandle.vue';
 import ChevronIcon from '@/components/common/ChevronIcon.vue';
 import IconAutostart from '@/components/icons/IconAutostart.vue';
+import IconComposeStack from '@/components/icons/IconComposeStack.vue';
 import InputModal from '@/components/InputModal.vue';
 import type { Folder } from '@/types/folder';
 import { SORT_MODE_OPTIONS } from '@/types/folder';
@@ -140,6 +147,8 @@ const menuOpen = computed(() => kebabMenu.value?.menuOpen ?? false);
 
 interface Props {
   folder: Folder;
+  /** Shown state, not the saved one: a filter can hold a collapsed folder open. */
+  collapsed: boolean;
   hideStopped?: boolean;
   hiddenCount?: number;
 }
@@ -162,6 +171,7 @@ const emit = defineEmits<{
   'update-folder': [];
   'edit-compose': [project: string];
   'compose-recompose': [project: string];
+  'compose-down': [project: string];
   'compose-pull': [project: string];
   'compose-up': [project: string];
   schedules: [targetType: string, targetId: string];
@@ -207,9 +217,13 @@ const folderCheckingUpdates = computed(() =>
 const {
   existingContainers,
   runningCount,
+  crashedContainers,
   totalCount: existingContainerCount,
   isRunning,
 } = useFolderRunningState(() => props.folder);
+
+const crashedCount = computed(() => crashedContainers.value.length);
+const crashedTitle = computed(() => crashedContainers.value.map((c) => `${c.name}: ${c.status}`).join('\n'));
 
 const allAutostart = computed(() => {
   if (existingContainers.value.length === 0) return false;
@@ -256,8 +270,9 @@ const folderMenuItems = computed<KebabMenuItem[]>(() => {
   return items;
 });
 
-function composeAvailability() {
-  return { composeDisabled: composeStore.composeActionsDisabled, composeReason: composeStore.composeDisabledReason ?? undefined };
+// Also off while a stop or down runs on this stack, from here or the stacks pane.
+function composeAvailability(project: string) {
+  return { composeDisabled: composeStore.stackActionsDisabled(project), composeReason: composeStore.stackDisabledReason(project) };
 }
 
 /** Things that act on the folder's containers or images right now. */
@@ -279,23 +294,14 @@ const actionItems = computed<KebabMenuItem[]>(() => {
     });
   }
 
-  // Compose stack actions.
-  //
-  // Gated only on the folder actually being a compose project. Compose
-  // availability is an async check, so these are disabled rather than hidden;
-  // hiding them made the menu reflow once the status landed.
-  //
-  // `show` is still used for genuinely state-dependent entries (up vs stop),
-  // which depend on container state we already have, not on the status check.
   if (props.folder.compose_project) {
-    const { composeDisabled, composeReason } = composeAvailability();
-    items.push(
-      { label: 'Stack Up', icon: PLAY_ICON, action: 'compose-up', show: !isRunning.value, disabled: composeDisabled, title: composeReason },
-      { label: 'Stop All', icon: 'M6 4h4v16H6zM14 4h4v16h-4z', action: 'compose-stop', show: isRunning.value, disabled: composeDisabled, title: composeReason },
-      { label: 'Pull Latest Images', icon: DOWNLOAD_ICON, action: 'compose-pull', disabled: composeDisabled, title: composeReason },
-      { label: 'Recompose', icon: REFRESH_ICON, action: 'compose-recompose', show: isRunning.value, disabled: composeDisabled, title: composeReason },
-      { label: composeStore.composePluginInstalled ? 'View Stack' : 'Edit Stack', icon: EDIT_ICON, action: 'compose-edit' },
-    );
+    const { composeDisabled, composeReason } = composeAvailability(props.folder.compose_project);
+    items.push(...stackActionItems({
+      running: isRunning.value,
+      disabled: composeDisabled,
+      reason: composeReason,
+      pluginInstalled: composeStore.composePluginInstalled,
+    }));
   }
 
   return byLabel(items);
@@ -326,7 +332,7 @@ const optionItems = computed<KebabMenuItem[]>(() => {
   const items: KebabMenuItem[] = [{ label: 'Edit Folder', icon: EDIT_ICON, action: 'edit' }];
 
   if (props.folder.compose_project) {
-    const { composeDisabled, composeReason } = composeAvailability();
+    const { composeDisabled, composeReason } = composeAvailability(props.folder.compose_project);
     items.push(
       { label: composeStack.value?.autostart ? 'Disable Stack Autostart' : 'Enable Stack Autostart', icon: REFRESH_ICON, action: 'compose-toggle-autostart', disabled: composeDisabled, title: composeReason },
     );
@@ -368,7 +374,7 @@ async function handleMenuSelect(action: string) {
   else if (action === 'compose-up' && props.folder.compose_project) {
     emit('compose-up', props.folder.compose_project);
   } else if (action === 'compose-stop' && props.folder.compose_project) {
-    await composeStore.stackStop(props.folder.compose_project);
+    await composeStore.runStackAction(props.folder.compose_project, 'stop');
   } else if (action === 'compose-pull' && props.folder.compose_project) {
     emit('compose-pull', props.folder.compose_project);
   } else if (action === 'compose-recompose' && props.folder.compose_project) {

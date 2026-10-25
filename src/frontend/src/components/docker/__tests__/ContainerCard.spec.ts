@@ -742,11 +742,11 @@ describe('ContainerCard', () => {
       }
     });
 
-    it('does not show log panel for exited containers', async () => {
+    it('shows the log panel for exited containers even with the setting off', async () => {
       const wrapper = mountCardWithSharedPinia(
         { state: 'exited' },
         { view: 'list' },
-        { enableLogs: true },
+        { enableLogs: false },
       );
 
       // Expand
@@ -755,7 +755,8 @@ describe('ContainerCard', () => {
       await flushPromises();
 
       const refreshBtn = wrapper.findAll('button').find((b) => b.attributes('title') === 'Refresh logs');
-      expect(refreshBtn).toBeUndefined();
+      expect(refreshBtn).toBeDefined();
+      expect(findLogsCall()?.[0]).toContain('tail=200');
     });
 
     it('passes container name in the logs fetch URL', async () => {
@@ -1409,4 +1410,39 @@ describe('ContainerCard', () => {
     });
   });
 
+});
+
+describe('ContainerCard – failed action', () => {
+  const REASON = 'Could not start container: endpoint with name web already exists in network bridge';
+
+  for (const view of ['grid', 'list'] as const) {
+    it(`shows Docker's reason in the ${view} view, and dismisses it on click`, async () => {
+      const wrapper = mountCard({ name: 'web', state: 'exited' }, { view });
+      const docker = useDockerStore();
+      docker.actionFailures.set('web', { action: 'start', error: REASON, state: 'exited' });
+      await flushPromises();
+
+      const line = wrapper.findAll('button').find((b) => b.text() === REASON);
+      expect(line).toBeTruthy();
+      await line!.trigger('click');
+      expect(docker.actionFailures.has('web')).toBe(false);
+    });
+  }
+});
+
+describe('ContainerCard – crashed', () => {
+  for (const view of ['grid', 'list'] as const) {
+    it(`colors a crash's status line as an error in the ${view} view`, () => {
+      const wrapper = mountCard({ state: 'exited', status: 'Exited (1) 12 hours ago' }, { view });
+      const line = wrapper.findAll('span').find((s) => s.text() === 'Exited (1) 12 hours ago');
+      expect(line?.classes()).toContain('text-error');
+      expect(line?.attributes('title')).toBe('Crashed (exit code 1)');
+    });
+  }
+
+  it('leaves a stopped container\'s status line alone', () => {
+    const wrapper = mountCard({ state: 'exited', status: 'Exited (0) 2 days ago' });
+    const line = wrapper.findAll('span').find((s) => s.text() === 'Exited (0) 2 days ago');
+    expect(line?.classes()).not.toContain('text-error');
+  });
 });

@@ -1,6 +1,6 @@
 <template>
   <div class="mb-1">
-    <FolderHeader :folder="folder" :hide-stopped="hideStopped" :hidden-count="hiddenCount" @toggle-collapse="toggleCollapse" @toggle-hide-stopped="hideStopped = !hideStopped" @edit="$emit('edit', folder)" @delete="$emit('delete', folder.id)" @update-folder="$emit('update-folder', folder)" @edit-compose="(p) => emit('edit-compose', p)" @compose-up="(p) => emit('compose-up', p)" @compose-recompose="(p) => emit('compose-recompose', p)" @compose-pull="(p) => emit('compose-pull', p)" @schedules="(type, id) => emit('schedules', type, id)" />
+    <FolderHeader :folder="folder" :collapsed="!isExpanded" :hide-stopped="hideStopped" :hidden-count="hiddenCount" @toggle-collapse="toggleCollapse" @toggle-hide-stopped="hideStopped = !hideStopped" @edit="$emit('edit', folder)" @delete="$emit('delete', folder.id)" @update-folder="$emit('update-folder', folder)" @edit-compose="(p) => emit('edit-compose', p)" @compose-up="(p) => emit('compose-up', p)" @compose-recompose="(p) => emit('compose-recompose', p)" @compose-down="(p) => emit('compose-down', p)" @compose-pull="(p) => emit('compose-pull', p)" @schedules="(type, id) => emit('schedules', type, id)" />
 
     <div class="expand-grid" :class="{ 'expand-expanded': isExpanded, 'expand-settled': expandSettled }">
       <div class="expand-inner px-2 sm:px-4">
@@ -67,7 +67,8 @@ import { useSettingsStore } from '@/stores/settings';
 import type { Folder } from '@/types/folder';
 import { effectiveSortMode, sortByMode } from '@/utils/sortMode';
 import { safeLocalStorageGet, safeLocalStorageSet } from '@/utils/safeStorage';
-import { isAliveContainer } from '@/utils/containerDisplay';
+import { isShownWhenHidingStopped } from '@/utils/containerDisplay';
+import { containerMatchesSearch } from '@/utils/search';
 import FolderHeader from './FolderHeader.vue';
 import ContainerCard from '@/components/docker/ContainerCard.vue';
 
@@ -89,6 +90,7 @@ const emit = defineEmits<{
   'edit-compose': [project: string];
   'compose-up': [project: string];
   'compose-recompose': [project: string];
+  'compose-down': [project: string];
   'compose-pull': [project: string];
   schedules: [targetType: string, targetId: string];
   security: [containerId: string];
@@ -106,9 +108,15 @@ const hideStopped = ref(safeLocalStorageGet(`docker-folders-hide-stopped-${props
 watch(hideStopped, (v) => safeLocalStorageSet(storageKey.value, v ? '1' : '0'));
 
 
-const isSearching = computed(() => dockerStore.searchQuery.trim().length > 0);
-
-const isExpanded = computed(() => !props.folder.collapsed || isSearching.value);
+// A search or a stack filter opens every folder it leaves on screen. While
+// one is on, the header toggles this override instead of the saved state, so
+// a folder can still be closed without changing how it is saved. Starting a
+// filter, or picking another stack, opens them all again.
+const filterCollapsed = ref(false);
+watch(() => [dockerStore.isFiltering, dockerStore.stackFilter], () => {
+  filterCollapsed.value = false;
+});
+const isExpanded = computed(() => (dockerStore.isFiltering ? !filterCollapsed.value : !props.folder.collapsed));
 
 // Overflow on the expand container must stay hidden while the height
 // transition runs (see .expand-settled in main.css), so mark the folder as
@@ -136,20 +144,13 @@ const existingAssociations = computed(() =>
 
 const folderContainers = computed(() => {
   let list = existingAssociations.value;
-  if (isSearching.value) {
-    const q = dockerStore.searchQuery.trim().toLowerCase();
-    list = list.filter((assoc) => {
-      const container = getContainer(assoc.container_name);
-      if (container) {
-        return container.name.toLowerCase().includes(q) || container.image.toLowerCase().includes(q);
-      }
-      return assoc.container_name.toLowerCase().includes(q);
-    });
+  if (dockerStore.isFiltering) {
+    list = list.filter((assoc) => dockerStore.containerPassesFilters(getContainer(assoc.container_name), assoc.container_name));
   }
   if (hideStopped.value) {
     list = list.filter((assoc) => {
       const container = getContainer(assoc.container_name);
-      return isAliveContainer(container);
+      return isShownWhenHidingStopped(container);
     });
   }
   return sortByMode(list, effectiveSortMode(props.folder.sort_mode, settingsStore.sortMode), (assoc) => {
@@ -169,6 +170,7 @@ const folderContainers = computed(() => {
 // to stored container_folders rows if we have no stack metadata yet.
 const previewAssociations = computed(() => {
   if (!props.folder.compose_project) return [];
+  if (dockerStore.stackFilter !== null && !dockerStore.stackFilterKeepsDownStackFolder(props.folder.compose_project)) return [];
   const stack = composeStore.getStackByProject(props.folder.compose_project);
   let names: string[];
   if (stack?.service_names && stack.service_names.length > 0) {
@@ -176,16 +178,27 @@ const previewAssociations = computed(() => {
   } else {
     names = (props.folder.containers || []).map((a) => a.container_name);
   }
-  if (isSearching.value) {
-    const q = dockerStore.searchQuery.trim().toLowerCase();
-    names = names.filter((name) => name.toLowerCase().includes(q));
-  }
+  // A service whose container was moved into another folder is shown there,
+  // so it leaves this preview. It stays in the compose project.
+  const elsewhere = new Set(
+    folderStore.folders
+      .filter((f) => f.id !== props.folder.id)
+      .flatMap((f) => f.containers.map((c) => c.container_name)),
+  );
+  const project = props.folder.compose_project;
+  const movedService = (name: string) =>
+    elsewhere.has(name) ||
+    dockerStore.containers.some((c) =>
+      elsewhere.has(c.name) &&
+      c.labels?.['com.docker.compose.project'] === project &&
+      c.labels?.['com.docker.compose.service'] === name);
+  names = names.filter((name) => !movedService(name) && containerMatchesSearch(dockerStore.searchQuery, name));
   return names;
 });
 
 const hiddenCount = computed(() => {
   if (!hideStopped.value) return 0;
-  return existingAssociations.value.filter((assoc) => !isAliveContainer(getContainer(assoc.container_name))).length;
+  return existingAssociations.value.filter((assoc) => !isShownWhenHidingStopped(getContainer(assoc.container_name))).length;
 });
 
 function getContainer(name: string) {
@@ -193,8 +206,9 @@ function getContainer(name: string) {
 }
 
 function toggleCollapse() {
-  const wasCollapsed = props.folder.collapsed;
-  folderStore.toggleFolderCollapse(props.folder.id);
+  const wasCollapsed = !isExpanded.value;
+  if (dockerStore.isFiltering) filterCollapsed.value = !filterCollapsed.value;
+  else folderStore.toggleFolderCollapse(props.folder.id);
 
   // Pre-fetch stats for running containers when expanding a folder
   // so data is ready by the time ContainerCard components mount
@@ -214,7 +228,7 @@ const collapsedRegisteredIds = ref(new Set<string>());
 
 function registerCollapsedStats() {
   unregisterCollapsedStats();
-  if (!props.folder.collapsed || !settingsStore.showStats) return;
+  if (isExpanded.value || !settingsStore.showStats) return;
   for (const assoc of folderContainers.value) {
     const container = getContainer(assoc.container_name);
     if (container?.state === 'running') {
@@ -234,8 +248,10 @@ function unregisterCollapsedStats() {
 onMounted(() => registerCollapsedStats());
 onUnmounted(() => unregisterCollapsedStats());
 
-watch(() => props.folder.collapsed, () => {
-  if (props.folder.collapsed) {
+// Also when the listed containers change while collapsed: a filter can
+// collapse a folder, and clearing or changing it changes who is listed.
+watch([isExpanded, () => folderContainers.value.map((a) => a.container_name).join('\n')], ([expanded]) => {
+  if (!expanded) {
     // Wait for ContainerCards to unmount first, then register
     nextTick(() => registerCollapsedStats());
   } else {

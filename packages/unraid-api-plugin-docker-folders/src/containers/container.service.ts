@@ -168,9 +168,18 @@ export class ContainerService {
      * Docker's own message is kept, because it names the real reason: a
      * conflict on removing a running container, or a missing image. A 404
      * becomes NotFoundException so the resolver stays pure delegation.
+     * docker-modem puts the daemon's own text in `json.message`; its
+     * `message` adds "(HTTP code 500) server error - ", which PHP's
+     * DockerClient::getLastErrorReason leaves out too.
      */
     private failure(action: string, id: string, error: unknown): Error {
-        const reason = error instanceof Error ? error.message : String(error);
+        const json = (error as { json?: { message?: unknown } } | null)?.json;
+        const reason =
+            typeof json?.message === 'string' && json.message !== ''
+                ? json.message
+                : error instanceof Error
+                  ? error.message
+                  : String(error);
         this.logger.warn(`Could not ${action} container ${id}: ${reason}`);
 
         const status = (error as { statusCode?: number } | null)?.statusCode;

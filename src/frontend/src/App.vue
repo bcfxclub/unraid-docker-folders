@@ -23,6 +23,17 @@
           @update:model-value="settingsStore.setSortMode"
           @update:sort-folders="settingsStore.setSortFolders"
         />
+        <button
+          @click="stacksPaneOpen = !stacksPaneOpen"
+          class="nav-btn shrink-0"
+          :class="{ active: stacksPaneOpen }"
+          :aria-pressed="stacksPaneOpen"
+          aria-controls="stacks-pane"
+          aria-label="Compose stacks"
+          :title="stacksPaneOpen ? 'Hide compose stacks' : 'Show compose stacks'"
+        >
+          <IconComposeStack />
+        </button>
       </div>
       <!-- Its own header child rather than part of the button cluster so
            `flex-1` can eat the whole gap between the two groups. `.form-input`
@@ -41,7 +52,7 @@
           :style="{ paddingRight: `${searchOverlayWidth + 16}px` }"
         />
         <div ref="searchOverlayEl" class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
-          <span class="text-xs text-text-secondary whitespace-nowrap pointer-events-none">{{ dockerStore.containerCount }} containers, {{ folderStore.folderCount }} folders</span>
+          <span class="text-xs text-text-secondary whitespace-nowrap pointer-events-none">{{ searchCountLabel }}</span>
           <button
             v-if="dockerStore.searchQuery"
             @click="dockerStore.searchQuery = ''"
@@ -134,81 +145,104 @@
     <main class="min-h-[200px]">
       <BackendNotice />
       <ComposeSetupBanner />
-      <LoadingSkeleton v-if="isLoading" :view="viewMode" />
-
-      <div v-else-if="error" class="text-center py-8 px-6 text-error">
-        <p>Error: {{ error }}</p>
-        <button @click="loadData" class="mt-4 px-6 py-2 bg-error text-white border-none rounded cursor-pointer">Retry</button>
-      </div>
-
-      <div v-else>
-        <!-- Folders -->
-        <div v-if="filteredFolders.length > 0" id="folder-list" class="mb-8">
-          <FolderContainer
-            v-for="folder in filteredFolders"
-            :key="folder.id"
-            :folder="folder"
-            :view="viewMode"
-            :data-folder-sort-id="folder.id"
-
-            @edit="openEditFolderModal"
-            @delete="deleteFolder"
-            @pull="handlePull"
-            @update-folder="handleUpdateFolder"
+      <!-- Pane and content wrap, so on a phone the pane sits above the folders. -->
+      <div class="relative flex flex-wrap gap-4 items-start">
+        <Transition name="stacks-pane" @before-leave="pinPaneWidth">
+          <StacksPane
+            v-if="stacksPaneOpen"
+            id="stacks-pane"
+            class="flex-[1_1_240px] max-w-[280px] min-w-0"
             @edit-compose="openComposeEditor"
             @compose-up="openComposeUp"
             @compose-recompose="openComposeRecompose"
+            @compose-down="downConfirm.request"
             @compose-pull="handleComposePull"
             @schedules="openSchedules"
-            @security="openSecurity"
           />
-        </div>
+        </Transition>
+        <div ref="foldersColumn" class="flex-[999_1_560px] min-w-0">
+          <LoadingSkeleton v-if="isLoading" :view="viewMode" />
 
-        <!-- Unfoldered Containers -->
-        <div v-if="filteredUnfolderedContainers.length > 0" class="mt-8">
-          <div
-            class="flex items-center gap-2 mb-4 cursor-pointer select-none"
-            @click="unfolderedCollapsed = !unfolderedCollapsed"
-          >
-            <ChevronIcon :expanded="!unfolderedCollapsed" />
-            <h2 class="text-sm font-semibold text-text">Unfoldered Containers</h2>
-            <span class="inline-flex items-center justify-center min-w-6 h-6 px-2 bg-text-secondary text-white rounded-full text-xs font-semibold">{{
-              filteredUnfolderedContainers.length
-            }}</span>
+          <div v-else-if="error" class="text-center py-8 px-6 text-error">
+            <p>Error: {{ error }}</p>
+            <button @click="loadData" class="mt-4 px-6 py-2 bg-error text-white border-none rounded cursor-pointer">Retry</button>
           </div>
 
-          <div class="expand-grid" :class="{ 'expand-expanded': !unfolderedCollapsed, 'expand-settled': unfolderedSettled }">
-            <div class="expand-inner">
-              <div
-                class="container-list"
-                :class="viewMode === 'list' ? 'flex flex-col gap-2' : 'grid grid-cols-[repeat(auto-fill,minmax(min(280px,100%),1fr))] gap-4'"
-                id="unfoldered-containers"
-              >
-                <ContainerCard
-                  v-for="container in filteredUnfolderedContainers"
-                  :key="container.id"
-                  :container="container"
-                  :action-in-progress="actionsInProgress.get(container.id) ?? null"
-                  :view="viewMode"
+          <div v-else>
+            <!-- Folders -->
+            <div v-if="filteredFolders.length > 0" id="folder-list" class="mb-8">
+              <FolderContainer
+                v-for="folder in filteredFolders"
+                :key="folder.id"
+                :folder="folder"
+                :view="viewMode"
+                :data-folder-sort-id="folder.id"
 
-                  @start="handleStart"
-                  @resume="handleResume"
-                  @stop="handleStop"
-                  @restart="handleRestart"
-                  @remove="handleRemove"
-                  @pull="handlePull"
-                  @schedules="openSchedules"
-                  @security="openSecurity"
-                  @edit-compose="openComposeEditor"
-                />
+                @edit="openEditFolderModal"
+                @delete="deleteFolder"
+                @pull="handlePull"
+                @update-folder="handleUpdateFolder"
+                @edit-compose="openComposeEditor"
+                @compose-up="openComposeUp"
+                @compose-recompose="openComposeRecompose"
+                @compose-down="downConfirm.request"
+                @compose-pull="handleComposePull"
+                @schedules="openSchedules"
+                @security="openSecurity"
+              />
+            </div>
+
+            <!-- Unfoldered Containers -->
+            <div v-if="filteredUnfolderedContainers.length > 0" class="mt-8">
+              <div
+                class="flex items-center gap-2 mb-4 cursor-pointer select-none"
+                @click="unfolderedCollapsed = !unfolderedCollapsed"
+              >
+                <ChevronIcon :expanded="!unfolderedCollapsed" />
+                <h2 class="text-sm font-semibold text-text">Unfoldered Containers</h2>
+                <span class="inline-flex items-center justify-center min-w-6 h-6 px-2 bg-text-secondary text-white rounded-full text-xs font-semibold">{{
+                  filteredUnfolderedContainers.length
+                }}</span>
+              </div>
+
+              <div class="expand-grid" :class="{ 'expand-expanded': !unfolderedCollapsed, 'expand-settled': unfolderedSettled }">
+                <div class="expand-inner">
+                  <div
+                    class="container-list"
+                    :class="viewMode === 'list' ? 'flex flex-col gap-2' : 'grid grid-cols-[repeat(auto-fill,minmax(min(280px,100%),1fr))] gap-4'"
+                    id="unfoldered-containers"
+                  >
+                    <ContainerCard
+                      v-for="container in filteredUnfolderedContainers"
+                      :key="container.id"
+                      :container="container"
+                      :action-in-progress="actionsInProgress.get(container.id) ?? null"
+                      :view="viewMode"
+
+                      @start="handleStart"
+                      @resume="handleResume"
+                      @stop="handleStop"
+                      @restart="handleRestart"
+                      @remove="handleRemove"
+                      @pull="handlePull"
+                      @schedules="openSchedules"
+                      @security="openSecurity"
+                      @edit-compose="openComposeEditor"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
 
-        <!-- Empty State -->
-        <div v-if="dockerStore.containerCount === 0" class="text-center py-8 px-6 text-text-secondary">
-          <p>No Docker containers found</p>
+            <!-- Empty State -->
+            <div v-if="dockerStore.containerCount === 0" class="text-center py-8 px-6 text-text-secondary">
+              <p>No Docker containers found</p>
+            </div>
+            <p
+              v-else-if="dockerStore.stackFilter !== null && filteredFolders.length === 0 && filteredUnfolderedContainers.length === 0"
+              class="py-2 text-sm text-text-secondary"
+            >{{ dockerStore.searchQuery.trim() ? `No containers in ${dockerStore.stackFilter} match the search` : `${dockerStore.stackFilter} has no containers. Use Stack Up in its menu to create them.` }}</p>
+          </div>
         </div>
       </div>
     </main>
@@ -231,7 +265,7 @@
       :read-only="composeStore.composePluginInstalled && composeEditorMode !== 'create'"
       :mode="composeEditorMode"
       @close="composeEditorOpen = false"
-      @recompose="openComposeRecompose"
+      @recompose="startComposeRecompose"
     />
 
     <!-- Compose Start / Recompose / Pull Progress -->
@@ -282,6 +316,8 @@
       @confirm="confirmDeleteFolder"
       @cancel="deletingFolderId = null"
     />
+    <StackActionConfirmModal v-if="recomposeConfirm.pending.value" :pending="recomposeConfirm.pending.value" @confirm="recomposeConfirm.confirm" @cancel="recomposeConfirm.cancel" />
+    <StackActionConfirmModal v-if="downConfirm.pending.value" :pending="downConfirm.pending.value" @confirm="downConfirm.confirm" @cancel="downConfirm.cancel" />
     <UpdateConfirmModal
       :is-open="showBatchConfirm"
       :units="pendingUnits"
@@ -311,7 +347,11 @@ import ComposeSetupBanner from '@/components/compose/ComposeSetupBanner.vue';
 import BackendNotice from '@/components/BackendNotice.vue';
 import ComposeFileEditor from '@/components/compose/ComposeFileEditor.vue';
 import ComposeProgressModal from '@/components/compose/ComposeProgressModal.vue';
+import StacksPane from '@/components/compose/StacksPane.vue';
+import IconComposeStack from '@/components/icons/IconComposeStack.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
+import StackActionConfirmModal from '@/components/compose/StackActionConfirmModal.vue';
+import { useStackActionConfirm } from '@/composables/useStackActionConfirm';
 import ContainerCard from '@/components/docker/ContainerCard.vue';
 import ChevronIcon from '@/components/common/ChevronIcon.vue';
 import LoadingSkeleton from '@/components/common/LoadingSkeleton.vue';
@@ -381,6 +421,51 @@ const unfolderedCollapsed = ref(safeLocalStorageGet('docker-folders-unfoldered-c
 watch(unfolderedCollapsed, (v) => safeLocalStorageSet('docker-folders-unfoldered-collapsed', v ? '1' : '0'));
 
 const dragLocked = ref(safeLocalStorageGet('docker-folders-drag-locked') === '1');
+
+// The stacks pane and the filter it sets. Closing the pane drops the filter,
+// so the button alone switches between one stack and every container. Only
+// the open state is remembered: a remembered filter would hide containers
+// with no sign why after a reload.
+const stacksPaneOpen = ref(safeLocalStorageGet('docker-folders-stacks-pane') === '1');
+watch(stacksPaneOpen, (open) => {
+  safeLocalStorageSet('docker-folders-stacks-pane', open ? '1' : '0');
+  if (!open) dockerStore.stackFilter = null;
+});
+
+// The folders column moves when the pane takes or frees its space. It slides
+// there with a transform (FLIP: measure before and after, then animate the
+// difference away), since DESIGN.md §6 allows no width transitions. A leaving
+// pane goes out of the flow at once (`.stacks-pane-leave-active`), so the
+// column moves with it instead of after the fade.
+const foldersColumn = ref<HTMLElement | null>(null);
+watch(stacksPaneOpen, async () => {
+  const el = foldersColumn.value;
+  if (!el || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const first = el.getBoundingClientRect();
+  await nextTick();
+  const last = el.getBoundingClientRect();
+  const dx = first.left - last.left;
+  const dy = first.top - last.top;
+  if (!dx && !dy) return;
+  el.style.transition = 'none';
+  el.style.transform = `translate(${dx}px, ${dy}px)`;
+  void el.offsetWidth;
+  el.style.transition = 'transform 200ms ease';
+  el.style.transform = '';
+  // A child's own transition bubbles up too, so wait for the column's.
+  const done = (e: TransitionEvent) => {
+    if (e.target !== el) return;
+    el.style.transition = '';
+    el.removeEventListener('transitionend', done);
+  };
+  el.addEventListener('transitionend', done);
+}, { flush: 'pre' });
+
+/** Keep the leaving pane's width once it is out of the flow. */
+function pinPaneWidth(el: Element) {
+  (el as HTMLElement).style.width = `${(el as HTMLElement).offsetWidth}px`;
+}
+
 // `.expand-inner` is overflow:hidden so the collapse transition can animate, and
 // that clips a kebab menu opening off the bottom of the section — visible as
 // soon as the last row is near the edge, e.g. when a search matches one
@@ -442,13 +527,29 @@ function handleCreate(action: 'stack' | 'folder') {
 }
 
 function openComposeUp(project: string) {
+  composeStore.clearStackStatus(project);
   composeProgressProject.value = project;
   composeProgressMode.value = 'up';
   composeProgressForceRecreate.value = false;
   composeProgressOpen.value = true;
 }
 
+// Every Recompose button lands here, so this is the one place it asks. The
+// editor's Save & Recompose skips it: the user just chose it in that dialog,
+// and asking again would replace the editor with the confirm on Unraid.
+const recomposeConfirm = useStackActionConfirm('recompose', startComposeRecompose);
+
+// Stack Down from the stacks pane and from a folder header. Its progress and
+// any failure show on both (composeStore.runStackAction). Up, Recompose and
+// Pull start below, so each clears an old stop or down failure first.
+const downConfirm = useStackActionConfirm('down', (project) => composeStore.runStackAction(project, 'down'));
+
 function openComposeRecompose(project: string) {
+  recomposeConfirm.request(project);
+}
+
+function startComposeRecompose(project: string) {
+  composeStore.clearStackStatus(project);
   composeProgressProject.value = project;
   composeProgressMode.value = 'up';
   composeProgressForceRecreate.value = true;
@@ -458,6 +559,7 @@ function openComposeRecompose(project: string) {
 // Pull streams its output into the same progress modal as up/recompose —
 // a bare await gave no sign anything was happening.
 function handleComposePull(project: string) {
+  composeStore.clearStackStatus(project);
   composeProgressProject.value = project;
   composeProgressMode.value = 'pull';
   composeProgressForceRecreate.value = false;
@@ -492,7 +594,12 @@ function closeComposeProgress() {
 const isLoading = computed(() => dockerStore.loading || folderStore.loading);
 const error = computed(() => dockerStore.error || folderStore.error);
 
-const isSearching = computed(() => dockerStore.searchQuery.trim().length > 0);
+const searchCountLabel = computed(() => {
+  const project = dockerStore.stackFilter;
+  if (project === null) return `${dockerStore.containerCount} containers, ${folderStore.folderCount} folders`;
+  const count = dockerStore.containersInStack(project).length;
+  return `${project}: ${count} ${count === 1 ? 'container' : 'containers'}`;
+});
 
 // Width of the counts and clear button drawn over the right end of the search field.
 const searchOverlayEl = ref<HTMLElement | null>(null);
@@ -507,24 +614,29 @@ onMounted(() => {
 });
 onUnmounted(() => searchOverlayObserver?.disconnect());
 
-function matchesQuery(name: string, image?: string): boolean {
-  return containerMatchesSearch(dockerStore.searchQuery, name, image);
-}
-
 const filteredUnfolderedContainers = computed(() => {
-  if (!isSearching.value) return dockerStore.unfolderedContainers;
-  return dockerStore.unfolderedContainers.filter((c) => matchesQuery(c.name, c.image));
+  if (!dockerStore.isFiltering) return dockerStore.unfolderedContainers;
+  return dockerStore.unfolderedContainers.filter((c) => dockerStore.containerPassesFilters(c, c.name));
 });
 
+// A folder stays when one of its containers passes the search and the stack
+// filter, or when it is the picked stack's own folder and that stack has no
+// containers (see stackFilterKeepsDownStackFolder).
 const filteredFolders = computed(() => {
-  if (!isSearching.value) return folderStore.sortedFolders;
-  const q = dockerStore.searchQuery.trim().toLowerCase();
-  return folderStore.sortedFolders.filter((folder) =>
-    (folder.containers || []).some((assoc) => {
-      const container = dockerStore.containers.find((c) => c.name === assoc.container_name);
-      return container ? matchesQuery(container.name, container.image) : assoc.container_name.toLowerCase().includes(q);
-    })
-  );
+  if (!dockerStore.isFiltering) return folderStore.sortedFolders;
+  return folderStore.sortedFolders.filter((folder) => {
+    const associations = folder.containers || [];
+    if (associations.some((assoc) => dockerStore.containerPassesFilters(dockerStore.containersByName.get(assoc.container_name), assoc.container_name))) {
+      return true;
+    }
+    return (
+      dockerStore.stackFilterKeepsDownStackFolder(folder.compose_project) &&
+      // A stack that was never brought up has no saved containers to search,
+      // so an empty search must keep its folder on its own.
+      (!dockerStore.searchQuery.trim() ||
+        associations.some((assoc) => containerMatchesSearch(dockerStore.searchQuery, assoc.container_name)))
+    );
+  });
 });
 
 // Track Sortable instances so we can destroy them before re-creating
@@ -540,7 +652,7 @@ onMounted(async () => {
 
 // Re-initialize drag-and-drop whenever folders, containers, search, or sort mode change.
 watch(
-  () => [folderStore.folders, dockerStore.containers, dockerStore.searchQuery, settingsStore.sortMode, settingsStore.sortFolders],
+  () => [folderStore.folders, dockerStore.containers, dockerStore.searchQuery, dockerStore.stackFilter, settingsStore.sortMode, settingsStore.sortFolders],
   () => {
     nextTick(() => initializeDragAndDrop());
   },
@@ -580,7 +692,9 @@ function destroyDragAndDrop() {
 function initializeDragAndDrop() {
   destroyDragAndDrop();
 
-  if (dragLocked.value || isSearching.value) return;
+  // A filtered list holds only some of a folder's containers, and a reorder
+  // would save that partial order.
+  if (dragLocked.value || dockerStore.isFiltering) return;
 
   // Folder list itself: reordering only makes sense in manual folder-order mode
   // (auto modes compute the folder order every render, so a drag would be
@@ -622,6 +736,12 @@ function initializeDragAndDrop() {
         onStart: dragAutoScroll.start,
         onEnd: dragAutoScroll.stop,
         onAdd: async (evt) => {
+          // The card it landed in front of, read before the revert below. A
+          // folder in automatic order sorts it anyway, so it passes none.
+          const manual = effectiveSortMode(folderStore.getFolderById(folderId)?.sort_mode ?? 'manual', settingsStore.sortMode) === 'manual';
+          const beforeId = manual ? (evt.item.nextElementSibling as HTMLElement | null)?.dataset.containerId : undefined;
+          const beforeName = beforeId ? dockerStore.getContainerById(beforeId)?.name : undefined;
+
           // Revert SortableJS DOM move — let Vue reactivity handle rendering
           evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex ?? 0] || null);
 
@@ -629,7 +749,7 @@ function initializeDragAndDrop() {
           const containerName = dockerStore.getContainerById(containerId!)?.name || '';
 
           if (containerId) {
-            await folderStore.moveContainerToFolder(folderId, containerId, containerName);
+            await folderStore.moveContainerToFolder(folderId, containerId, containerName, beforeName);
           }
         },
         onUpdate: async () => {

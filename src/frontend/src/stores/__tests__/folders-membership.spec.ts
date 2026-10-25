@@ -198,6 +198,58 @@ describe('folders store – moveContainerToFolder', () => {
   });
 });
 
+describe('folders store – moveContainerToFolder at a drop position', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    mockApiFetch.mockReset();
+  });
+
+  function reorderBody(): string[] | undefined {
+    const call = mockApiFetch.mock.calls.find((c) => String(c[0]).includes('action=reorder_containers'));
+    if (!call) return undefined;
+    return JSON.parse(String(call[1]?.body)).container_ids;
+  }
+
+  it('saves the moved container in front of the one it was dropped before', async () => {
+    const store = useFolderStore();
+    store.folders = [
+      makeFolder(['mimir'], { id: 1, name: 'grafana' }),
+      makeFolder(['tempo', 'loki', 'postgres'], { id: 2, name: 'Databases' }),
+    ];
+    mockApiFetch.mockImplementation(async (url) => {
+      if (String(url).includes('action=add_container')) {
+        // The backend appends it at the end.
+        return okResponse(makeFolder(['tempo', 'loki', 'postgres', 'mimir'], { id: 2, name: 'Databases' }));
+      }
+      return okResponse(makeFolder(['tempo', 'mimir', 'loki', 'postgres'], { id: 2, name: 'Databases' }));
+    });
+
+    await store.moveContainerToFolder(2, 'id-mimir', 'mimir', 'loki');
+
+    expect(reorderBody()).toEqual(['id-tempo', 'id-mimir', 'id-loki', 'id-postgres']);
+  });
+
+  it('leaves the backend order alone without a drop position', async () => {
+    const store = useFolderStore();
+    store.folders = [makeFolder(['mimir'], { id: 1 }), makeFolder(['tempo'], { id: 2 })];
+    mockApiFetch.mockImplementation(async () => okResponse(makeFolder(['tempo', 'mimir'], { id: 2 })));
+
+    await store.moveContainerToFolder(2, 'id-mimir', 'mimir');
+
+    expect(reorderBody()).toBeUndefined();
+  });
+
+  it('does not reorder when the add fails', async () => {
+    const store = useFolderStore();
+    store.folders = [makeFolder(['mimir'], { id: 1 }), makeFolder(['tempo'], { id: 2 })];
+    mockApiFetch.mockImplementation(async () => ({ ok: false, status: 500 }) as Response);
+
+    await store.moveContainerToFolder(2, 'id-mimir', 'mimir', 'tempo');
+
+    expect(reorderBody()).toBeUndefined();
+  });
+});
+
 describe('getFolderForContainer', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
