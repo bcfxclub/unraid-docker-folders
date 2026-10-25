@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026.10.25
+### New
+- A stacks button on the Folders page toolbar opens a pane of compose stacks; picking a stack shows only its folders and containers, and each row offers the stack's actions.
+- The compose stacks pane slides in and out, and the folders column slides with it.
+- Stack Down and Recompose now open a confirm dialog explaining what is kept and lost, with a "Don't ask again" box and a toggle for each under Settings > Docker Folders > Docker Compose.
+- Containers that crashed are marked "Crashed" on cards, list rows and the dashboard widget, folders show a crashed count, and "Hide stopped" keeps them in view.
+- Containers killed for running out of memory show as "Crashed (out of memory)".
+- Running containers are checked once a minute: a dead process shows as crashed, unreachable ports show a warning line, and an Unraid notification is sent when a container crashes or goes unreachable.
+- Expanding a stopped container shows its last 200 log lines so you can see why it stopped.
+
+### Improved
+- The folder header's Stack Down button is now labelled "Stack Down (delete containers)" with a trash icon.
+- The details panel hides Block I/O, Net I/O, PIDs and Uptime for a stopped container.
+- While a stack is stopping or going down, its other compose actions are disabled everywhere.
+
+### Fixed
+- A failed start, stop or remove now shows Docker's own reason on the card, list row and dashboard widget.
+- A failed Stack Down or Stop All from a folder now shows its error instead of silently stopping the spinner.
+- Folders can be collapsed again while a search filter is active.
+- A container dragged into a folder now stays where it was dropped, and leaves its old stack's service preview.
+- The "Also delete the image" box in the container Remove dialog now shows on Unraid.
+- A failed folder assignment during compose sync no longer marks the container as assigned.
+
+### Internal
+- Internal fixes and performance improvements.
+
 ## 2026.10.24-dev4
 ### New
 - Expanding a stopped container now shows its last 200 log lines on the card, so you can see why it stopped.

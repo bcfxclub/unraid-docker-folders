@@ -2,8 +2,8 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "unraid-docker-folders-modern">
 <!ENTITY author "rizowski">
-<!ENTITY version "2026.10.24">
-<!ENTITY md5 "3bf6eab890bbcffa460df4f075f3d2f3">
+<!ENTITY version "2026.10.25">
+<!ENTITY md5 "eecdce86d2f70e3fda929175ed706a19">
 <!ENTITY launch "Docker">
 <!ENTITY plugdir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY github "rizowski/unraid-docker-folders">
@@ -148,6 +148,25 @@
 
 
 
+
+###2026.10.25
+- New: A stacks button on the Folders page toolbar opens a pane of compose stacks; picking a stack shows only its folders and containers, and each row offers the stack's actions.
+- New: The compose stacks pane slides in and out, and the folders column slides with it.
+- New: Stack Down and Recompose now open a confirm dialog explaining what is kept and lost, with a "Don't ask again" box and a toggle for each under Settings &gt; Docker Folders &gt; Docker Compose.
+- New: Containers that crashed are marked "Crashed" on cards, list rows and the dashboard widget, folders show a crashed count, and "Hide stopped" keeps them in view.
+- New: Containers killed for running out of memory show as "Crashed (out of memory)".
+- New: Running containers are checked once a minute: a dead process shows as crashed, unreachable ports show a warning line, and an Unraid notification is sent when a container crashes or goes unreachable.
+- New: Expanding a stopped container shows its last 200 log lines so you can see why it stopped.
+- Improved: The folder header's Stack Down button is now labelled "Stack Down (delete containers)" with a trash icon.
+- Improved: The details panel hides Block I/O, Net I/O, PIDs and Uptime for a stopped container.
+- Improved: While a stack is stopping or going down, its other compose actions are disabled everywhere.
+- Fixed: A failed start, stop or remove now shows Docker's own reason on the card, list row and dashboard widget.
+- Fixed: A failed Stack Down or Stop All from a folder now shows its error instead of silently stopping the spinner.
+- Fixed: Folders can be collapsed again while a search filter is active.
+- Fixed: A container dragged into a folder now stays where it was dropped, and leaves its old stack's service preview.
+- Fixed: The "Also delete the image" box in the container Remove dialog now shows on Unraid.
+- Fixed: A failed folder assignment during compose sync no longer marks the container as assigned.
+- Internal fixes and performance improvements.
 ###2026.10.24-dev4
 - New: Expanding a stopped container now shows its last 200 log lines on the card, so you can see why it stopped.
 - Improved: The Compose stacks pane now slides in and out smoothly, with the animation turned off when reduced motion is preferred.
