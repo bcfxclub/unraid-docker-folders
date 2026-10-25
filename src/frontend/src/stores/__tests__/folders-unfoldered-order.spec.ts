@@ -72,6 +72,18 @@ describe('folders store – unfoldered order', () => {
       expect(store.unfolderedOrder).toEqual(['x', 'y']);
     });
 
+    it('shows the new order before the response lands', async () => {
+      let answer!: (r: Response) => void;
+      mockApiFetch.mockImplementation(() => new Promise((r) => { answer = r; }));
+      const store = useFolderStore();
+      store.unfolderedOrder = ['a', 'b'];
+
+      const pending = store.reorderUnfoldered(['b', 'a']);
+      expect(store.unfolderedOrder).toEqual(['b', 'a']);
+      answer(okResponse({ success: true, unfoldered_order: ['b', 'a'] }));
+      await pending;
+    });
+
     it('returns false and leaves state alone on a non-ok response', async () => {
       mockApiFetch.mockResolvedValue({ ok: false, status: 500 } as Response);
       const store = useFolderStore();

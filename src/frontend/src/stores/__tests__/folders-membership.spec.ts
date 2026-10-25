@@ -250,6 +250,40 @@ describe('folders store – moveContainerToFolder at a drop position', () => {
   });
 });
 
+describe('folders store – reorderContainers', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    mockApiFetch.mockReset();
+  });
+
+  const names = (store: ReturnType<typeof useFolderStore>) =>
+    [...store.folders[0].containers].sort((a, b) => a.position - b.position).map((c) => c.container_name);
+
+  it('shows the new order before the response lands', async () => {
+    let answer!: (r: Response) => void;
+    mockApiFetch.mockImplementation(() => new Promise((r) => { answer = r; }));
+    const store = useFolderStore();
+    store.folders = [makeFolder(['a', 'b', 'c'])];
+
+    const pending = store.reorderContainers(1, ['id-c', 'id-a', 'id-b']);
+    expect(names(store)).toEqual(['c', 'a', 'b']);
+    answer(okResponse(makeFolder(['c', 'a', 'b'])));
+    await pending;
+    expect(names(store)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('goes back to the old order when the save fails', async () => {
+    mockApiFetch.mockResolvedValue({ ok: false, status: 500 } as Response);
+    const store = useFolderStore();
+    store.folders = [makeFolder(['a', 'b', 'c'])];
+
+    const ok = await store.reorderContainers(1, ['id-c', 'id-a', 'id-b']);
+
+    expect(ok).toBe(false);
+    expect(names(store)).toEqual(['a', 'b', 'c']);
+  });
+});
+
 describe('getFolderForContainer', () => {
   beforeEach(() => {
     setActivePinia(createPinia());

@@ -350,7 +350,20 @@ export const useFolderStore = defineStore('folders', () => {
     await reorderContainers(folderId, rest.map((c) => c.container_id));
   }
 
+  /**
+   * Save a folder's manual order. State takes the new order before the request
+   * goes out, so a drag shows its result at once, and goes back on a failure.
+   */
   async function reorderContainers(folderId: number, containerIds: string[]): Promise<boolean> {
+    const folder = folders.value.find((f) => f.id === folderId);
+    const before = folder?.containers;
+    if (folder) {
+      const rank = new Map(containerIds.map((id, i) => [id, i]));
+      const ordered = [...folder.containers].sort(
+        (a, b) => (rank.get(a.container_id) ?? containerIds.length + a.position) - (rank.get(b.container_id) ?? containerIds.length + b.position),
+      );
+      folder.containers = ordered.map((c, i) => ({ ...c, position: i }));
+    }
     try {
       const { ok, data: result } = await useBackend().folders.reorderContainers(folderId, {
         container_ids: containerIds,
@@ -371,6 +384,7 @@ export const useFolderStore = defineStore('folders', () => {
       return true;
     } catch (e) {
       console.error('Error reordering containers:', e);
+      if (folder && before) folder.containers = before;
       return false;
     }
   }
@@ -380,6 +394,8 @@ export const useFolderStore = defineStore('folders', () => {
    * display order; the backend replaces the saved order with it.
    */
   async function reorderUnfoldered(containerNames: string[]): Promise<boolean> {
+    const before = unfolderedOrder.value;
+    unfolderedOrder.value = containerNames;
     try {
       const { ok, data: result } = await useBackend().folders.reorderUnfoldered({
         container_names: containerNames,
@@ -394,6 +410,7 @@ export const useFolderStore = defineStore('folders', () => {
       return true;
     } catch (e) {
       console.error('Error reordering unfoldered containers:', e);
+      unfolderedOrder.value = before;
       return false;
     }
   }
