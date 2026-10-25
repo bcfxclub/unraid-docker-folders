@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.10.25-2
+### Fixed
+- A container dragged to another folder no longer shows in both folders until the page is reloaded.
+- Reordering containers within a folder no longer makes the card snap back while the new order saves.
+
 ## 2026.10.25
 ### New
 - A stacks button on the Folders page toolbar opens a pane of compose stacks; picking a stack shows only its folders and containers, and each row offers the stack's actions.
