@@ -474,7 +474,7 @@ export const useDockerStore = defineStore('docker', () => {
       if (delay !== undefined) body.delay = delay;
       const { ok } = await useBackend().containers.setAutostart(name, body);
       if (!ok) {
-        throw new Error('Failed to update autostart');
+        throw new Error('更新自动启动失败');
       }
       // Update local state immediately
       const container = containers.value.find(c => c.name === name);

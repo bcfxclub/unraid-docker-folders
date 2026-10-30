@@ -57,3 +57,14 @@ composer.lock
 
 # graphify knowledge graph (rebuilt from source; graph.json is ~2 MB)
 graphify-out/
+
+# Localization build scripts and temp files
+work/*.py
+work/*.txt
+work/*.json
+work/*.b64
+work/*.bak
+work/*.md5
+
+# Generated plugin package (will be rebuilt by CI)
+unraid-docker-folders-modern.plg

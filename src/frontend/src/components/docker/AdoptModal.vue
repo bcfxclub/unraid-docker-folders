@@ -3,14 +3,14 @@
     <div class="px-6 py-4 border-b border-border">
       <h2 class="text-base font-semibold text-text">Adopt {{ containerName }} into Unraid</h2>
       <p class="text-sm text-text-secondary mt-1">
-        Unraid takes over this container so you can edit it in the Docker tab.
+        Unraid 将接管此容器，以便你在 Docker 选项卡中编辑它。
       </p>
     </div>
 
     <div class="max-h-[420px] overflow-auto px-6 py-4">
       <p v-if="error" class="text-sm text-error">{{ error }}</p>
 
-      <p v-else-if="!data" class="text-sm text-text-secondary">Reading the container…</p>
+      <p v-else-if="!data" class="text-sm text-text-secondary">正在读取容器…</p>
 
       <template v-else>
         <p class="text-sm text-text-secondary">{{ benefitsText }}</p>
@@ -52,7 +52,7 @@
         @click="$emit('dry-run')"
       >Dry Run</button>
       <span class="flex-1"></span>
-      <button type="button" class="nav-btn" @click="$emit('cancel')">Cancel</button>
+      <button type="button" class="nav-btn" @click="$emit('cancel')">取消</button>
       <button
         ref="confirmBtn"
         type="button"
@@ -60,7 +60,7 @@
         :class="{ 'opacity-50 cursor-not-allowed': !data }"
         :disabled="!data"
         @click="$emit('adopt')"
-      >Adopt</button>
+      >接管</button>
     </div>
   </BaseModal>
 </template>
@@ -99,7 +99,7 @@ function ofType(type: string) {
   return (props.data?.configs ?? []).filter((c) => c.Type === type);
 }
 
-const hasPorts = computed(() => ofType('Port').length > 0);
+const hasPorts = computed(() => ofType('端口').length > 0);
 
 /** Why a user would want this. The modal states the cost as well — see warningText. */
 const benefitsText =
@@ -131,29 +131,29 @@ const rows = computed(() => {
   if (!data) return [];
 
   const out: { label: string; value: string }[] = [
-    { label: 'Image', value: data.fields.contRepository || '—' },
-    { label: 'Network', value: data.fields.contNetwork || '—' },
+    { label: '镜像', value: data.fields.contRepository || '—' },
+    { label: '网络', value: data.fields.contNetwork || '—' },
   ];
 
-  const ports = ofType('Port').map((c) => `${c.Value}→${c.Target}/${c.Mode}`);
-  if (ports.length) out.push({ label: 'Ports', value: ports.join('  ') });
+  const ports = ofType('端口').map((c) => `${c.Value}→${c.Target}/${c.Mode}`);
+  if (ports.length) out.push({ label: '端口', value: ports.join('  ') });
 
-  const paths = ofType('Path').map((c) => `${c.Value} → ${c.Target} (${c.Mode})`);
-  if (paths.length) out.push({ label: 'Paths', value: paths.join('\n') });
+  const paths = ofType('路径').map((c) => `${c.Value} → ${c.Target} (${c.Mode})`);
+  if (paths.length) out.push({ label: '路径', value: paths.join('\n') });
 
   // Values are deliberately not shown. One of them may be a password, and the
   // point of Mask is that it does not get displayed.
-  const vars = ofType('Variable').map((c) => (c.Mask === 'true' ? `${c.Target} (hidden)` : c.Target));
-  if (vars.length) out.push({ label: 'Variables', value: vars.join('  ') });
+  const vars = ofType('变量').map((c) => (c.Mask === 'true' ? `${c.Target} (hidden)` : c.Target));
+  if (vars.length) out.push({ label: '变量', value: vars.join('  ') });
 
-  const labels = ofType('Label').map((c) => c.Target);
-  if (labels.length) out.push({ label: 'Labels', value: labels.join('  ') });
+  const labels = ofType('标签').map((c) => c.Target);
+  if (labels.length) out.push({ label: '标签', value: labels.join('  ') });
 
-  const devices = ofType('Device').map((c) => c.Value);
-  if (devices.length) out.push({ label: 'Devices', value: devices.join('  ') });
+  const devices = ofType('设备').map((c) => c.Value);
+  if (devices.length) out.push({ label: '设备', value: devices.join('  ') });
 
   if (data.fields.contExtraParams) {
-    out.push({ label: 'Extra', value: data.fields.contExtraParams });
+    out.push({ label: '额外', value: data.fields.contExtraParams });
   }
   if (data.fields.contPostArgs) {
     out.push({ label: 'Command', value: data.fields.contPostArgs });
@@ -179,7 +179,7 @@ const { inIframe } = parentModal;
 function parentFields(): ModalField[] {
   const data = props.data;
   if (props.error) return [{ type: 'text', text: props.error, variant: 'error' }];
-  if (!data) return [{ type: 'text', text: 'Reading the container…', variant: 'muted' }];
+  if (!data) return [{ type: 'text', text: '正在读取容器…', variant: 'muted' }];
 
   const fields: ModalField[] = [
     { type: 'text', text: benefitsText, variant: 'muted' },
@@ -221,8 +221,8 @@ function parentDescriptor() {
     fields: parentFields(),
     actions: [
       { id: 'dry-run', label: 'Dry Run', variant: 'default' as const, disabled: !props.data },
-      { id: 'cancel', label: 'Cancel', variant: 'default' as const },
-      { id: 'adopt', label: 'Adopt', variant: 'danger' as const, disabled: !props.data },
+      { id: 'cancel', label: '取消', variant: 'default' as const },
+      { id: 'adopt', label: '接管', variant: 'danger' as const, disabled: !props.data },
     ],
   };
 }

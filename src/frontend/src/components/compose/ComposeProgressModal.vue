@@ -9,7 +9,7 @@
               v-if="isDone"
               @click="handleClose"
               class="icon-btn cursor-pointer text-text-secondary hover:text-text shrink-0"
-              aria-label="Close"
+              aria-label="关闭"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -46,7 +46,7 @@
             <button
               @click="handleClose"
               class="px-4 py-1.5 bg-bg border border-border rounded cursor-pointer text-sm text-text hover:brightness-110 transition"
-            >Close</button>
+            >关闭</button>
           </div>
   </BaseModal>
 </template>
@@ -70,7 +70,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), { mode: 'up', forceRecreate: false });
 
 const isPull = computed(() => props.mode === 'pull');
-const heading = computed(() => (isPull.value ? 'Pull Images' : 'Start Stack'));
+const heading = computed(() => (isPull.value ? '拉取镜像' : '启动堆栈'));
 
 const emit = defineEmits<{
   close: [];
@@ -108,7 +108,7 @@ function openParent() {
       { type: 'log', id: 'log', content: '', fillHeight: true },
     ],
     actions: [
-      { id: 'close', label: 'Close', variant: 'default', hidden: true },
+      { id: 'close', label: '关闭', variant: 'default', hidden: true },
     ],
   });
 }
@@ -138,7 +138,7 @@ function showCloseButton() {
   if (!inIframe) return;
   parentModal.update({
     dismissable: true,
-    actions: [{ id: 'close', label: 'Close', variant: 'default' }],
+    actions: [{ id: 'close', label: '关闭', variant: 'default' }],
   });
 }
 
@@ -183,8 +183,8 @@ async function startStream() {
     );
   } catch (e: any) {
     if (e.name !== 'AbortError') {
-      errorMessage.value = e.message || (isPull.value ? 'Image pull failed' : 'Stack start failed');
-      statusMessage.value = 'Error';
+      errorMessage.value = e.message || (isPull.value ? '镜像拉取失败' : '堆栈启动失败');
+      statusMessage.value = '错误';
     }
   }
 
@@ -209,14 +209,14 @@ function handleSSEEvent(event: string, data: any) {
       if (typeof data.line === 'string') appendLine(data.line);
       break;
     case 'complete':
-      statusMessage.value = data.message || (isPull.value ? 'Images pulled' : 'Stack started');
+      statusMessage.value = data.message || (isPull.value ? '已拉取镜像' : '堆栈已启动');
       isComplete.value = true;
       patchStatus();
       emit('complete', props.projectName);
       break;
     case 'error':
-      errorMessage.value = data.message || 'Failed';
-      statusMessage.value = 'Error';
+      errorMessage.value = data.message || '失败';
+      statusMessage.value = '错误';
       patchStatus();
       break;
     case 'done':

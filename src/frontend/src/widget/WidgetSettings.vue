@@ -1,11 +1,11 @@
 <template>
   <div class="mb-2 p-2 border border-border rounded">
     <div class="flex items-center justify-between mb-1">
-      <span class="text-xs font-semibold text-text-secondary">Widget settings</span>
+      <span class="text-xs font-semibold text-text-secondary">组件设置</span>
       <button
         class="icon-btn text-text-secondary hover:text-text leading-none"
-        title="Close settings"
-        aria-label="Close settings"
+        title="关闭设置"
+        aria-label="关闭设置"
         @click="emit('close')"
       >&times;</button>
     </div>
@@ -34,8 +34,8 @@ const emit = defineEmits<{
 }>();
 
 const OPTIONS: Array<{ key: keyof WidgetSettings; label: string }> = [
-  { key: 'hideStopped', label: 'Hide stopped containers' },
-  { key: 'startCollapsed', label: 'Start folders collapsed' },
+  { key: 'hideStopped', label: '隐藏已停止的容器' },
+  { key: 'startCollapsed', label: '以折叠状态启动文件夹' },
   { key: 'showWebui', label: 'Show WebUI icons' },
   { key: 'showIcons', label: 'Show container icons' },
   { key: 'showStats', label: 'Show CPU and memory' },

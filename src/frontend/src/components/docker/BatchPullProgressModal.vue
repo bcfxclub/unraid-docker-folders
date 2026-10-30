@@ -38,15 +38,15 @@
         </div>
 
         <p v-if="recreatableUnits.length > 0" class="px-6 pb-3 text-xs text-text-secondary">
-          The updated containers still run their old images. Recreate them to apply the updates.
+          已更新的容器仍在运行旧镜像。请重建以应用更新。
         </p>
 
         <!-- Footer -->
         <div class="px-6 py-3 border-t border-border flex justify-end">
           <div class="flex gap-2">
-            <button v-if="!allDone" @click="cancelBatch" class="nav-btn">Cancel</button>
-            <button v-if="allDone" @click="handleClose" class="nav-btn">Close</button>
-            <button v-if="recreatableUnits.length > 0" @click="startRecreate" class="nav-btn active">Recreate</button>
+            <button v-if="!allDone" @click="cancelBatch" class="nav-btn">取消</button>
+            <button v-if="allDone" @click="handleClose" class="nav-btn">关闭</button>
+            <button v-if="recreatableUnits.length > 0" @click="startRecreate" class="nav-btn active">重建</button>
           </div>
         </div>
   </BaseModal>
@@ -105,7 +105,7 @@ let runToken = 0;
 const completedCount = computed(() => Object.keys(unitResults.value).length);
 
 /**
- * "Pull + offer recreate": the units whose pull went through, which still run
+ * "拉取并提供重建": the units whose pull went through, which still run
  * their old images until they are recreated. A restart would keep those.
  */
 const recreatableUnits = computed(() => {
@@ -117,8 +117,8 @@ const recreatableUnits = computed(() => {
 function statusLabel(id: string): string {
   const result = unitResults.value[id];
   if (result === 'success') return 'Done';
-  if (result === 'error') return 'Error';
-  if (result === 'cancelled') return 'Skipped';
+  if (result === 'error') return '错误';
+  if (result === 'cancelled') return '已跳过';
   if (unitRunning.value[id]) return 'Updating';
   return 'Pending';
 }
@@ -153,8 +153,8 @@ function unitPercent(id: string): number {
 function unitStatusText(id: string): string {
   const result = unitResults.value[id];
   if (result === 'success') return 'Done';
-  if (result === 'error') return unitErrors.value[id] || 'Error';
-  if (result === 'cancelled') return 'Skipped';
+  if (result === 'error') return unitErrors.value[id] || '错误';
+  if (result === 'cancelled') return '已跳过';
   if (unitRunning.value[id]) return unitStatus.value[id] || 'Updating...';
   return 'Pending';
 }
@@ -194,14 +194,14 @@ function openParent() {
       { type: 'progress-list', id: 'units', items: buildProgressItems() },
     ],
     actions: [
-      { id: 'cancel', label: 'Cancel', variant: 'default' },
+      { id: 'cancel', label: '取消', variant: 'default' },
     ],
   });
 }
 
 function modalTitle(): string {
   return allDone.value
-    ? 'Update Complete'
+    ? '更新完成'
     : `Updating Containers (${completedCount.value}/${props.units.length})`;
 }
 
@@ -238,9 +238,9 @@ function patchUnit(unit: UpdateUnit) {
 function showCloseAction() {
   if (!inIframe) return;
   const actions: { id: string; label: string; variant: 'default' | 'primary' }[] = [
-    { id: 'close', label: 'Close', variant: 'default' },
+    { id: 'close', label: '关闭', variant: 'default' },
   ];
-  if (recreatableUnits.value.length > 0) actions.push({ id: 'recreate', label: 'Recreate', variant: 'primary' });
+  if (recreatableUnits.value.length > 0) actions.push({ id: 'recreate', label: '重建', variant: 'primary' });
   parentModal.update({ dismissable: true, actions });
 }
 
@@ -301,7 +301,7 @@ function applyEvent(
       const total = data.total ?? existing.total;
       const percent = total > 0
         ? Math.round((current / total) * 100)
-        : (data.status === 'Pull complete' || data.status === 'Already exists' ? 100 : existing.percent);
+        : (data.status === '拉取完成' || data.status === '已存在' ? 100 : existing.percent);
       layers[data.id] = { status: data.status || existing.status, current, total, percent };
       unitLayers.value = { ...unitLayers.value, [id]: layers };
       break;
@@ -330,7 +330,7 @@ function applyEvent(
 
     case 'recreate_error':
       unitRecreate.value = { ...unitRecreate.value, [id]: data.message || '' };
-      unitErrors.value = { ...unitErrors.value, [id]: data.message || 'Recreate failed' };
+      unitErrors.value = { ...unitErrors.value, [id]: data.message || '重建失败' };
       break;
 
     // The pull went through, but a container that failed to recreate still
@@ -339,7 +339,7 @@ function applyEvent(
       return unitErrors.value[id] ? 'error' : 'success';
 
     case 'error':
-      unitErrors.value = { ...unitErrors.value, [id]: data.message || 'Update failed' };
+      unitErrors.value = { ...unitErrors.value, [id]: data.message || '更新失败' };
       return 'error';
   }
 
@@ -390,7 +390,7 @@ async function runUnit(unit: UpdateUnit, recreate = false): Promise<UnitResult> 
     // never set unitErrors for these two cases, unlike the single-unit
     // PullProgressModal/ComposeProgressModal, which do show them.
     if (e instanceof SseHttpError || e instanceof SseNoStreamError) return 'error';
-    unitErrors.value = { ...unitErrors.value, [unit.id]: e.message || 'Update failed' };
+    unitErrors.value = { ...unitErrors.value, [unit.id]: e.message || '更新失败' };
     return 'error';
   } finally {
     controllers.delete(controller);
@@ -446,7 +446,7 @@ async function startBatch() {
   finishRun(token);
 }
 
-/** The second pass "Pull + offer recreate" offers once the pulls are in. */
+/** The second pass "拉取并提供重建" offers once the pulls are in. */
 async function startRecreate() {
   const units = recreatableUnits.value;
   if (units.length === 0) return;
@@ -467,7 +467,7 @@ async function startRecreate() {
   if (inIframe) {
     parentModal.update({
       dismissable: false,
-      actions: [{ id: 'cancel', label: 'Cancel', variant: 'default' }],
+      actions: [{ id: 'cancel', label: '取消', variant: 'default' }],
     });
   }
   patchAll();

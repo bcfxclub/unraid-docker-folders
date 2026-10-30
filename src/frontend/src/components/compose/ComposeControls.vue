@@ -36,7 +36,7 @@
 
     <!-- Schedules -->
     <button
-      title="Schedules"
+      title="计划"
       class="p-1 rounded cursor-pointer transition text-text-secondary hover:text-text"
       @click="$emit('schedules', 'stack', projectName)"
     >
@@ -56,7 +56,7 @@
       class="text-[11px] text-error truncate max-w-[240px] cursor-pointer"
       :title="`${stackActionText(failure)} (click to dismiss)`"
       @click="composeStore.clearStackStatus(projectName)"
-    >{{ failure.kind === 'down' ? 'Stack Down' : 'Stop All' }} failed: {{ stackActionText(failure) }}</span>
+    >{{ failure.kind === 'down' ? 'Stack Down' : '全部停止' }} failed: {{ stackActionText(failure) }}</span>
   </div>
 </template>
 

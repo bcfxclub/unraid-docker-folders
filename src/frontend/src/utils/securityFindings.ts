@@ -433,7 +433,7 @@ function hostNetworkFinding(container: Container, bound: PortOwners): FindingRul
     .sort((a, b) => a.port - b.port);
 
   const detail: FindingDetail[] = [
-    { remove: 'Network Type: host', add: 'Network Type: bridge' },
+    { remove: '网络类型：host', add: '网络类型：bridge' },
   ];
 
   if (exposed.length === 0) {

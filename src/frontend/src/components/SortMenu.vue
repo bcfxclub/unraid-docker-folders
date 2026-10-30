@@ -1,6 +1,6 @@
 <!--
   Toolbar control for the global sort mode (container order, and folder order
-  when "Sort folders too" is on). Chrome mirrors CreateMenu.vue so the two toolbar
+  when "同时对文件夹排序" is on). Chrome mirrors CreateMenu.vue so the two toolbar
   dropdowns read as one pattern; see DESIGN.md §11 — every item carries
   `.kebab-menu-item` or the Unraid reset strips its padding.
 -->
@@ -83,7 +83,7 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
         </svg>
-        <span class="flex-1">Sort folders too</span>
+        <span class="flex-1">同时对文件夹排序</span>
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" :class="{ invisible: !sortFolders }" aria-hidden="true">
           <path d="M20 6L9 17l-5-5" />
         </svg>
@@ -127,7 +127,7 @@ function onClickOutside(e: MouseEvent) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') menuOpen.value = false;
+  if (e.key === 'Esc') menuOpen.value = false;
 }
 
 onMounted(() => {

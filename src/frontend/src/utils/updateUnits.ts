@@ -158,7 +158,7 @@ export function unitReleases(
   return releases;
 }
 
-/** How many releases get named before the summary collapses into "+N more". */
+/** How many releases get named before the summary collapses into "+N 更多". */
 const MAX_NAMED_RELEASES = 3;
 
 /**

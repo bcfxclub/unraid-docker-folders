@@ -108,7 +108,7 @@ class ComposeManager
     $dir = dirname(self::COMPOSE_BINARY_PATH);
     if (!is_dir($dir)) {
       if (!@mkdir($dir, 0755, true)) {
-        return ['success' => false, 'error' => 'Failed to create directory: ' . $dir];
+        return ['success' => false, 'error' => '创建目录失败：' . $dir];
       }
     }
 
@@ -118,7 +118,7 @@ class ComposeManager
     $ch = curl_init($url);
     $fp = fopen($tmpPath, 'w');
     if (!$fp) {
-      return ['success' => false, 'error' => 'Failed to open temp file for writing'];
+      return ['success' => false, 'error' => '打开临时文件写入失败'];
     }
 
     curl_setopt_array($ch, [
@@ -137,20 +137,20 @@ class ComposeManager
 
     if (!$result || $httpCode >= 400) {
       @unlink($tmpPath);
-      return ['success' => false, 'error' => 'Download failed: ' . $curlError . ' (HTTP ' . $httpCode . ')'];
+      return ['success' => false, 'error' => '下载失败：' . $curlError . ' (HTTP ' . $httpCode . ')'];
     }
 
     // Verify SHA256
     $hash = hash_file('sha256', $tmpPath);
     if ($hash !== self::COMPOSE_SHA256) {
       @unlink($tmpPath);
-      return ['success' => false, 'error' => 'SHA256 verification failed. Expected: ' . self::COMPOSE_SHA256 . ', got: ' . $hash];
+      return ['success' => false, 'error' => 'SHA256 校验失败。期望值：' . self::COMPOSE_SHA256 . ', got: ' . $hash];
     }
 
     // Move into place and set permissions
     if (!@rename($tmpPath, self::COMPOSE_BINARY_PATH)) {
       @unlink($tmpPath);
-      return ['success' => false, 'error' => 'Failed to move binary into place'];
+      return ['success' => false, 'error' => '移动二进制文件到位失败'];
     }
 
     @chmod(self::COMPOSE_BINARY_PATH, 0755);
@@ -193,19 +193,19 @@ class ComposeManager
   public function cacheComposeBinary($source = self::COMPOSE_BINARY_PATH, $dest = self::COMPOSE_CACHE_PATH, $sha = self::COMPOSE_SHA256, $sourceVerified = false)
   {
     if (!is_file($source)) {
-      return ['success' => false, 'error' => 'Docker Compose is not installed'];
+      return ['success' => false, 'error' => '未安装 Docker Compose'];
     }
     if (!$sourceVerified && hash_file('sha256', $source) !== $sha) {
       return [
         'success' => false,
-        'error' => 'the installed Docker Compose is not the pinned ' . self::COMPOSE_VERSION . ' build, so no copy was kept',
+        'error' => '已安装的 Docker Compose 不是固定版本 ' . self::COMPOSE_VERSION . ' build, so no copy was kept',
       ];
     }
     if (is_file($dest) && filesize($dest) === filesize($source)) {
       return ['success' => true, 'error' => null];
     }
     if (!$this->copyExecutable($source, $dest)) {
-      return ['success' => false, 'error' => 'the copy could not be written to ' . dirname($dest)];
+      return ['success' => false, 'error' => '副本无法写入 ' . dirname($dest)];
     }
     return ['success' => true, 'error' => null];
   }
@@ -529,7 +529,7 @@ class ComposeManager
   {
     // Validate project name (alphanumeric, hyphens, underscores)
     if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/', $projectName)) {
-      return ['success' => false, 'error' => 'Invalid project name. Use only letters, numbers, hyphens, and underscores.'];
+      return ['success' => false, 'error' => '项目名称无效。仅可使用字母、数字、连字符和下划线。'];
     }
 
     // Check if stack already exists
@@ -545,7 +545,7 @@ class ComposeManager
     $stackDir = COMPOSE_STACKS_DIR . '/' . $projectName;
     if (!is_dir($stackDir)) {
       if (!@mkdir($stackDir, 0755, true)) {
-        return ['success' => false, 'error' => 'Failed to create stack directory'];
+        return ['success' => false, 'error' => '创建堆栈目录失败'];
       }
     }
 
@@ -555,7 +555,7 @@ class ComposeManager
       $composeContent = "version: \"3.8\"\nservices:\n  app:\n    image: \n";
     }
     if (@file_put_contents($composeFile, $composeContent) === false) {
-      return ['success' => false, 'error' => 'Failed to write compose file'];
+      return ['success' => false, 'error' => '写入 Compose 文件失败'];
     }
 
     // Write env file if provided
@@ -701,7 +701,7 @@ class ComposeManager
     $process = proc_open($cmd, $descriptors, $pipes, $cwd, $env);
 
     if (!is_resource($process)) {
-      return ['success' => false, 'output' => '', 'error' => 'Failed to start process'];
+      return ['success' => false, 'output' => '', 'error' => '启动进程失败'];
     }
 
     fclose($pipes[0]); // Close stdin
@@ -794,7 +794,7 @@ class ComposeManager
   public function validateComposeContent($projectName, $content = null)
   {
     if (!$this->isComposeAvailable()) {
-      return ['success' => false, 'errors' => [['line' => 1, 'message' => 'Docker Compose not available']]];
+      return ['success' => false, 'errors' => [['line' => 1, 'message' => 'Docker Compose 不可用']]];
     }
 
     // Always resolve the stack so we can pass --env-file and working_dir
@@ -812,7 +812,7 @@ class ComposeManager
     if ($content !== null) {
       $tmpFile = tempnam(sys_get_temp_dir(), 'dfm-compose-');
       if ($tmpFile === false) {
-        return ['success' => false, 'errors' => [['line' => 1, 'message' => 'Failed to create temp file']]];
+        return ['success' => false, 'errors' => [['line' => 1, 'message' => '创建临时文件失败']]];
       }
       file_put_contents($tmpFile, $content);
       $cmd .= ' -f ' . escapeshellarg($tmpFile);
@@ -905,7 +905,7 @@ class ComposeManager
 
     $process = proc_open($cmd, $descriptors, $pipes);
     if (!is_resource($process)) {
-      return ['success' => false, 'exit_code' => -1, 'error' => 'Failed to start process'];
+      return ['success' => false, 'exit_code' => -1, 'error' => '启动进程失败'];
     }
 
     fclose($pipes[0]);
@@ -969,7 +969,7 @@ class ComposeManager
       if ($timeout > 0 && (time() - $start) > $timeout) {
         proc_terminate($process);
         $exit = proc_close($process);
-        return ['success' => false, 'exit_code' => $exit, 'error' => 'Command timed out'];
+        return ['success' => false, 'exit_code' => $exit, 'error' => '命令超时'];
       }
     }
 
@@ -1200,19 +1200,19 @@ class ComposeManager
     );
 
     if (!$stack) {
-      return ['success' => false, 'error' => 'Stack not found', 'content' => null, 'path' => null];
+      return ['success' => false, 'error' => '未找到堆栈', 'content' => null, 'path' => null];
     }
 
     // Determine the file path
     $path = $this->resolveComposeFilePath($stack);
 
     if (!$path || !file_exists($path)) {
-      return ['success' => false, 'error' => 'Compose file not found at: ' . ($path ?? 'unknown'), 'content' => null, 'path' => $path];
+      return ['success' => false, 'error' => '在以下位置未找到 Compose 文件：' . ($path ?? 'unknown'), 'content' => null, 'path' => $path];
     }
 
     $content = @file_get_contents($path);
     if ($content === false) {
-      return ['success' => false, 'error' => 'Failed to read compose file', 'content' => null, 'path' => $path];
+      return ['success' => false, 'error' => '读取 Compose 文件失败', 'content' => null, 'path' => $path];
     }
 
     return ['success' => true, 'error' => null, 'content' => $content, 'path' => $path];
@@ -1229,13 +1229,13 @@ class ComposeManager
     );
 
     if (!$stack) {
-      return ['success' => false, 'error' => 'Stack not found'];
+      return ['success' => false, 'error' => '未找到堆栈'];
     }
 
     $path = $this->resolveComposeFilePath($stack);
 
     if (!$path) {
-      return ['success' => false, 'error' => 'Cannot determine compose file path'];
+      return ['success' => false, 'error' => '无法确定 Compose 文件路径'];
     }
 
     // Snapshot current version before overwriting
@@ -1254,7 +1254,7 @@ class ComposeManager
 
     $result = @file_put_contents($path, $content);
     if ($result === false) {
-      return ['success' => false, 'error' => 'Failed to write compose file'];
+      return ['success' => false, 'error' => '写入 Compose 文件失败'];
     }
 
     return ['success' => true, 'error' => null, 'path' => $path];
@@ -1271,7 +1271,7 @@ class ComposeManager
     );
 
     if (!$stack) {
-      return ['success' => false, 'error' => 'Stack not found', 'content' => null, 'path' => null];
+      return ['success' => false, 'error' => '未找到堆栈', 'content' => null, 'path' => null];
     }
 
     $path = $this->resolveEnvFilePath($stack);
@@ -1283,7 +1283,7 @@ class ComposeManager
 
     $content = @file_get_contents($path);
     if ($content === false) {
-      return ['success' => false, 'error' => 'Failed to read env file', 'content' => null, 'path' => $path];
+      return ['success' => false, 'error' => '读取环境变量文件失败', 'content' => null, 'path' => $path];
     }
 
     return ['success' => true, 'error' => null, 'content' => $content, 'path' => $path];
@@ -1300,13 +1300,13 @@ class ComposeManager
     );
 
     if (!$stack) {
-      return ['success' => false, 'error' => 'Stack not found'];
+      return ['success' => false, 'error' => '未找到堆栈'];
     }
 
     $path = $this->resolveEnvFilePath($stack);
 
     if (!$path) {
-      return ['success' => false, 'error' => 'Cannot determine env file path'];
+      return ['success' => false, 'error' => '无法确定环境变量文件路径'];
     }
 
     // Snapshot current version before overwriting
@@ -1324,7 +1324,7 @@ class ComposeManager
 
     $result = @file_put_contents($path, $content);
     if ($result === false) {
-      return ['success' => false, 'error' => 'Failed to write env file'];
+      return ['success' => false, 'error' => '写入环境变量文件失败'];
     }
 
     return ['success' => true, 'error' => null, 'path' => $path];
@@ -1484,7 +1484,7 @@ class ComposeManager
   public function getFileVersions($projectName, $fileType = 'compose')
   {
     if (!in_array($fileType, ['compose', 'env'])) {
-      return ['success' => false, 'error' => 'Invalid file type', 'versions' => []];
+      return ['success' => false, 'error' => '文件类型无效', 'versions' => []];
     }
 
     $versions = $this->db->fetchAll(
@@ -1509,23 +1509,23 @@ class ComposeManager
     );
 
     if (!$version) {
-      return ['success' => false, 'error' => 'Version not found'];
+      return ['success' => false, 'error' => '未找到版本'];
     }
 
     // Reachable from a plain GET, so the read must be contained even though both
     // components are plugin-written.
     $fullPath = resolveAgainst($version['file_path'], $version['working_dir']);
     if ($fullPath === null || !pathIsWithin($fullPath, $version['working_dir'])) {
-      return ['success' => false, 'error' => 'Version file path is not valid'];
+      return ['success' => false, 'error' => '版本文件路径无效'];
     }
 
     if (!file_exists($fullPath)) {
-      return ['success' => false, 'error' => 'Version file missing from disk'];
+      return ['success' => false, 'error' => '磁盘上缺少版本文件'];
     }
 
     $content = @file_get_contents($fullPath);
     if ($content === false) {
-      return ['success' => false, 'error' => 'Failed to read version file'];
+      return ['success' => false, 'error' => '读取版本文件失败'];
     }
 
     return [
@@ -1867,24 +1867,24 @@ class ComposeManager
     // checks this at write time; this guards values stored before that existed.
     $exportDir = normalizePath($exportDir);
     if ($exportDir === null) {
-      return ['success' => false, 'error' => 'Export directory must be an absolute path'];
+      return ['success' => false, 'error' => '导出目录必须是绝对路径'];
     }
     if (!pathIsWithinAny($exportDir, EXPORT_ALLOWED_ROOTS)) {
       return [
         'success' => false,
-        'error' => 'Export directory must be under ' . implode(' or ', EXPORT_ALLOWED_ROOTS),
+        'error' => '导出目录必须位于 之下' . implode(' or ', EXPORT_ALLOWED_ROOTS),
       ];
     }
 
     // Create directory if needed
     if (!is_dir($exportDir)) {
       if (!@mkdir($exportDir, 0755, true)) {
-        return ['success' => false, 'error' => 'Failed to create export directory: ' . $exportDir];
+        return ['success' => false, 'error' => '创建导出目录失败：' . $exportDir];
       }
     }
 
     if (!is_writable($exportDir)) {
-      return ['success' => false, 'error' => 'Export directory is not writable: ' . $exportDir];
+      return ['success' => false, 'error' => '导出目录不可写：' . $exportDir];
     }
 
     $stacks = $this->db->fetchAll('SELECT project_name FROM compose_stacks');

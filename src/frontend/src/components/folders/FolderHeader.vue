@@ -57,7 +57,7 @@
       </span>
       <!-- The kebab item that starts this check disappears with the menu, so
            the only sign it is running has to live in the always-visible header. -->
-      <span v-if="folderCheckingUpdates" class="shrink-0 inline-flex items-center gap-1 h-6 px-2 ml-1 text-xs text-text-secondary" title="Checking for image updates">
+      <span v-if="folderCheckingUpdates" class="shrink-0 inline-flex items-center gap-1 h-6 px-2 ml-1 text-xs text-text-secondary" title="正在检查镜像更新">
         <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
         <span class="hidden sm:inline">Checking…</span>
       </span>
@@ -94,7 +94,7 @@
     <KebabMenu
       ref="kebabMenu"
       :items="folderMenuItems"
-      button-title="Folder actions"
+      button-title="文件夹操作"
       button-class="p-2 border-none rounded cursor-pointer transition text-text-secondary hover:text-text"
       @select="handleMenuSelect"
     />
@@ -102,13 +102,13 @@
   </div>
   <InputModal
     :is-open="showDelayModal"
-    title="Folder Autostart Delay"
+    title="文件夹自动启动延迟"
     :description="`Set delay before all containers in &quot;${folder.name}&quot; start automatically (in seconds).`"
     :initial-value="String(folderAutostartDelay)"
     placeholder="0"
     suffix="Seconds to wait before starting containers on boot. Applied to all containers in this folder."
     input-type="number"
-    confirm-label="Save"
+    confirm-label="保存"
     @confirm="handleFolderDelayConfirm"
     @cancel="showDelayModal = false"
   />
@@ -264,7 +264,7 @@ const folderMenuItems = computed<KebabMenuItem[]>(() => {
   items.push(
     { label: 'Actions', icon: PLAY_ICON, children: actionItems.value },
     { label: 'Folder Options', icon: GEAR_ICON, children: optionItems.value },
-    { label: 'Sort', icon: 'M3 16l4 4 4-4|M7 20V4|M11 4h10|M11 8h7|M11 12h4', children: sortItems.value },
+    { label: '排序', icon: 'M3 16l4 4 4-4|M7 20V4|M11 4h10|M11 8h7|M11 12h4', children: sortItems.value },
   );
 
   return items;
@@ -329,12 +329,12 @@ const sortItems = computed<KebabMenuItem[]>(() => {
 
 /** Settings for the folder and its stack's autostart, and deleting it. */
 const optionItems = computed<KebabMenuItem[]>(() => {
-  const items: KebabMenuItem[] = [{ label: 'Edit Folder', icon: EDIT_ICON, action: 'edit' }];
+  const items: KebabMenuItem[] = [{ label: '编辑文件夹', icon: EDIT_ICON, action: 'edit' }];
 
   if (props.folder.compose_project) {
     const { composeDisabled, composeReason } = composeAvailability(props.folder.compose_project);
     items.push(
-      { label: composeStack.value?.autostart ? 'Disable Stack Autostart' : 'Enable Stack Autostart', icon: REFRESH_ICON, action: 'compose-toggle-autostart', disabled: composeDisabled, title: composeReason },
+      { label: composeStack.value?.autostart ? '禁用堆栈自动启动' : 'Enable Stack Autostart', icon: REFRESH_ICON, action: 'compose-toggle-autostart', disabled: composeDisabled, title: composeReason },
     );
   }
 
@@ -345,7 +345,7 @@ const optionItems = computed<KebabMenuItem[]>(() => {
   });
   if (hasDockermanContainers && !props.folder.compose_project) {
     items.push(
-      { label: allAutostart.value ? 'Disable Autostart (all)' : 'Enable Autostart (all)', icon: AUTOSTART_ICON, action: 'toggle-folder-autostart', class: allAutostart.value ? 'text-success' : '' },
+      { label: allAutostart.value ? '禁用自动启动（全部）' : 'Enable Autostart (all)', icon: AUTOSTART_ICON, action: 'toggle-folder-autostart', class: allAutostart.value ? 'text-success' : '' },
       { label: `Autostart Delay: ${folderAutostartDelay.value}s`, icon: STOPWATCH_ICON, action: 'set-folder-autostart-delay', show: allAutostart.value },
     );
   }
@@ -354,7 +354,7 @@ const optionItems = computed<KebabMenuItem[]>(() => {
   return [
     ...byLabel(items),
     { divider: true },
-    { label: 'Delete Folder', icon: TRASH_ICON, action: 'delete', class: 'hover:text-error' },
+    { label: '删除文件夹', icon: TRASH_ICON, action: 'delete', class: 'hover:text-error' },
   ];
 });
 

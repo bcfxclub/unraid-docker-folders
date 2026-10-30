@@ -20,31 +20,31 @@
           target="_blank"
           rel="noopener noreferrer"
           class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning hover:bg-warning/30"
-          title="View release notes"
+          title="查看发行说明"
           @click.stop
-        >Update</a>
+        >更新</a>
         <span
           v-else-if="hasUpdate"
           class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning"
-        >Update</span>
+        >更新</span>
         <span
           v-else-if="needsRecreate"
           class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning"
           :title="needsRecreateTitle"
-        >Not Applied</span>
+        >未应用</span>
         <span
           v-if="checkingUpdates"
           class="shrink-0 inline-flex items-center gap-1 text-[10px] text-text-secondary"
-          title="Checking for image updates"
+          title="正在检查镜像更新"
         >
           <svg class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-          Checking
+          检查中
         </span>
         <span
           v-if="hasPortConflict"
           class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-error/15 text-error"
           :title="portConflictTitle"
-        >Port Conflict</span>
+        >端口冲突</span>
         <!-- The pill lives on the inner span, not the button: the Unraid reset
              zeroes padding/background/radius on any button without .nav-btn
              (DESIGN.md §11), and a .nav-btn does not look like a badge. -->
@@ -122,11 +122,11 @@
         </div>
       </template>
       <template v-else>
-      <button v-if="isPaused" @click="emit('resume', container.id)" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-success hover:bg-success hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Resume"><IconPlay :size="20" /></button>
-      <button v-else-if="isRunning" @click="confirmAction = 'stop'" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-error hover:bg-error hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Stop"><IconStop :size="20" /></button>
-      <button v-else @click="emit('start', container.id)" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-success hover:bg-success hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Start"><IconPlay :size="20" /></button>
-      <button v-if="isRunning" @click="confirmAction = 'restart'" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-primary hover:bg-primary hover:text-primary-text disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Restart"><IconRestart :size="20" /></button>
-      <button v-if="isStopped" @click="confirmAction = 'remove'" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-muted hover:bg-error hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Remove"><IconTrash :size="20" /></button>
+      <button v-if="isPaused" @click="emit('resume', container.id)" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-success hover:bg-success hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="恢复"><IconPlay :size="20" /></button>
+      <button v-else-if="isRunning" @click="confirmAction = 'stop'" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-error hover:bg-error hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="停止"><IconStop :size="20" /></button>
+      <button v-else @click="emit('start', container.id)" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-success hover:bg-success hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="启动"><IconPlay :size="20" /></button>
+      <button v-if="isRunning" @click="confirmAction = 'restart'" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-primary hover:bg-primary hover:text-primary-text disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="重启"><IconRestart :size="20" /></button>
+      <button v-if="isStopped" @click="confirmAction = 'remove'" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-muted hover:bg-error hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="移除"><IconTrash :size="20" /></button>
       <button v-if="hasUpdate" @click="emit('pull', pullPayload())" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-warning hover:bg-warning hover:text-white" title="Pull Update"><IconDownload :size="20" /></button>
       <!-- Adopt: only for a container Unraid does not manage yet -->
       <button v-if="canAdopt" @click.stop="openAdopt" class="flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-primary hover:bg-primary hover:text-primary-text" title="Adopt into Unraid — let Unraid manage this container"><IconAdopt :size="20" /></button>
@@ -171,31 +171,31 @@
             target="_blank"
             rel="noopener noreferrer"
             class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning hover:bg-warning/30"
-            title="View release notes"
+            title="查看发行说明"
             @click.stop
-          >Update</a>
+          >更新</a>
           <span
             v-else-if="hasUpdate"
             class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning"
-          >Update</span>
+          >更新</span>
           <span
             v-else-if="needsRecreate"
             class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning"
             :title="needsRecreateTitle"
-          >Not Applied</span>
+          >未应用</span>
           <span
             v-if="checkingUpdates"
             class="shrink-0 inline-flex items-center gap-1 text-[10px] text-text-secondary"
-            title="Checking for image updates"
+            title="正在检查镜像更新"
           >
             <svg class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-            Checking
+            检查中
           </span>
           <span
             v-if="hasPortConflict"
             class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-error/15 text-error"
             :title="portConflictTitle"
-          >Port Conflict</span>
+          >端口冲突</span>
           <!-- See the grid branch: the pill has to sit on a child of the
                button, because the reset strips it from the button itself. -->
           <button
@@ -256,11 +256,11 @@
         <!-- WebUI (always shown, disabled when no webui) -->
         <a v-if="resolvedWebui && isRunning" :href="resolvedWebui" target="_blank" rel="noopener" class="hidden sm:flex items-center justify-center w-8 h-8 rounded text-text-secondary hover:text-primary transition" title="Open WebUI" @click.stop><IconGlobe :size="18" /></a>
         <span v-else class="hidden sm:flex items-center justify-center w-8 h-8 rounded text-text-secondary opacity-30" title="No WebUI configured. Set the WebUI field in the container's Unraid template to enable this."><IconGlobe :size="18" /></span>
-        <button v-if="isPaused" @click="emit('resume', container.id)" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-success hover:bg-success hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Resume"><IconPlay :size="18" /></button>
-        <button v-else-if="isRunning" @click="confirmAction = 'stop'" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-error hover:bg-error hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Stop"><IconStop :size="18" /></button>
-        <button v-else @click="emit('start', container.id)" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-success hover:bg-success hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Start"><IconPlay :size="18" /></button>
-        <button v-if="isRunning" @click="confirmAction = 'restart'" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-primary hover:bg-primary hover:text-primary-text disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Restart"><IconRestart :size="18" /></button>
-        <button v-if="isStopped" @click="confirmAction = 'remove'" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-muted hover:bg-error hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="Remove"><IconTrash :size="18" /></button>
+        <button v-if="isPaused" @click="emit('resume', container.id)" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-success hover:bg-success hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="恢复"><IconPlay :size="18" /></button>
+        <button v-else-if="isRunning" @click="confirmAction = 'stop'" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-error hover:bg-error hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="停止"><IconStop :size="18" /></button>
+        <button v-else @click="emit('start', container.id)" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-success hover:bg-success hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="启动"><IconPlay :size="18" /></button>
+        <button v-if="isRunning" @click="confirmAction = 'restart'" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-primary hover:bg-primary hover:text-primary-text disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="重启"><IconRestart :size="18" /></button>
+        <button v-if="isStopped" @click="confirmAction = 'remove'" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-muted hover:bg-error hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isActionInProgress" title="移除"><IconTrash :size="18" /></button>
         <button v-if="hasUpdate" @click="emit('pull', pullPayload())" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-warning hover:bg-warning hover:text-white" title="Pull Update"><IconDownload :size="18" /></button>
         <!-- Adopt: only for a container Unraid does not manage yet -->
         <button v-if="canAdopt" @click.stop="openAdopt" class="action-btn hidden sm:flex items-center justify-center w-8 h-8 border-none rounded cursor-pointer transition text-primary hover:bg-primary hover:text-primary-text" title="Adopt into Unraid — let Unraid manage this container"><IconAdopt :size="18" /></button>
@@ -303,13 +303,13 @@
     />
     <InputModal
       :is-open="showDelayModal"
-      title="Autostart Delay"
+      title="自动启动延迟"
       :description="`Set delay before ${container.name} starts automatically (in seconds).`"
       :initial-value="String(container.autostartDelay)"
       placeholder="0"
       suffix="Seconds to wait before starting this container on boot."
       input-type="number"
-      confirm-label="Save"
+      confirm-label="保存"
       @confirm="handleDelayConfirm"
       @cancel="showDelayModal = false"
     />
@@ -427,7 +427,7 @@ const showDelayModal = ref(false);
 const folderStore = useFolderStore();
 const showFolderPicker = ref(false);
 const currentFolder = computed(() => folderStore.getFolderForContainer(props.container.name));
-const folderVerb = computed(() => (currentFolder.value ? 'Move' : 'Add'));
+const folderVerb = computed(() => (currentFolder.value ? '移动' : 'Add'));
 const folderTargets = computed(() => {
   const targets = folderStore.sortedFolders
     .filter((f) => f.id !== currentFolder.value?.id)
@@ -484,15 +484,15 @@ async function handleDelayConfirm(value: string) {
 const confirmModalConfig = computed(() => {
   switch (confirmAction.value) {
     case 'stop':
-      return { title: 'Stop Container', message: `Stop "${props.container.name}"?`, label: 'Stop', variant: 'danger' as const };
+      return { title: 'Stop Container', message: `Stop "${props.container.name}"?`, label: '停止', variant: 'danger' as const };
     case 'restart':
-      return { title: 'Restart Container', message: `Restart "${props.container.name}"?`, label: 'Restart', variant: 'default' as const };
+      return { title: 'Restart Container', message: `Restart "${props.container.name}"?`, label: '重启', variant: 'default' as const };
     case 'remove':
-      return { title: 'Remove Container', message: `Remove "${props.container.name}"? This cannot be undone.`, label: 'Remove', variant: 'danger' as const };
+      return { title: 'Remove Container', message: `Remove "${props.container.name}"? This cannot be undone.`, label: '移除', variant: 'danger' as const };
     case 'force-update':
-      return { title: 'Force Update', message: `Pull "${props.container.image}" and recreate "${props.container.name}" even if no update is available?`, label: 'Force Update', variant: 'default' as const };
+      return { title: '强制更新', message: `Pull "${props.container.image}" and recreate "${props.container.name}" even if no update is available?`, label: '强制更新', variant: 'default' as const };
     case 'recreate':
-      return { title: 'Apply Update', message: `Recreate "${props.container.name}" so it runs the pulled "${props.container.image}" image? A restart keeps the old image.`, label: 'Recreate', variant: 'default' as const };
+      return { title: '应用更新', message: `Recreate "${props.container.name}" so it runs the pulled "${props.container.image}" image? A restart keeps the old image.`, label: '重建', variant: 'default' as const };
     default:
       return { title: '', message: '', label: '', variant: 'default' as const };
   }
@@ -693,19 +693,19 @@ async function fetchLogs() {
       logLines.value = lines;
       // Matches the API's error envelope: `error` is a boolean, the human text
       // is in `message`.
-      logError.value = data.error ? data.message || 'Failed to load logs.' : '';
+      logError.value = data.error ? data.message || '加载日志失败。' : '';
     } else {
       // The backend turns a transport failure into `ok: false` rather than
       // throwing, so this branch covers what the catch below used to.
       logLines.value = [];
-      logError.value = 'Failed to load logs.';
+      logError.value = '加载日志失败。';
       newLineCount.value = 0;
     }
   } catch (e) {
     if (seq !== logFetchSeq) return;
     console.error('Error fetching logs:', e);
     logLines.value = [];
-    logError.value = 'Failed to load logs.';
+    logError.value = '加载日志失败。';
     newLineCount.value = 0;
   } finally {
     if (seq === logFetchSeq) logsLoading.value = false;
@@ -729,7 +729,7 @@ function startLogStream(): boolean {
       logsLoading.value = false;
       if (data.error) {
         logLines.value = [];
-        logError.value = data.message || 'Failed to load logs.';
+        logError.value = data.message || '加载日志失败。';
         newLineCount.value = 0;
         return;
       }
@@ -926,11 +926,11 @@ const onMobileList = computed(() => props.view === 'list' && isMobile.value);
  * itself (KebabMenu).
  */
 const menuItems = computed<KebabMenuItem[]>(() => [
-  { label: 'Apply Update', icon: DOWNLOAD_ICON, action: 'update', class: 'text-warning', show: hasUpdate.value },
-  { label: 'Apply Update', icon: DOWNLOAD_ICON, action: 'recreate', class: 'text-warning', show: needsRecreate.value && !isCompose.value },
+  { label: '应用更新', icon: DOWNLOAD_ICON, action: 'update', class: 'text-warning', show: hasUpdate.value },
+  { label: '应用更新', icon: DOWNLOAD_ICON, action: 'recreate', class: 'text-warning', show: needsRecreate.value && !isCompose.value },
   { divider: true },
   { label: 'Actions', icon: PLAY_ICON, children: actionMenuItems.value },
-  { label: 'Autostart', icon: AUTOSTART_ICON, children: autostartMenuItems.value },
+  { label: '自动启动', icon: AUTOSTART_ICON, children: autostartMenuItems.value },
   { label: 'Links', icon: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71|M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71', children: linkMenuItems.value },
   { label: 'Options', icon: GEAR_ICON, children: optionMenuItems.value },
 ]);
@@ -943,37 +943,37 @@ const menuItems = computed<KebabMenuItem[]>(() => [
  */
 const actionMenuItems = computed<KebabMenuItem[]>(() => [
   ...byLabel([
-    { label: 'Start', icon: 'M6 4l14 8-14 8z', action: 'start', class: 'text-success', show: onMobileList.value && isStopped.value },
-    { label: 'Resume', icon: 'M6 4l14 8-14 8z', action: 'resume', class: 'text-success', show: onMobileList.value && isPaused.value },
-    { label: 'Restart', icon: 'M1 4v6h6|M3.51 15a9 9 0 1 0 2.13-9.36L1 10', action: 'restart', class: 'text-primary', show: onMobileList.value && isRunning.value },
-    { label: 'Stop', icon: 'M6 6h12v12H6z', action: 'stop', class: 'text-error', show: onMobileList.value && isRunning.value },
-    { label: 'Force Update', icon: DOWNLOAD_ICON, action: 'force-update', class: 'text-warning', show: !hasUpdate.value && !isCompose.value },
+    { label: '启动', icon: 'M6 4l14 8-14 8z', action: 'start', class: 'text-success', show: onMobileList.value && isStopped.value },
+    { label: '恢复', icon: 'M6 4l14 8-14 8z', action: 'resume', class: 'text-success', show: onMobileList.value && isPaused.value },
+    { label: '重启', icon: 'M1 4v6h6|M3.51 15a9 9 0 1 0 2.13-9.36L1 10', action: 'restart', class: 'text-primary', show: onMobileList.value && isRunning.value },
+    { label: '停止', icon: 'M6 6h12v12H6z', action: 'stop', class: 'text-error', show: onMobileList.value && isRunning.value },
+    { label: '强制更新', icon: DOWNLOAD_ICON, action: 'force-update', class: 'text-warning', show: !hasUpdate.value && !isCompose.value },
     // Shown before settings land so the menu doesn't grow an entry a moment
     // after it opens; disabled until we know update checks are actually on.
     { label: updatesStore.isCheckingImage(props.container.image) ? 'Checking for Updates…' : 'Check for Updates', icon: REFRESH_ICON, action: 'check-updates', show: !settingsStore.loaded || settingsStore.enableUpdateChecks, disabled: !settingsStore.loaded, title: settingsStore.loaded ? undefined : 'Loading settings…' },
     { label: 'Console', icon: 'M4 17l6-5-6-5|M12 19h8', action: 'console', show: isRunning.value && !isCompose.value },
-    { label: 'Logs', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z|M14 2v6h6|M16 13H8|M16 17H8|M10 9H8', action: 'logs', show: !isCompose.value },
+    { label: '日志', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z|M14 2v6h6|M16 13H8|M16 17H8|M10 9H8', action: 'logs', show: !isCompose.value },
     // `href` is empty for an unmanaged container, so KebabMenu falls through to
     // its button branch, which is the only one that honours disabled/title.
     // A compose container takes that branch on purpose: Unraid has no template
     // to open for it, and the file that actually defines it is the stack's.
     // Same label either way, so the entry keeps its place in the sorted list.
-    { label: 'Edit', icon: EDIT_ICON, ...editEntry.value },
+    { label: '编辑', icon: EDIT_ICON, ...editEntry.value },
   ]),
   { divider: true },
-  { label: 'Remove', icon: TRASH_ICON, action: 'remove', class: 'text-error', show: onMobileList.value && isStopped.value },
+  { label: '移除', icon: TRASH_ICON, action: 'remove', class: 'text-error', show: onMobileList.value && isStopped.value },
 ]);
 
 /** Whether the container starts with the array, and how long it waits. */
 const autostartMenuItems = computed<KebabMenuItem[]>(() => [
-  { label: props.container.autostart ? 'Disable Autostart' : 'Enable Autostart', icon: AUTOSTART_ICON, action: 'toggle-autostart', class: props.container.autostart ? 'text-success' : '', disabled: !isManaged.value, title: manageHint.value },
+  { label: props.container.autostart ? '禁用自动启动' : 'Enable Autostart', icon: AUTOSTART_ICON, action: 'toggle-autostart', class: props.container.autostart ? 'text-success' : '', disabled: !isManaged.value, title: manageHint.value },
   { label: `Autostart Delay: ${props.container.autostartDelay ?? 0}s`, icon: STOPWATCH_ICON, action: 'set-autostart-delay', show: !isManaged.value || props.container.autostart, disabled: !isManaged.value, title: manageHint.value },
 ]);
 
 /** Where the container lives and runs from: adoption, schedules, folder. */
 const optionMenuItems = computed<KebabMenuItem[]>(() => byLabel([
   { label: 'Adopt into Unraid', icon: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4|M17 8l-5-5-5 5|M12 3v12', action: 'adopt', show: canAdopt.value },
-  { label: 'Schedules', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z|M12 6v6l4 2', action: 'schedules' },
+  { label: '计划', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z|M12 6v6l4 2', action: 'schedules' },
   { label: `Security Findings (${securityFindings.value.length})`, icon: SHIELD_ICON, action: 'security', show: securityFindings.value.length > 0 },
   { label: `${folderVerb.value} to Folder…`, icon: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z|M12 11v6|M9 14h6', action: 'pick-folder', show: folderTargets.value.length > 0 },
 ]));
@@ -981,8 +981,8 @@ const optionMenuItems = computed<KebabMenuItem[]>(() => byLabel([
 /** Pages outside this plugin. */
 const linkMenuItems = computed<KebabMenuItem[]>(() => byLabel([
   { label: 'WebUI', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z|M2 12h20|M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z', href: resolvedWebui.value || '', target: '_blank', show: !!resolvedWebui.value && isRunning.value },
-  { label: 'Project', icon: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71|M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71', href: projectUrl.value || imageLink.value || '', target: '_blank', show: !!(projectUrl.value || imageLink.value) },
-  { label: 'Support', icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z', href: supportUrl.value || '', target: '_blank', show: !!supportUrl.value },
+  { label: '项目', icon: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71|M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71', href: projectUrl.value || imageLink.value || '', target: '_blank', show: !!(projectUrl.value || imageLink.value) },
+  { label: '支持', icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z', href: supportUrl.value || '', target: '_blank', show: !!supportUrl.value },
 ]));
 
 async function handleMenuAction(action: string) {

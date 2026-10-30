@@ -60,14 +60,14 @@
           </div>
 
           <p v-if="canOfferRecreate" class="text-xs text-text-secondary">
-            The container still runs the old image. Recreate it to apply the update.
+            容器仍在运行旧镜像。请重建以应用更新。
           </p>
         </div>
 
         <!-- Footer -->
         <div v-if="isDone" class="px-6 py-3 border-t border-border flex justify-end gap-2">
-          <button @click="handleClose" class="nav-btn">Close</button>
-          <button v-if="canOfferRecreate" @click="startRecreate" class="nav-btn active">Recreate</button>
+          <button @click="handleClose" class="nav-btn">关闭</button>
+          <button v-if="canOfferRecreate" @click="startRecreate" class="nav-btn active">重建</button>
         </div>
   </BaseModal>
 </template>
@@ -116,12 +116,12 @@ const recreateMessage = ref('');
 let abortController: AbortController | null = null;
 
 const modalTitle = computed(() => {
-  if (props.recreateOnly) return 'Apply Update';
-  return props.force ? 'Force Update' : 'Pull Image Update';
+  if (props.recreateOnly) return '应用更新';
+  return props.force ? '强制更新' : '拉取镜像更新';
 });
 
 /**
- * "Pull + offer recreate": once the pull is in, offer to recreate the
+ * "拉取并提供重建": once the pull is in, offer to recreate the
  * container so it runs the new image. A restart would keep the old one.
  * Not after a force update or an auto-recreate, which already recreated.
  */
@@ -150,7 +150,7 @@ const { inIframe } = parentModal;
 function openParent() {
   parentModal.open({
     kind: 'pull-progress',
-    title: `${props.recreateOnly || props.force ? modalTitle.value : 'Pull Image'} — ${props.image}`,
+    title: `${props.recreateOnly || props.force ? modalTitle.value : '拉取镜像'} — ${props.image}`,
     size: 'md',
     dismissable: false,
     fields: [
@@ -158,7 +158,7 @@ function openParent() {
       { type: 'progress-list', id: 'layers', items: [] },
     ],
     actions: [
-      { id: 'close', label: 'Close', variant: 'default', hidden: true },
+      { id: 'close', label: '关闭', variant: 'default', hidden: true },
     ],
   });
 }
@@ -202,9 +202,9 @@ function patchLayer(layerId: string) {
 function showCloseButton() {
   if (!inIframe) return;
   const actions: { id: string; label: string; variant: 'default' | 'primary' }[] = [
-    { id: 'close', label: 'Close', variant: 'default' },
+    { id: 'close', label: '关闭', variant: 'default' },
   ];
-  if (canOfferRecreate.value) actions.push({ id: 'recreate', label: 'Recreate', variant: 'primary' });
+  if (canOfferRecreate.value) actions.push({ id: 'recreate', label: '重建', variant: 'primary' });
   parentModal.update({ dismissable: true, actions });
 }
 
@@ -212,7 +212,7 @@ function hideActions() {
   if (!inIframe) return;
   parentModal.update({
     dismissable: false,
-    actions: [{ id: 'close', label: 'Close', variant: 'default', hidden: true }],
+    actions: [{ id: 'close', label: '关闭', variant: 'default', hidden: true }],
   });
 }
 
@@ -265,8 +265,8 @@ async function runStream(opts: { containerIds?: string[]; recreate?: boolean; re
     await useBackend().streams.pull(props.image, opts, handleSSEEvent, controller.signal);
   } catch (e: any) {
     if (e.name !== 'AbortError') {
-      errorMessage.value = e.message || 'Pull failed';
-      statusMessage.value = 'Error';
+      errorMessage.value = e.message || '拉取失败';
+      statusMessage.value = '错误';
     }
   }
 
@@ -288,7 +288,7 @@ function handleSSEEvent(event: string, data: any) {
         const existing = layers.value[data.id] || { status: '', current: 0, total: 0, percent: 0 };
         const current = data.current ?? existing.current;
         const total = data.total ?? existing.total;
-        const percent = total > 0 ? Math.round((current / total) * 100) : (data.status === 'Pull complete' || data.status === 'Already exists' ? 100 : existing.percent);
+        const percent = total > 0 ? Math.round((current / total) * 100) : (data.status === '拉取完成' || data.status === '已存在' ? 100 : existing.percent);
         layers.value[data.id] = { status: data.status || existing.status, current, total, percent };
         layers.value = { ...layers.value };
         patchLayer(data.id);
@@ -301,7 +301,7 @@ function handleSSEEvent(event: string, data: any) {
       } else {
         statusMessage.value = recreateStatus.value === 'recreated'
           ? recreateMessage.value
-          : data.message || 'Pull complete';
+          : data.message || '拉取完成';
         isComplete.value = true;
       }
       patchStatus();
@@ -326,8 +326,8 @@ function handleSSEEvent(event: string, data: any) {
       patchStatus();
       break;
     case 'error':
-      errorMessage.value = data.message || 'Pull failed';
-      statusMessage.value = 'Error';
+      errorMessage.value = data.message || '拉取失败';
+      statusMessage.value = '错误';
       patchStatus();
       break;
     case 'done':

@@ -21,10 +21,10 @@ export function stackActionItems(opts: {
 }): KebabMenuItem[] {
   const { running, disabled, reason: title } = opts;
   return [
-    { label: 'Stack Up', icon: PLAY_ICON, action: 'compose-up', show: !running, disabled, title },
-    { label: 'Stop All', icon: STOP_ICON, action: 'compose-stop', show: running, disabled, title },
-    { label: 'Pull Latest Images', icon: DOWNLOAD_ICON, action: 'compose-pull', disabled, title },
-    { label: 'Recompose', icon: REFRESH_ICON, action: 'compose-recompose', show: running, disabled, title },
-    { label: opts.pluginInstalled ? 'View Stack' : 'Edit Stack', icon: EDIT_ICON, action: 'compose-edit' },
+    { label: '启动堆栈', icon: PLAY_ICON, action: 'compose-up', show: !running, disabled, title },
+    { label: '全部停止', icon: STOP_ICON, action: 'compose-stop', show: running, disabled, title },
+    { label: '拉取最新镜像', icon: DOWNLOAD_ICON, action: 'compose-pull', disabled, title },
+    { label: '重建', icon: REFRESH_ICON, action: 'compose-recompose', show: running, disabled, title },
+    { label: opts.pluginInstalled ? '查看堆栈' : '编辑堆栈', icon: EDIT_ICON, action: 'compose-edit' },
   ];
 }

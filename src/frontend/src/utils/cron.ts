@@ -138,7 +138,7 @@ function describeTime(min: Segment[], hour: Segment[]): string | null {
 
   const onTheHour = minutes?.length === 1 && minutes[0] === 0;
   if (isAny(hour)) {
-    if (onTheHour) return 'every hour';
+    if (onTheHour) return '每小时';
     return minutes ? `${describeMinutes(min)} past every hour` : describeMinutes(min);
   }
 

@@ -212,7 +212,7 @@ function onKeydown(event: KeyboardEvent) {
     move(-1);
     return;
   }
-  if (event.key === 'Escape') {
+  if (event.key === 'Esc') {
     isOpen.value = false;
     active.value = -1;
     return;
@@ -221,7 +221,7 @@ function onKeydown(event: KeyboardEvent) {
   const chosen = isOpen.value && active.value >= 0 ? shownEntries.value[active.value] : null;
   if (!chosen) return;
 
-  if (event.key === 'Enter' || event.key === 'Tab') {
+  if (event.key === 'Enter' || event.key === '选项卡') {
     // Enter would otherwise submit, and Tab would leave the field with the
     // highlighted entry discarded.
     event.preventDefault();

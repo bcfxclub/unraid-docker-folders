@@ -90,7 +90,7 @@ function runSubscriptionStream(
       fn();
     };
 
-    const onAbort = (): void => finish(() => reject(new DOMException('Aborted', 'AbortError')));
+    const onAbort = (): void => finish(() => reject(new DOMException('已中止', 'AbortError')));
 
     const client = new GraphqlWsClient(wsUrl(), { 'x-csrf-token': getCsrfToken() }, {
       onClosed: (reason) => {

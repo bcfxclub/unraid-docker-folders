@@ -1,5 +1,5 @@
 Menu="Docker:0"
-Title="Folders"
+Title="文件夹"
 Tag="folder-open"
 Cond="is_file('/var/run/dockerd.pid')"
 Markdown="false"
@@ -12,9 +12,9 @@ $dbStatus = file_exists(DB_PATH) ? 'exists' : 'missing';
 
 <?php if ($dbStatus === 'missing'): ?>
 <div style="background:#f0f0f0;padding:20px;margin:20px;border:2px solid #f44336;border-radius:8px;">
-    <h3>Database Not Found</h3>
-    <p>The plugin database has not been initialized. Please reinstall the plugin or run migrations.</p>
-    <p>Expected path: <code><?= DB_PATH ?></code></p>
+    <h3>未找到数据库</h3>
+    <p>插件数据库尚未初始化。请重新安装插件或运行迁移。</p>
+    <p>期望路径： <code><?= DB_PATH ?></code></p>
 </div>
 <?php else: ?>
 <iframe id="docker-folders-frame"
@@ -1144,7 +1144,7 @@ $dbStatus = file_exists(DB_PATH) ? 'exists' : 'missing';
     if (id !== currentId) return;
     if (success) {
       statusEl.style.color = '#4caf50';
-      statusEl.textContent = 'Saved';
+      statusEl.textContent = '已保存';
       setTimeout(function() { if (currentId === id) statusEl.textContent = ''; }, 2000);
     } else {
       statusEl.style.color = '#f44336';

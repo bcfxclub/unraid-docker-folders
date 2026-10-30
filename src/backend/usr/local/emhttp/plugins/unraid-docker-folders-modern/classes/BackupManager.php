@@ -158,7 +158,7 @@ class BackupManager
 
     $prepared = $postgres->prepareDump($target['id'], $pg);
     if (!$prepared['success']) {
-      return ['success' => false, 'message' => 'Postgres backup failed: ' . $prepared['message']];
+      return ['success' => false, 'message' => 'Postgres 备份失败：' . $prepared['message']];
     }
 
     $created = [];

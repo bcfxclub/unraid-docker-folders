@@ -10,7 +10,7 @@
       </select>
     </div>
     <div class="flex justify-end gap-2 p-4 sm:p-6 pt-2">
-      <button type="button" @click="$emit('cancel')" class="nav-btn">Cancel</button>
+      <button type="button" @click="$emit('cancel')" class="nav-btn">取消</button>
       <button type="button" @click="handleConfirm" class="nav-btn active">{{ confirmLabel }}</button>
     </div>
   </BaseModal>
@@ -40,7 +40,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   description: '',
-  confirmLabel: 'Select',
+  confirmLabel: '选择',
 });
 
 const emit = defineEmits<{
@@ -79,7 +79,7 @@ function openParent() {
       },
     ],
     actions: [
-      { id: 'cancel', label: 'Cancel', variant: 'default' },
+      { id: 'cancel', label: '取消', variant: 'default' },
       { id: 'confirm', label: props.confirmLabel, variant: 'primary' },
     ],
   });

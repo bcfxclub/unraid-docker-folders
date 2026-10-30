@@ -1,5 +1,5 @@
 Menu="Utilities"
-Title="Docker Folders"
+Title="Docker 文件夹"
 Icon="icon.png"
 Tag="folder"
 Markdown="false"
@@ -30,7 +30,7 @@ $confirmRecompose = ($settings['confirm_recompose'] ?? '1') === '1';
 $enableSecurityAdvisor = ($settings['enable_security_advisor'] ?? '1') === '1';
 $logRefreshInterval = $settings['log_refresh_interval'] ?? '10';
 $statsRefreshInterval = $settings['stats_refresh_interval'] ?? '2';
-$statsRefreshOptions = ['1' => '1 second', '2' => '2 seconds', '5' => '5 seconds', '10' => '10 seconds', '15' => '15 seconds', '30' => '30 seconds', '60' => '60 seconds'];
+$statsRefreshOptions = ['1' => '1 second', '2' => '2 秒', '5' => '5 秒', '10' => '10 seconds', '15' => '15 秒', '30' => '30 秒', '60' => '60 秒'];
 $backendMode = dfmNormalizeBackendMode($settings['backend_mode'] ?? 'php');
 $graphqlPluginState = dfmGraphqlPluginState();
 // Choosing GraphQL installs the backend, so it only needs a running Unraid
@@ -659,10 +659,10 @@ if (file_exists($changelogPath)) {
 
 <div class="settings-container">
   <div class="settings-header">
-    <h1>Docker Folders</h1>
-    <p>A modern plugin for organizing Docker containers with folders and real-time updates</p>
+    <h1>Docker 文件夹</h1>
+    <p>一个用于通过文件夹和实时更新管理 Docker 容器的现代化插件</p>
     <div style="margin-top: 12px;">
-      <a href="/Docker" class="btn btn-primary">Open Docker Folders</a>
+      <a href="/Docker" class="btn btn-primary">打开 Docker 文件夹</a>
     </div>
   </div>
 
@@ -674,37 +674,37 @@ if (file_exists($changelogPath)) {
 
   <!-- Display Settings -->
   <div class="settings-section">
-    <h3>Display</h3>
+    <h3>显示</h3>
 
     <div class="settings-group">
-      <h4>Containers</h4>
+      <h4>容器</h4>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="distinguish-healthy">Distinguish health status</label>
-        <div class="description">When enabled, running containers with a passing health check show green, and those without a health check show blue. When disabled, all running containers show green. <strong>Default: On</strong></div>
+        <label for="distinguish-healthy">区分健康状态</label>
+        <div class="description">When enabled, running containers with a passing health check show green, and those without a health check show blue. When disabled, all running containers show green. <strong>默认：开启</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="distinguish-healthy" <?= $distinguishHealthy ? 'checked' : '' ?> onchange="saveSetting('distinguish_healthy', this.checked ? '1' : '0')" />
-        <span id="save-status-distinguish-healthy" class="save-status">Saved</span>
+        <span id="save-status-distinguish-healthy" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="show-stats">Show container stats</label>
-        <div class="description">When enabled, live resource stats (CPU, memory, network, etc.) are polled and displayed on container cards. Disable to reduce network traffic and server load. <strong>Default: On</strong></div>
+        <label for="show-stats">显示容器资源占用</label>
+        <div class="description">When enabled, live resource stats (CPU, memory, network, etc.) are polled and displayed on container cards. Disable to reduce network traffic and server load. <strong>默认：开启</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="show-stats" <?= $showStats ? 'checked' : '' ?> onchange="saveSetting('show_stats', this.checked ? '1' : '0')" />
-        <span id="save-status-show-stats" class="save-status">Saved</span>
+        <span id="save-status-show-stats" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="memory-calculation">Memory usage</label>
-        <div class="description">How container memory is counted. Docker CLI subtracts inactive page cache, so it matches <code>docker stats</code>. Raw cgroup counts the page cache too, so it reads higher. Applies to both backends; in GraphQL mode a change takes up to a minute. <strong>Default: Docker CLI</strong></div>
+        <label for="memory-calculation">内存占用</label>
+        <div class="description">容器内存的计算方式。Docker CLI 会减去未激活的页缓存，因此与 <code>docker stats</code>. Raw cgroup counts the page cache too, so it reads higher. Applies to both backends; in GraphQL mode a change takes up to a minute. <strong>默认：Docker CLI</strong></div>
       </div>
       <div class="setting-control">
         <select id="memory-calculation" onchange="saveSetting('memory_calculation', this.value)">
@@ -712,73 +712,73 @@ if (file_exists($changelogPath)) {
           <option value="<?= $memOptValue ?>" <?= $memoryCalculation === $memOptValue ? 'selected' : '' ?>><?= $memOptLabel ?></option>
           <?php endforeach; ?>
         </select>
-        <span id="save-status-memory-calculation" class="save-status">Saved</span>
+        <span id="save-status-memory-calculation" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="show-inline-logs">Show inline logs</label>
-        <div class="description">When enabled, expanding a running container shows a live log panel alongside resource stats. A stopped container always shows its last 200 log lines, so you can see why it stopped. <strong>Default: Off</strong></div>
+        <label for="show-inline-logs">显示内联日志</label>
+        <div class="description">When enabled, expanding a running container shows a live log panel alongside resource stats. A stopped container always shows its last 200 log lines, so you can see why it stopped. <strong>默认：关闭</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="show-inline-logs" <?= $showInlineLogs ? 'checked' : '' ?> onchange="saveSetting('show_inline_logs', this.checked ? '1' : '0')" />
-        <span id="save-status-show-inline-logs" class="save-status">Saved</span>
+        <span id="save-status-show-inline-logs" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="log-refresh-interval">Log refresh interval</label>
-        <div class="description">How often to auto-refresh inline logs when the panel is open. Only applies to running containers, when inline logs are enabled. <strong>Default: 10 seconds</strong></div>
+        <label for="log-refresh-interval">日志刷新间隔</label>
+        <div class="description">How often to auto-refresh inline logs when the panel is open. Only applies to running containers, when inline logs are enabled. <strong>默认：10 秒</strong></div>
       </div>
       <div class="setting-control">
         <select id="log-refresh-interval" onchange="saveSetting('log_refresh_interval', this.value)">
-          <option value="5" <?= $logRefreshInterval === '5' ? 'selected' : '' ?>>5 seconds</option>
+          <option value="5" <?= $logRefreshInterval === '5' ? 'selected' : '' ?>>5 秒</option>
           <option value="10" <?= $logRefreshInterval === '10' ? 'selected' : '' ?>>10 seconds</option>
-          <option value="15" <?= $logRefreshInterval === '15' ? 'selected' : '' ?>>15 seconds</option>
-          <option value="30" <?= $logRefreshInterval === '30' ? 'selected' : '' ?>>30 seconds</option>
-          <option value="60" <?= $logRefreshInterval === '60' ? 'selected' : '' ?>>60 seconds</option>
-          <option value="0" <?= $logRefreshInterval === '0' ? 'selected' : '' ?>>Disabled (manual only)</option>
+          <option value="15" <?= $logRefreshInterval === '15' ? 'selected' : '' ?>>15 秒</option>
+          <option value="30" <?= $logRefreshInterval === '30' ? 'selected' : '' ?>>30 秒</option>
+          <option value="60" <?= $logRefreshInterval === '60' ? 'selected' : '' ?>>60 秒</option>
+          <option value="0" <?= $logRefreshInterval === '0' ? 'selected' : '' ?>>已禁用（仅手动）</option>
         </select>
-        <span id="save-status-log-refresh-interval" class="save-status">Saved</span>
+        <span id="save-status-log-refresh-interval" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="enable-adopt">Offer to adopt manually created containers</label>
-        <div class="description">When enabled, a container that was created outside Unraid (for example with <code>docker run</code>) shows an Adopt button. Adoption hands the container to Unraid's container manager, which removes and recreates it. Compose containers are never offered. <strong>Default: On</strong></div>
+        <label for="enable-adopt">提供接管手动创建的容器</label>
+        <div class="description">When enabled, a container that was created outside Unraid (for example with <code>docker run</code>) shows an Adopt button. Adoption hands the container to Unraid's container manager, which removes and recreates it. Compose containers are never offered. <strong>默认：开启</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="enable-adopt" <?= $enableAdopt ? 'checked' : '' ?> onchange="saveSetting('enable_adopt', this.checked ? '1' : '0')" />
-        <span id="save-status-enable-adopt" class="save-status">Saved</span>
+        <span id="save-status-enable-adopt" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="enable-security-advisor">Flag risky container settings</label>
-        <div class="description">Marks running containers that use privileged mode, host networking, added capabilities, a mounted <code>/var/run/docker.sock</code>, or a writable mount of a broad host path, and suggests what to change instead. Nothing is changed for you, and a finding you accept can be dismissed. <strong>Default: On</strong></div>
+        <label for="enable-security-advisor">标记有风险的容器设置</label>
+        <div class="description">标记使用特权模式、主机网络、附加权限、挂载的 <code>/var/run/docker.sock</code>, or a writable mount of a broad host path, and suggests what to change instead. Nothing is changed for you, and a finding you accept can be dismissed. <strong>默认：开启</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="enable-security-advisor" <?= $enableSecurityAdvisor ? 'checked' : '' ?> onchange="saveSetting('enable_security_advisor', this.checked ? '1' : '0')" />
-        <span id="save-status-enable-security-advisor" class="save-status">Saved</span>
+        <span id="save-status-enable-security-advisor" class="save-status">已保存</span>
       </div>
     </div>
     </div>
 
     <div class="settings-group">
-      <h4>Folders</h4>
+      <h4>文件夹</h4>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="show-folder-ports">Show ports on collapsed folders</label>
-        <div class="description">When enabled, collapsed folders display the public ports of all running containers inside them. <strong>Default: On</strong></div>
+        <label for="show-folder-ports">在折叠文件夹上显示端口</label>
+        <div class="description">启用后，折叠的文件夹会显示其中所有运行容器的公开端口。 <strong>默认：开启</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="show-folder-ports" <?= $showFolderPorts ? 'checked' : '' ?> onchange="saveSetting('show_folder_ports', this.checked ? '1' : '0')" />
-        <span id="save-status-show-folder-ports" class="save-status">Saved</span>
+        <span id="save-status-show-folder-ports" class="save-status">已保存</span>
       </div>
     </div>
     </div>
@@ -786,66 +786,66 @@ if (file_exists($changelogPath)) {
 
   <!-- Image Updates -->
   <div class="settings-section">
-    <h3>Image Updates</h3>
+    <h3>镜像更新</h3>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="enable-update-checks">Enable image update checks</label>
-        <div class="description">Check Docker registries for newer images. Containers with available updates show an "Update" badge. Images are never pulled automatically &mdash; only digest comparison is performed. <strong>Default: Off</strong></div>
+        <label for="enable-update-checks">启用镜像更新检查</label>
+        <div class="description">Check Docker registries for newer images. Containers with available updates show an "Update" badge. Images are never pulled automatically &mdash; only digest comparison is performed. <strong>默认：关闭</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="enable-update-checks" <?= $enableUpdateChecks ? 'checked' : '' ?> onchange="toggleUpdateSettings(this.checked)" />
-        <span id="save-status-enable-update-checks" class="save-status">Saved</span>
+        <span id="save-status-enable-update-checks" class="save-status">已保存</span>
       </div>
     </div>
 
     <div id="update-settings" class="update-settings <?= $enableUpdateChecks ? '' : 'hidden' ?>">
       <div class="setting-row">
         <div class="setting-info">
-          <label for="update-check-schedule">Automatic check schedule</label>
-          <div class="description">How often to automatically check registries for image updates in the background.</div>
+          <label for="update-check-schedule">自动检查计划</label>
+          <div class="description">在后台自动检查镜像更新仓库的频率。</div>
         </div>
         <div class="setting-control">
           <select id="update-check-schedule" onchange="saveSetting('update_check_schedule', this.value)">
-            <option value="disabled" <?= $updateCheckSchedule === 'disabled' ? 'selected' : '' ?>>Disabled</option>
-            <option value="hourly" <?= $updateCheckSchedule === 'hourly' ? 'selected' : '' ?>>Hourly</option>
-            <option value="daily" <?= $updateCheckSchedule === 'daily' ? 'selected' : '' ?>>Daily (3 AM)</option>
+            <option value="disabled" <?= $updateCheckSchedule === 'disabled' ? 'selected' : '' ?>>已禁用</option>
+            <option value="hourly" <?= $updateCheckSchedule === 'hourly' ? 'selected' : '' ?>>每小时</option>
+            <option value="daily" <?= $updateCheckSchedule === 'daily' ? 'selected' : '' ?>>每日（凌晨 3 点）</option>
             <option value="twice_daily" <?= $updateCheckSchedule === 'twice_daily' ? 'selected' : '' ?>>Twice Daily (3 AM &amp; 3 PM)</option>
-            <option value="weekly" <?= $updateCheckSchedule === 'weekly' ? 'selected' : '' ?>>Weekly (Sunday 3 AM)</option>
+            <option value="weekly" <?= $updateCheckSchedule === 'weekly' ? 'selected' : '' ?>>每周（周日 凌晨 3 点）</option>
           </select>
-          <span id="save-status-update-check-schedule" class="save-status">Saved</span>
+          <span id="save-status-update-check-schedule" class="save-status">已保存</span>
         </div>
       </div>
 
       <div class="setting-row">
         <div class="setting-info">
-          <label for="notify-on-updates">Notify on updates</label>
-          <div class="description">Send an Unraid notification that names the containers when a background check finds new updates.</div>
+          <label for="notify-on-updates">更新时通知</label>
+          <div class="description">后台检查发现有新更新时，发送一封列出相关容器的 Unraid 通知。</div>
         </div>
         <div class="setting-control">
           <input type="checkbox" id="notify-on-updates" <?= $notifyOnUpdates ? 'checked' : '' ?> onchange="saveSetting('notify_on_updates', this.checked ? '1' : '0')" />
-          <span id="save-status-notify-on-updates" class="save-status">Saved</span>
+          <span id="save-status-notify-on-updates" class="save-status">已保存</span>
         </div>
       </div>
 
       <div class="setting-row">
         <div class="setting-info">
-          <label for="post-pull-action">Post-pull behavior</label>
+          <label for="post-pull-action">拉取后行为</label>
           <div class="description">What to do after pulling an updated image. A container keeps running the old image until it is recreated; a restart is not enough. "Pull only" leaves it to you: the container shows Not Applied, and Apply Update in its menu recreates it (for a compose stack, Recompose in the stack folder menu). "Offer recreate" shows a Recreate button when the pull finishes. "Auto recreate" recreates the container right away.</div>
         </div>
         <div class="setting-control">
           <select id="post-pull-action" onchange="saveSetting('post_pull_action', this.value)">
-            <option value="pull_only" <?= $postPullAction === 'pull_only' ? 'selected' : '' ?>>Pull only (manual apply)</option>
-            <option value="pull_and_offer_restart" <?= $postPullAction === 'pull_and_offer_restart' ? 'selected' : '' ?>>Pull + offer recreate</option>
-            <option value="pull_and_auto_recreate" <?= $postPullAction === 'pull_and_auto_recreate' ? 'selected' : '' ?>>Pull + auto recreate</option>
+            <option value="pull_only" <?= $postPullAction === 'pull_only' ? 'selected' : '' ?>>仅拉取（手动应用）</option>
+            <option value="pull_and_offer_restart" <?= $postPullAction === 'pull_and_offer_restart' ? 'selected' : '' ?>>拉取并提供重建</option>
+            <option value="pull_and_auto_recreate" <?= $postPullAction === 'pull_and_auto_recreate' ? 'selected' : '' ?>>拉取并自动重建</option>
           </select>
-          <span id="save-status-post-pull-action" class="save-status">Saved</span>
+          <span id="save-status-post-pull-action" class="save-status">已保存</span>
         </div>
       </div>
 
       <div class="setting-row">
         <div class="setting-info">
-          <label for="update-concurrency">Concurrent updates</label>
+          <label for="update-concurrency">并发更新</label>
           <div class="description">How many containers to pull and recreate at the same time during a batch update. Higher is faster but uses more bandwidth and PHP worker slots. Set to 1 to update one at a time.</div>
         </div>
         <div class="setting-control">
@@ -854,20 +854,20 @@ if (file_exists($changelogPath)) {
               <option value="<?= $i ?>" <?= $updateConcurrency === $i ? 'selected' : '' ?>><?= $i ?></option>
             <?php endfor; ?>
           </select>
-          <span id="save-status-update-concurrency" class="save-status">Saved</span>
+          <span id="save-status-update-concurrency" class="save-status">已保存</span>
         </div>
       </div>
 
       <div class="setting-row">
         <div class="setting-info">
-          <label>Excluded images</label>
-          <div class="description">Images excluded from update checks. Select containers or add custom glob patterns.</div>
+          <label>已排除的镜像</label>
+          <div class="description">已从更新检查中排除的镜像。选择容器或添加自定义 glob 模式。</div>
         </div>
         <div class="setting-control">
           <div class="exclude-summary">
             <span id="exclude-count" class="exclude-count"><?= $excludeCount > 0 ? $excludeCount . ' excluded' : 'None' ?></span>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openExcludeModal()">Manage</button>
-            <span id="save-status-update-check-exclude" class="save-status">Saved</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openExcludeModal()">管理</button>
+            <span id="save-status-update-check-exclude" class="save-status">已保存</span>
           </div>
         </div>
       </div>
@@ -875,12 +875,12 @@ if (file_exists($changelogPath)) {
       <div style="padding-top: 10px;">
         <div style="display: flex; align-items: center; gap: 10px;">
           <button type="button" class="log-viewer-toggle" onclick="toggleLog()">
-            <span id="log-arrow" class="arrow">&#9654;</span> Update check log
+            <span id="log-arrow" class="arrow">&#9654;</span> 更新检查日志
           </button>
-          <button type="button" id="clear-log-btn" class="btn btn-secondary btn-sm" onclick="clearLog()" style="display: none;">Clear</button>
+          <button type="button" id="clear-log-btn" class="btn btn-secondary btn-sm" onclick="clearLog()" style="display: none;">清除</button>
         </div>
         <div id="log-viewer" class="log-viewer">
-          <div id="log-content" class="log-content"><?php if ($updateLog): ?><?= htmlspecialchars($updateLog) ?><?php else: ?><span class="log-empty">No log entries yet. Logs appear after the first scheduled or manual update check.</span><?php endif; ?></div>
+          <div id="log-content" class="log-content"><?php if ($updateLog): ?><?= htmlspecialchars($updateLog) ?><?php else: ?><span class="log-empty">暂无日志。首次计划或手动更新检查后会出现日志。</span><?php endif; ?></div>
         </div>
       </div>
     </div>
@@ -892,45 +892,45 @@ if (file_exists($changelogPath)) {
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="compose-auto-install">Reinstall Docker Compose after a reboot</label>
-        <div class="description">Unraid keeps the Docker CLI plugins in RAM, so <code>docker compose</code> disappears at every reboot and compose stacks cannot autostart. When enabled, a verified copy of the Compose binary is kept on the flash drive (about 65 MB) and put back each time Docker starts, before stacks autostart. If no copy exists yet, it is downloaded once. <strong>Default: Off</strong></div>
+        <label for="compose-auto-install">重启后重新安装 Docker Compose</label>
+        <div class="description">Unraid 将 Docker CLI 插件保留在内存中，因此 <code>docker compose</code> disappears at every reboot and compose stacks cannot autostart. When enabled, a verified copy of the Compose binary is kept on the flash drive (about 65 MB) and put back each time Docker starts, before stacks autostart. If no copy exists yet, it is downloaded once. <strong>默认：关闭</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="compose-auto-install" <?= $composeAutoInstall ? 'checked' : '' ?> onchange="saveSetting('compose_auto_install', this.checked ? '1' : '0')" />
-        <span id="save-status-compose-auto-install" class="save-status">Saved</span>
+        <span id="save-status-compose-auto-install" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="confirm-stack-down">Confirm before Stack Down</label>
-        <div class="description">Asks first, and explains what happens, before <code>docker compose down</code> deletes a stack's containers and networks. Turned off when you tick "Don't ask again" in that dialog. <strong>Default: On</strong></div>
+        <label for="confirm-stack-down">停止堆栈前确认</label>
+        <div class="description">Asks first, and explains what happens, before <code>docker compose down</code> 会删除堆栈的容器和网络。在该对话框中勾选“不再询问”后关闭。 <strong>默认：开启</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="confirm-stack-down" <?= $confirmStackDown ? 'checked' : '' ?> onchange="saveSetting('confirm_stack_down', this.checked ? '1' : '0')" />
-        <span id="save-status-confirm-stack-down" class="save-status">Saved</span>
+        <span id="save-status-confirm-stack-down" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="confirm-recompose">Confirm before Recompose</label>
-        <div class="description">Asks first, and explains what happens, before Recompose deletes and rebuilds every container in a stack. Turned off when you tick "Don't ask again" in that dialog. <strong>Default: On</strong></div>
+        <label for="confirm-recompose">重建前确认</label>
+        <div class="description">Asks first, and explains what happens, before Recompose deletes and rebuilds every container in a stack. Turned off when you tick "Don't ask again" in that dialog. <strong>默认：开启</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="confirm-recompose" <?= $confirmRecompose ? 'checked' : '' ?> onchange="saveSetting('confirm_recompose', this.checked ? '1' : '0')" />
-        <span id="save-status-confirm-recompose" class="save-status">Saved</span>
+        <span id="save-status-confirm-recompose" class="save-status">已保存</span>
       </div>
     </div>
   </div>
 
   <!-- Compose Export -->
   <div class="settings-section">
-    <h3>Compose Export</h3>
+    <h3>Compose 导出</h3>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="compose-export-dir">Export directory</label>
+        <label for="compose-export-dir">导出目录</label>
         <div class="description">Directory where compose configs will be exported. Each stack gets its own subdirectory with docker-compose.yml and .env files. <strong>Default: <?= htmlspecialchars(COMPOSE_STACKS_DIR) ?></strong></div>
       </div>
       <div class="setting-control">
@@ -938,56 +938,56 @@ if (file_exists($changelogPath)) {
                value="<?= htmlspecialchars($composeExportDir) ?>"
                style="padding: 6px 10px; border: 1px solid var(--border-color, #ccc); border-radius: 4px; font-size: 13px; background: color-mix(in srgb, var(--background-color, white), var(--text-color, #1a1a1a) 8%); color: var(--text-color, #333); min-width: 300px; font-family: 'Courier New', monospace;"
                onchange="saveSetting('compose_export_dir', this.value)" />
-        <span id="save-status-compose-export-dir" class="save-status">Saved</span>
+        <span id="save-status-compose-export-dir" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label>Export compose configs</label>
+        <label>导出 Compose 配置</label>
         <div class="description">Copy all compose stack configurations (docker-compose.yml and .env files) to the export directory. This does not affect running stacks.</div>
       </div>
       <div class="setting-control">
-        <button type="button" class="btn btn-primary btn-sm" onclick="exportComposeConfigs()">Export Now</button>
-        <span id="export-status" class="save-status">Exported</span>
+        <button type="button" class="btn btn-primary btn-sm" onclick="exportComposeConfigs()">立即导出</button>
+        <span id="export-status" class="save-status">已导出</span>
       </div>
     </div>
   </div>
 
   <!-- Native Docker tab: replacing the built-in section, and the legacy parts kept alongside it -->
   <div class="settings-section">
-    <h3>Native Docker Tab</h3>
+    <h3>原生 Docker 选项卡</h3>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="replace-docker-section">Replace Docker Containers section</label>
-        <div class="description">When enabled, the built-in Docker Containers section on the Docker tab is replaced with the Docker Folders UI. <strong>Default: On</strong></div>
+        <label for="replace-docker-section">替换 Docker 容器区块</label>
+        <div class="description">启用后，Docker 选项卡内置的容器区块将被 Docker 文件夹界面替换。 <strong>默认：开启</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="replace-docker-section" <?= $replaceDockerSection ? 'checked' : '' ?> onchange="saveSetting('replace_docker_section', this.checked ? '1' : '0')" />
-        <span id="save-status-replace-docker-section" class="save-status">Saved</span>
+        <span id="save-status-replace-docker-section" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="show-legacy-containers">Show legacy Docker containers</label>
-        <div class="description">When the Docker Containers section is replaced, show the native (legacy) container list in a collapsed "Native Docker Containers" accordion below the Folders UI. When disabled, the legacy list is hidden entirely. Only applies while the section is replaced. <strong>Default: Off</strong></div>
+        <label for="show-legacy-containers">显示旧版 Docker 容器</label>
+        <div class="description">When the Docker Containers section is replaced, show the native (legacy) container list in a collapsed "Native Docker Containers" accordion below the Folders UI. When disabled, the legacy list is hidden entirely. Only applies while the section is replaced. <strong>默认：关闭</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="show-legacy-containers" <?= $showLegacyContainers ? 'checked' : '' ?> onchange="saveSetting('show_legacy_containers', this.checked ? '1' : '0')" />
-        <span id="save-status-show-legacy-containers" class="save-status">Saved</span>
+        <span id="save-status-show-legacy-containers" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="show-legacy-buttons">Show legacy Docker buttons</label>
-        <div class="description">When the Docker Containers section is replaced, keep the native Docker page action buttons (Add Container, Check for Updates, etc.) visible. When disabled, they are hidden. Only applies while the section is replaced. <strong>Default: Off</strong></div>
+        <label for="show-legacy-buttons">显示旧版 Docker 按钮</label>
+        <div class="description">When the Docker Containers section is replaced, keep the native Docker page action buttons (Add Container, Check for Updates, etc.) visible. When disabled, they are hidden. Only applies while the section is replaced. <strong>默认：关闭</strong></div>
       </div>
       <div class="setting-control">
         <input type="checkbox" id="show-legacy-buttons" <?= $showLegacyButtons ? 'checked' : '' ?> onchange="saveSetting('show_legacy_buttons', this.checked ? '1' : '0')" />
-        <span id="save-status-show-legacy-buttons" class="save-status">Saved</span>
+        <span id="save-status-show-legacy-buttons" class="save-status">已保存</span>
       </div>
     </div>
   </div>
@@ -996,44 +996,44 @@ if (file_exists($changelogPath)) {
        GraphQL needs the companion Unraid API plugin, and is marked unstable
        while it is tested. -->
   <div class="settings-section">
-    <h3>Backend <span class="unstable-tag">Unstable</span></h3>
+    <h3>Backend <span class="unstable-tag">不稳定</span></h3>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="backend-mode">Data source</label>
+        <label for="backend-mode">数据源</label>
         <div class="description">
-          Which backend the Folders page and the dashboard tile use. <strong>PHP</strong> is this plugin's own API and is always available.
+          文件夹页面与仪表盘组件所使用的前端后端。 <strong>PHP</strong> is this plugin's own API and is always available.
           <strong>GraphQL</strong> is highly experimental. Choosing it installs a backend into the Unraid API and restarts the API. It sends live updates for container changes, stats and logs, and it also runs schedules and update checks.
           If the GraphQL backend stops answering for about 8 minutes while the Unraid API runs, the plugin switches back to PHP, and you get a notification. Do not rely on that automatic restore. Choosing PHP removes the backend from the Unraid API again.
           The Folders page reads this setting when it loads, so reload it after a change.
           <?php if ($unraidApiVersion !== null): ?>
-          This server runs Unraid API <?= htmlspecialchars($unraidApiVersion) ?>.
+          此服务器运行 Unraid API <?= htmlspecialchars($unraidApiVersion) ?>.
           <?php endif; ?>
-          <strong>Default: PHP</strong>
+          <strong>默认：PHP</strong>
           <?php if (!$graphqlSelectable && $graphqlUnavailableReason !== ''): ?>
           <br><em><?= htmlspecialchars($graphqlUnavailableReason) ?></em>
           <?php endif; ?>
           <?php if ($backendRollback): ?>
-          <br><em>Switched back to PHP automatically on <?= htmlspecialchars(date('Y-m-d H:i', (int) ($backendRollback['at'] ?? 0))) ?>. <?= htmlspecialchars((string) ($backendRollback['reason'] ?? '')) ?></em>
+          <br><em>已在以下时间自动切回 PHP： <?= htmlspecialchars(date('Y-m-d H:i', (int) ($backendRollback['at'] ?? 0))) ?>. <?= htmlspecialchars((string) ($backendRollback['reason'] ?? '')) ?></em>
           <?php endif; ?>
           <br><em id="backend-mode-progress"></em>
         </div>
       </div>
       <div class="setting-control">
         <select id="backend-mode" data-current="<?= htmlspecialchars($backendMode) ?>" onchange="changeBackendMode(this)">
-          <option value="php" <?= $backendMode === 'php' ? 'selected' : '' ?>>PHP (default)</option>
-          <option value="graphql" <?= $backendMode === 'graphql' ? 'selected' : '' ?> <?= $graphqlSelectable ? '' : 'disabled' ?>>GraphQL (unstable)</option>
+          <option value="php" <?= $backendMode === 'php' ? 'selected' : '' ?>>PHP（默认）</option>
+          <option value="graphql" <?= $backendMode === 'graphql' ? 'selected' : '' ?> <?= $graphqlSelectable ? '' : 'disabled' ?>>GraphQL（不稳定）</option>
         </select>
-        <span id="save-status-backend-mode" class="save-status">Saved</span>
+        <span id="save-status-backend-mode" class="save-status">已保存</span>
       </div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <label for="stats-refresh-interval">Stats refresh interval</label>
+        <label for="stats-refresh-interval">资源占用刷新间隔</label>
         <div class="description">
           How often the server sends live CPU, memory and I/O stats in GraphQL mode, on the Folders page and the dashboard tile. A shorter interval costs the server more work. PHP mode does not use this setting.
-          <strong>Default: 2 seconds</strong>
+          <strong>默认：2 秒</strong>
         </div>
       </div>
       <div class="setting-control">
@@ -1042,14 +1042,14 @@ if (file_exists($changelogPath)) {
           <option value="<?= $statsOptValue ?>" <?= $statsRefreshInterval === (string) $statsOptValue ? 'selected' : '' ?>><?= $statsOptLabel ?></option>
           <?php endforeach; ?>
         </select>
-        <span id="save-status-stats-refresh-interval" class="save-status">Saved</span>
+        <span id="save-status-stats-refresh-interval" class="save-status">已保存</span>
       </div>
     </div>
   </div>
 
   <div class="action-buttons">
     <a href="https://github.com/rizowski/unraid-docker-folders" class="btn btn-secondary" target="_blank">
-      View on GitHub
+      在 GitHub 查看
     </a>
     <!-- Ko-fi, hand-built rather than Ko-fi's Widget_2.js snippet. That widget
          loads a render-blocking script from storage.ko-fi.com and draws itself
@@ -1064,7 +1064,7 @@ if (file_exists($changelogPath)) {
         <line x1="10" y1="1" x2="10" y2="4" />
         <line x1="14" y1="1" x2="14" y2="4" />
       </svg>
-      Buy me a coffee
+      请我喝杯咖啡
     </a>
   </div>
 </div>
@@ -1073,26 +1073,26 @@ if (file_exists($changelogPath)) {
 <div id="exclude-modal" class="exclude-modal-overlay" onclick="if(event.target===this)closeExcludeModal()">
   <div class="exclude-modal">
     <div class="exclude-modal-header">
-      <h3>Exclude Images from Update Checks</h3>
+      <h3>从更新检查中排除镜像</h3>
       <button class="exclude-modal-close" onclick="closeExcludeModal()">&times;</button>
     </div>
     <div class="exclude-modal-body">
       <input type="text" id="exclude-search" class="exclude-search" placeholder="Filter images..." oninput="filterExcludeList()" />
       <div id="exclude-list" class="exclude-list">
-        <div class="exclude-empty">Loading containers...</div>
+        <div class="exclude-empty">正在加载容器…</div>
       </div>
       <div class="exclude-custom-section">
-        <label>Custom glob patterns</label>
+        <label>自定义 glob 模式</label>
         <div class="exclude-custom-row">
           <input type="text" id="exclude-custom-input" class="exclude-custom-input" placeholder="e.g. linuxserver/*:latest" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomPattern()}" />
-          <button type="button" class="btn btn-secondary btn-sm" onclick="addCustomPattern()">Add</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="addCustomPattern()">添加</button>
         </div>
         <div id="exclude-custom-tags" class="exclude-custom-tags"></div>
       </div>
     </div>
     <div class="exclude-modal-footer">
-      <button type="button" class="btn btn-secondary btn-sm" onclick="closeExcludeModal()">Cancel</button>
-      <button type="button" class="btn btn-primary btn-sm" onclick="saveExclusions()">Save</button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeExcludeModal()">取消</button>
+      <button type="button" class="btn btn-primary btn-sm" onclick="saveExclusions()">保存</button>
     </div>
   </div>
 </div>
@@ -1110,19 +1110,19 @@ function saveSetting(key, value) {
     var error = null;
     if (xhr.status >= 400) {
       try { error = JSON.parse(xhr.responseText).message; } catch (e) {}
-      error = error || ('Not saved (HTTP ' + xhr.status + ')');
+      error = error || ('未保存（HTTP ' + xhr.status + ')');
     }
     showSaveStatus(statusEl, error);
   };
-  xhr.onerror = function() { showSaveStatus(statusEl, 'Not saved: the server did not answer'); };
+  xhr.onerror = function() { showSaveStatus(statusEl, '未保存：服务器无响应'); };
   xhr.send(body);
 }
 
-// "Saved" for 2 seconds, or the server's error for 8.
+// "已保存" for 2 seconds, or the server's error for 8.
 function showSaveStatus(statusEl, error) {
   if (!statusEl) return;
   clearTimeout(statusEl.hideTimer);
-  statusEl.textContent = error || 'Saved';
+  statusEl.textContent = error || '已保存';
   statusEl.classList.toggle('failed', !!error);
   statusEl.classList.add('visible');
   statusEl.hideTimer = setTimeout(function() { statusEl.classList.remove('visible'); }, error ? 8000 : 2000);
@@ -1149,20 +1149,20 @@ var BACKEND_RESTORE_TEXT =
 
 var BACKEND_WARNING =
   '<div style="text-align:left">' +
-  '<p>The GraphQL backend is <b>highly experimental</b>.</p>' +
+  '<p>GraphQL 后端为 <b>highly experimental</b>.</p>' +
   '<p>It installs code into the Unraid API. A fault in that code can take the whole Unraid GraphQL service offline, and the dashboard and other parts of the webgui use that service. The Unraid API restarts now, and is offline for about 15 seconds.</p>' +
   '<p>If the backend stops answering for about 8 minutes while the Unraid API runs, the plugin switches back to PHP by itself and sends a notification.</p>' +
   '<div style="border:1px solid #e68a00;background:color-mix(in srgb, #e68a00 12%, transparent);border-radius:4px;padding:8px 10px;margin:10px 0">' +
-  '<b>Do not rely on the automatic restore.</b> It can fail, or it can come too late. Copy the steps below and keep them outside the webgui before you install.</div>' +
-  '<p>To go back by hand, in this order:</p>' +
+  '<b>不要依赖自动恢复。</b> 它可能失败，也可能来得太晚。在安装前，请复制以下步骤并保存在 WebGUI 之外。</div>' +
+  '<p>如需手动恢复，请按以下顺序：</p>' +
   '<ol style="margin-left:20px">' +
-  '<li>On this page, set the data source to PHP.</li>' +
-  '<li>If the webgui does not respond, run this over SSH or on the local console:<br>' +
+  '<li>在此页面，将数据源设置为 PHP。</li>' +
+  '<li>如果 WebGUI 无响应，请通过 SSH 或本地控制台运行：<br>' +
   '<code>' + BACKEND_ROLLBACK_COMMAND + '</code></li>' +
-  '<li>If that fails, remove the Docker Folders plugin on the Plugins page, or run <code>plugin remove unraid-docker-folders-modern.plg</code>. The removal also takes the backend out of the Unraid API, and your folders are kept in a database backup.</li>' +
+  '<li>如果失败，请在插件页面移除 Docker 文件夹插件，或运行 <code>plugin remove unraid-docker-folders-modern.plg</code>。移除操作还会将该后端从 Unraid API 中卸下，而你的文件夹会保留在数据库备份中。</li>' +
   '</ol>' +
-  '<p style="margin-top:10px"><button type="button" id="backend-copy-restore">Copy the restore steps</button> ' +
-  '<span id="backend-copy-status">Copy the steps to unlock the install button.</span></p>' +
+  '<p style="margin-top:10px"><button type="button" id="backend-copy-restore">复制恢复步骤</button> ' +
+  '<span id="backend-copy-status">复制这些步骤以解锁安装按钮。</span></p>' +
   '<textarea id="backend-restore-text" readonly rows="6" style="display:none;width:100%;font-family:monospace;font-size:12px"></textarea>' +
   '</div>';
 
@@ -1254,7 +1254,7 @@ function changeBackendMode(select) {
     html: true,
     showCancelButton: true,
     confirmButtonText: 'Install and switch',
-    cancelButtonText: 'Cancel'
+    cancelButtonText: '取消'
   }, function(confirmed) {
     var restoreCopied = hasCopiedRestore();
     resetBackendWarningDialog();
@@ -1417,11 +1417,11 @@ function openExcludeModal() {
 
       renderExcludeList();
     } catch (e) {
-      document.getElementById('exclude-list').innerHTML = '<div class="exclude-empty">Error loading containers</div>';
+      document.getElementById('exclude-list').innerHTML = '<div class="exclude-empty">加载容器失败</div>';
     }
   };
   xhr.onerror = function() {
-    document.getElementById('exclude-list').innerHTML = '<div class="exclude-empty">Error loading containers</div>';
+    document.getElementById('exclude-list').innerHTML = '<div class="exclude-empty">加载容器失败</div>';
   };
   xhr.send();
 }
@@ -1562,7 +1562,7 @@ function clearLog() {
     try {
       var data = JSON.parse(xhr.responseText);
       if (data.success) {
-        document.getElementById('log-content').innerHTML = '<span class="log-empty">No log entries yet. Logs appear after the first scheduled or manual update check.</span>';
+        document.getElementById('log-content').innerHTML = '<span class="log-empty">暂无日志。首次计划或手动更新检查后会出现日志。</span>';
       }
     } catch (e) {}
   };

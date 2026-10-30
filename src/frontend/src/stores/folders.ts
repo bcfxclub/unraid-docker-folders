@@ -45,12 +45,12 @@ export const useFolderStore = defineStore('folders', () => {
     return (id: number) => folders.value.find((f) => f.id === id);
   });
 
-  // Folders keep their drag order unless the user turned on "Sort folders too".
+  // Folders keep their drag order unless the user turned on "同时对文件夹排序".
   // Under an automatic mode a folder ranks by its containers: its most active
-  // state for "Status", and its newest container for the date modes.
+  // state for "状态", and its newest container for the date modes.
   // Explicit types break the folders <-> docker store inference cycle.
   // The mode folders themselves render in. An automatic toolbar sort reorders
-  // folders only when "Sort folders too" is on; otherwise they keep drag order.
+  // folders only when "同时对文件夹排序" is on; otherwise they keep drag order.
   const folderSortMode = computed<SortMode>(() => {
     const settingsStore = useSettingsStore();
     return settingsStore.sortFolders ? settingsStore.sortMode : 'manual';

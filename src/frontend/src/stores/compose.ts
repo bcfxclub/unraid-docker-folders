@@ -146,7 +146,7 @@ export const useComposeStore = defineStore('compose', () => {
       const { ok, data } = await useBackend().compose.stackAction(project, 'up', { force_recreate: forceRecreate });
 
       if (!ok) {
-        throw new Error(data.message || 'Failed to start stack');
+        throw new Error(data.message || '启动堆栈失败');
       }
 
       await fetchStacks(true);
@@ -163,7 +163,7 @@ export const useComposeStore = defineStore('compose', () => {
       const { ok, data } = await useBackend().compose.stackAction(project, 'down');
 
       if (!ok) {
-        throw new Error(data.message || 'Failed to stop stack');
+        throw new Error(data.message || '停止堆栈失败');
       }
 
       await fetchStacks(true);
@@ -180,7 +180,7 @@ export const useComposeStore = defineStore('compose', () => {
       const { ok, data } = await useBackend().compose.stackAction(project, 'stop');
 
       if (!ok) {
-        throw new Error(data.message || 'Failed to stop stack');
+        throw new Error(data.message || '停止堆栈失败');
       }
 
       await fetchStacks(true);
@@ -231,7 +231,7 @@ export const useComposeStore = defineStore('compose', () => {
       await Promise.all([useDockerStore().fetchContainers(), useFolderStore().fetchFolders()]);
     } finally {
       if (result.success) stackActionStatus.value.delete(project);
-      else stackActionStatus.value.set(project, { kind, error: result.error || 'Failed' });
+      else stackActionStatus.value.set(project, { kind, error: result.error || '失败' });
     }
   }
 
@@ -240,7 +240,7 @@ export const useComposeStore = defineStore('compose', () => {
       const { ok, data } = await useBackend().compose.stackAction(project, 'restart');
 
       if (!ok) {
-        throw new Error(data.message || 'Failed to restart stack');
+        throw new Error(data.message || '重启堆栈失败');
       }
 
       await fetchStacks(true);
@@ -266,7 +266,7 @@ export const useComposeStore = defineStore('compose', () => {
       // here means the request itself failed and there is nothing to report
       // line by line.
       if (!ok && !Array.isArray(data.errors)) {
-        return { success: false, errors: [{ line: 1, message: failure ?? 'Request failed' }] };
+        return { success: false, errors: [{ line: 1, message: failure ?? '请求失败' }] };
       }
       return {
         success: !!data.success,
@@ -298,7 +298,7 @@ export const useComposeStore = defineStore('compose', () => {
       const { ok, data } = await useBackend().compose.saveFile(project, { content });
 
       if (!ok) {
-        throw new Error(data.message || 'Failed to save compose file');
+        throw new Error(data.message || '保存 Compose 文件失败');
       }
 
       return true;
@@ -361,7 +361,7 @@ export const useComposeStore = defineStore('compose', () => {
       });
 
       if (!ok) {
-        throw new Error('Failed to set autostart');
+        throw new Error('设置自动启动失败');
       }
 
       // Update local state
@@ -434,7 +434,7 @@ export const useComposeStore = defineStore('compose', () => {
         env_content: envContent,
       });
       if (!ok) {
-        return { success: false, error: data.message || 'Failed to create stack' };
+        return { success: false, error: data.message || '创建堆栈失败' };
       }
 
       // Refresh stacks and folders

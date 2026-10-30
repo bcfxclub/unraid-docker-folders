@@ -1,27 +1,27 @@
 <template>
   <div class="flex flex-col gap-3" :class="embedded ? '' : 'p-3 rounded border border-border bg-bg'">
     <div v-if="!embedded" class="flex items-center justify-between gap-2">
-      <h3 class="text-sm font-semibold text-text m-0">{{ editId ? 'Edit Schedule' : 'New Schedule' }}</h3>
-      <button class="icon-btn text-text-secondary hover:text-text" aria-label="Cancel" title="Cancel" @click="$emit('cancel')">
+      <h3 class="text-sm font-semibold text-text m-0">{{ editId ? '编辑计划' : '新建计划' }}</h3>
+      <button class="icon-btn text-text-secondary hover:text-text" aria-label="取消" title="取消" @click="$emit('cancel')">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
       </button>
     </div>
 
     <div class="flex flex-col gap-1">
-      <label :for="`${uid}-name`" class="text-sm font-medium text-text">Name</label>
-      <input :id="`${uid}-name`" v-model="form.name" class="form-input" placeholder="e.g. Nightly backup" />
+      <label :for="`${uid}-name`" class="text-sm font-medium text-text">名称</label>
+      <input :id="`${uid}-name`" v-model="form.name" class="form-input" placeholder="例如：夜间备份" />
     </div>
 
     <div class="flex flex-col gap-1">
-      <label :for="`${uid}-action`" class="text-sm font-medium text-text">Action</label>
+      <label :for="`${uid}-action`" class="text-sm font-medium text-text">操作</label>
       <select :id="`${uid}-action`" v-model="form.action" class="form-input">
-        <option value="start">Start</option>
-        <option value="stop">Stop</option>
-        <option value="pause">Pause</option>
-        <option value="resume">Resume</option>
-        <option value="restart">Restart</option>
-        <option value="backup">Backup</option>
-        <option v-if="targetType === 'container'" value="update">Update</option>
+        <option value="start">启动</option>
+        <option value="stop">停止</option>
+        <option value="pause">暂停</option>
+        <option value="resume">恢复</option>
+        <option value="restart">重启</option>
+        <option value="backup">备份</option>
+        <option v-if="targetType === 'container'" value="update">更新</option>
       </select>
       <div v-if="form.action === 'update'" class="text-xs text-text-secondary">
         Checks for a newer image. If one exists, pulls it and recreates the container. A run more than
@@ -34,7 +34,7 @@
     <!-- Backup config -->
     <template v-if="form.action === 'backup'">
       <div class="flex flex-col gap-3 p-3 rounded border border-border bg-bg-card">
-        <h4 class="text-sm font-semibold text-text m-0">Backup Configuration</h4>
+        <h4 class="text-sm font-semibold text-text m-0">备份配置</h4>
 
         <div class="flex flex-col gap-1">
           <div class="flex items-center gap-2">
@@ -45,8 +45,8 @@
               class="cursor-pointer"
               @change="pgModeTouched = true"
             />
-            <label :for="`${uid}-pg-mode`" class="text-sm text-text cursor-pointer">Postgres backup mode</label>
-            <span v-if="pgDetected" class="text-xs text-text-secondary">Postgres detected</span>
+            <label :for="`${uid}-pg-mode`" class="text-sm text-text cursor-pointer">Postgres 备份模式</label>
+            <span v-if="pgDetected" class="text-xs text-text-secondary">检测到 Postgres</span>
           </div>
           <div class="text-xs text-text-secondary">
             Dumps each database with pg_dump while the container runs. Use this instead of copying the
@@ -56,9 +56,9 @@
 
         <template v-if="pgMode">
           <div v-if="targetType === 'stack'" class="flex flex-col gap-1">
-            <label :for="`${uid}-pg-service`" class="text-xs text-text-secondary">Service</label>
+            <label :for="`${uid}-pg-service`" class="text-xs text-text-secondary">服务</label>
             <select :id="`${uid}-pg-service`" v-model="pgService" class="form-input compact">
-              <option v-if="!stackServices.length" value="" disabled>No running services found</option>
+              <option v-if="!stackServices.length" value="" disabled>未找到运行中的服务</option>
               <option v-for="svc in stackServices" :key="svc.service" :value="svc.service">
                 {{ svc.service }} ({{ svc.image }})
               </option>
@@ -66,10 +66,10 @@
           </div>
 
           <div class="flex flex-col gap-1">
-            <label :for="`${uid}-pg-credentials`" class="text-xs text-text-secondary">Login</label>
+            <label :for="`${uid}-pg-credentials`" class="text-xs text-text-secondary">登录</label>
             <select :id="`${uid}-pg-credentials`" v-model="pgCredentials" class="form-input compact">
-              <option value="env">From the container's environment</option>
-              <option value="custom">Custom user and password</option>
+              <option value="env">来自容器的环境变量</option>
+              <option value="custom">自定义用户和密码</option>
             </select>
             <div v-if="pgCredentials === 'env'" class="text-xs text-text-secondary">
               Every run reads POSTGRES_USER<template v-if="pgInfo"> ({{ pgInfo.env_user }})</template> and
@@ -281,14 +281,14 @@
     <div v-if="formError" class="text-sm text-error">{{ formError }}</div>
 
     <div class="flex justify-end gap-2 pt-3 border-t border-border">
-      <button class="nav-btn" @click="$emit('cancel')">Cancel</button>
+      <button class="nav-btn" @click="$emit('cancel')">取消</button>
       <button
         class="nav-btn active"
         :class="{ 'opacity-50 cursor-not-allowed': saving || saveBlocked }"
         :disabled="saving || saveBlocked"
         @click="save"
       >
-        {{ saving ? 'Saving...' : (editId ? 'Update' : 'Create') }}
+        {{ saving ? 'Saving...' : (editId ? '更新' : '创建') }}
       </button>
     </div>
   </div>
@@ -624,11 +624,11 @@ async function save() {
       const custom = pgCredentials.value === 'custom';
       const user = pgUser.value.trim();
       if (custom && !user) {
-        formError.value = 'Postgres user is required';
+        formError.value = '需要 Postgres 用户';
         return;
       }
       if (custom && !pgPassword.value && !pgPasswordSet.value) {
-        formError.value = 'Postgres password is required';
+        formError.value = '需要 Postgres 密码';
         return;
       }
       if (!pgDatabases.value.length) {
@@ -679,13 +679,13 @@ async function save() {
     if (props.editId) {
       const ok = await scheduleStore.updateSchedule(props.editId, data);
       if (!ok) {
-        formError.value = 'Failed to update schedule';
+        formError.value = '更新计划失败';
         return;
       }
     } else {
       const result = await scheduleStore.createSchedule(data);
       if (!result.success) {
-        formError.value = result.error || 'Failed to create schedule';
+        formError.value = result.error || '创建计划失败';
         return;
       }
     }

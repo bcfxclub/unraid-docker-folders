@@ -1,0 +1,91 @@
+name: Release (Chinese Localization)
+
+on:
+  push:
+    branches: [main-zh, zh]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - '.github/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-zh-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: src/frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frontend
+        working-directory: src/frontend
+        run: npm run build
+
+      - name: Install Python dependencies
+        run: python3 -m pip install --upgrade pip
+
+      - name: Generate .txz package
+        run: python3 work/package_local.py
+
+      - name: Embed .txz into .plg
+        run: python3 work/embed_txz.py
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(python3 -c "import re; print(re.search(r'<!ENTITY version \"([^\"]+)\">', open('unraid-docker-folders-modern.plg').read()).group(1))")
+          echo "version=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          CHANGELOG=$(git log --oneline -10 | sed 's/^/- /')
+          echo "changelog<<EOF" >> $GITHUB_ENV
+          echo "$CHANGELOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.version }}-zh
+          name: Docker Folders 中文汉化版 v${{ env.version }}
+          body: |
+            ## 中文汉化版
+
+            基于原始插件 [rizowski/unraid-docker-folders](https://github.com/rizowski/unraid-docker-folders) 汉化。
+
+            ### 更新内容
+            - 界面全部翻译为简体中文
+            - 支持离线安装（单文件 .plg）
+            - 修复 mtime 导致的缓存问题
+
+            ### 安装方式
+            1. 下载 `unraid-docker-folders-modern.plg`
+            2. 在 Unraid 中通过 **Plugins → Install Plugin** 安装
+            3. 重启 Docker 后在 **Docker → 文件夹** 使用
+
+            ### 变更日志
+            ${{ env.changelog }}
+          files: |
+            unraid-docker-folders-modern.plg
+            archive/unraid-docker-folders-modern-${{ env.version }}.txz
+          draft: false
+          prerelease: false

@@ -6,7 +6,7 @@
       <line x1="12" y1="9" x2="12" y2="13" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
-    <span class="text-text flex-1">Docker Compose is not installed. Install it to manage compose stacks.</span>
+    <span class="text-text flex-1">未安装 Docker Compose。请安装以管理 Compose 堆栈。</span>
     <button
       @click="install"
       :disabled="composeStore.installingBinary"
@@ -51,7 +51,7 @@
     <button
       @click="dismissImport"
       class="px-3 py-1.5 rounded text-sm font-medium cursor-pointer bg-border text-text border-none hover:brightness-90 transition shrink-0"
-    >Dismiss</button>
+    >忽略</button>
   </div>
 
   <!-- Import result -->

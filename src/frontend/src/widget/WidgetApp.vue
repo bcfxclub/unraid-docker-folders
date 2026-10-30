@@ -6,22 +6,22 @@
       <input
         v-model="query"
         type="text"
-        placeholder="Search containers..."
+        placeholder="搜索容器…"
         class="form-input subtle"
         :style="{ paddingRight: query ? '28px' : undefined }"
       />
       <button
         v-if="query"
         class="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text cursor-pointer leading-none"
-        title="Clear search"
-        aria-label="Clear search"
+        title="清除搜索"
+        aria-label="清除搜索"
         @click="query = ''"
       >&times;</button>
     </div>
 
     <div v-if="prefs.showStats && runningIds.length > 0" class="widget-total pb-2 mb-1 border-b border-border" :title="totalTitle">
       <div class="flex items-center justify-between px-2 mb-1 text-xs">
-        <span class="font-semibold">All running</span>
+        <span class="font-semibold">全部运行中</span>
         <span class="text-text-secondary">{{ runningIds.length }} {{ runningIds.length === 1 ? 'container' : 'containers' }}</span>
       </div>
       <div class="grid grid-cols-2 gap-3 px-2">
@@ -333,7 +333,7 @@ const groups = computed<Group[]>(() => {
 
 // Collapse state is the widget's own, so folding a folder on the dashboard does
 // not fold it on the Folders page. A group the user never touched follows the
-// "Start folders collapsed" setting.
+// "以折叠状态启动文件夹" setting.
 const savedCollapsed = safeLocalStorageGetJson(COLLAPSE_KEY);
 const collapsed = ref<Record<string, boolean>>(
   savedCollapsed && typeof savedCollapsed === 'object' ? (savedCollapsed as Record<string, boolean>) : {},

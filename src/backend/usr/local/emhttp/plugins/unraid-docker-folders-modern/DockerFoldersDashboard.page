@@ -29,20 +29,20 @@ $widgetVersion = dfmAssetVersion(PLUGIN_DIR . '/assets/widget.html');
 // The title attribute is required. The dashboard md5-hashes it to key the saved
 // tile position and collapse state, so renaming it resets both.
 $tile = <<<'EOT'
-<tbody id="docker_folders_view" title="Docker Folders">
+<tbody id="docker_folders_view" title="Docker 文件夹">
 <tr><td>
   <span class="tile-header">
     <span class="tile-header-left">
       <i class="icon-docker f32"></i>
       <div class="section">
-        <h3 class="tile-header-main">Docker Folders</h3>
+        <h3 class="tile-header-main">Docker 文件夹</h3>
         <span class="flex flex-row flex-wrap items-center gap-4">
           <!-- The dashboard shows span.switch only while the tile is folded, the
                way the System tile shows its RAM bar. The widget frame sends the
                numbers, because it keeps running while its row is hidden. -->
           <span class="switch">
             <span class="dfm-summary">
-              <span id="dfm-summary-count">-- running</span>
+              <span id="dfm-summary-count">-- 运行中</span>
               <span id="dfm-summary-crashed" style="color:#f0000c" hidden></span>
               <span class="dfm-summary-item">CPU <span class="dfm-summary-cpu">--</span><span class="dfm-summary-track"><span id="dfm-summary-cpu"></span></span></span>
               <span class="dfm-summary-item">RAM <span class="dfm-summary-memory">--</span><span class="dfm-summary-track"><span id="dfm-summary-memory"></span></span></span>

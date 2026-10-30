@@ -472,7 +472,7 @@ class PostgresBackup
   public function listDatabases($container, $user, $password)
   {
     if (!self::isValidUser($user)) {
-      return ['success' => false, 'databases' => [], 'message' => 'Invalid Postgres user'];
+      return ['success' => false, 'databases' => [], 'message' => 'Postgres 用户无效'];
     }
 
     $run = $this->docker->execCapture(
@@ -508,7 +508,7 @@ class PostgresBackup
   {
     $credentials = $this->resolveCredentials($container, $pg);
     if (!self::isValidUser($credentials['user'])) {
-      return ['success' => false, 'message' => 'The container env holds an invalid Postgres user'];
+      return ['success' => false, 'message' => '容器环境变量包含无效的 Postgres 用户'];
     }
 
     $version = $this->docker->execCapture($container, ['pg_dump', '--version'], [], self::QUERY_TIMEOUT);
@@ -564,7 +564,7 @@ class PostgresBackup
     fclose($handle);
 
     if ($writeFailed) {
-      return ['success' => false, 'message' => 'could not write the dump (disk full?)'];
+      return ['success' => false, 'message' => '无法写入转储（磁盘已满？）'];
     }
     if (!$run['ok']) {
       return ['success' => false, 'message' => self::describeFailure($run, 'pg_dump')];
@@ -585,7 +585,7 @@ class PostgresBackup
       json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
     );
     if ($written === false) {
-      return ['success' => false, 'message' => 'Cannot write manifest.json'];
+      return ['success' => false, 'message' => '无法写入 manifest.json'];
     }
 
     return ['success' => true, 'message' => ''];

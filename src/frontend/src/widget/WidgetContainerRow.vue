@@ -19,7 +19,7 @@
           v-if="status.crashed"
           class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-error/15 text-error"
           :title="status.tooltip"
-        >Crashed</span>
+        >已崩溃</span>
         <template v-if="showTags">
           <a
             v-if="hasUpdate && releaseNotesUrl"
@@ -27,9 +27,9 @@
             target="_blank"
             rel="noopener noreferrer"
             class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning hover:bg-warning/30"
-            title="View release notes"
-          >Update</a>
-          <span v-else-if="hasUpdate" class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning">Update</span>
+            title="查看发行说明"
+          >更新</a>
+          <span v-else-if="hasUpdate" class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-warning/20 text-warning">更新</span>
           <span
             v-if="restartCount >= RESTART_TAG_MIN"
             class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold font-mono rounded bg-error/15 text-error"
@@ -39,7 +39,7 @@
             v-if="failedSchedules.length"
             class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-error/15 text-error"
             :title="failedTitle"
-          >Failed</span>
+          >失败</span>
         </template>
       </span>
       <!-- A failed start, resume or stop shows whatever the tag setting, with
@@ -172,19 +172,19 @@ const failedTitle = computed(() =>
 );
 
 const menuItems = computed<KebabMenuItem[]>(() => [
-  { label: 'Start', icon: 'M6 4l14 8-14 8z', action: 'start', class: 'text-success', show: !isRunning.value && !isPaused.value, disabled: busy.value },
-  { label: 'Resume', icon: 'M6 4l14 8-14 8z', action: 'resume', class: 'text-success', show: isPaused.value, disabled: busy.value },
-  { label: 'Stop', icon: 'M6 6h12v12H6z', action: 'stop', class: 'text-error', show: isRunning.value, disabled: busy.value },
+  { label: '启动', icon: 'M6 4l14 8-14 8z', action: 'start', class: 'text-success', show: !isRunning.value && !isPaused.value, disabled: busy.value },
+  { label: '恢复', icon: 'M6 4l14 8-14 8z', action: 'resume', class: 'text-success', show: isPaused.value, disabled: busy.value },
+  { label: '停止', icon: 'M6 6h12v12H6z', action: 'stop', class: 'text-error', show: isRunning.value, disabled: busy.value },
   // `href` is empty for an unmanaged container, so KebabMenu falls through to
   // its button branch, which is the only one that honours disabled/title.
   {
-    label: 'Edit',
+    label: '编辑',
     icon: 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7|M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
     href: editUrl.value || '',
     disabled: !editUrl.value,
     title: editUrl.value ? undefined : 'Only available for containers that Unraid manages.',
   },
-  { label: 'Logs', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z|M14 2v6h6|M16 13H8|M16 17H8|M10 9H8', action: 'logs', show: !isCompose.value },
+  { label: '日志', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z|M14 2v6h6|M16 13H8|M16 17H8|M10 9H8', action: 'logs', show: !isCompose.value },
 ]);
 
 async function run(action: (id: string) => Promise<boolean>) {

@@ -1,10 +1,10 @@
 <template>
-  <nav aria-label="Compose stacks" class="border border-border rounded bg-bg-card p-1">
+  <nav aria-label="Compose 堆栈" class="border border-border rounded bg-bg-card p-1">
     <div class="flex items-center justify-between px-2 pt-1.5 pb-1">
-      <h2 class="text-[11px] font-bold uppercase text-text-secondary">Compose stacks</h2>
+      <h2 class="text-[11px] font-bold uppercase text-text-secondary">Compose 堆栈</h2>
       <span class="text-[11px] text-text-secondary">{{ rows.length }}</span>
     </div>
-    <p v-if="rows.length === 0" class="px-2 py-2 text-xs text-text-secondary">No compose stacks</p>
+    <p v-if="rows.length === 0" class="px-2 py-2 text-xs text-text-secondary">无 Compose 堆栈</p>
     <!-- The row is a div so the selected and hover tints apply: the button
          reset strips background and padding from a plain <button> (DESIGN.md
          §11), so the button carries no box of its own and its padding lives on
@@ -81,7 +81,7 @@ const composeStore = useComposeStore();
 const dockerStore = useDockerStore();
 const folderStore = useFolderStore();
 
-/** How many folder names "In …" lists before it shortens to "+N more". */
+/** How many folder names "In …" lists before it shortens to "+N 更多". */
 const MAX_LISTED_FOLDERS = 2;
 
 function isSelected(project: string): boolean {
@@ -107,7 +107,7 @@ const rows = computed<StackRow[]>(() => {
 });
 
 function locationText(members: Container[]): string {
-  if (members.length === 0) return 'Not created';
+  if (members.length === 0) return '未创建';
   const names: string[] = [];
   for (const c of members) {
     const name = folderStore.folderByContainerName.get(c.name)?.name ?? 'Unfoldered';
@@ -139,7 +139,7 @@ function menuItems(row: StackRow): KebabMenuItem[] {
     reason,
     pluginInstalled: composeStore.composePluginInstalled,
   });
-  items.push({ label: 'Schedules', icon: STOPWATCH_ICON, action: 'schedules' });
+  items.push({ label: '计划', icon: STOPWATCH_ICON, action: 'schedules' });
   return [
     ...byLabel(items),
     { divider: true },

@@ -31,7 +31,7 @@ const copy = computed(() => {
   const { project, action } = props.pending;
   if (action === 'recompose') {
     return {
-      title: 'Recompose',
+      title: '重建',
       message: `Pull the latest images for "${project}" and rebuild every container in it? Each container is deleted and created again from the compose file, even if nothing changed. Volumes and the compose file are kept. Anything a container wrote outside a volume is lost.`,
     };
   }

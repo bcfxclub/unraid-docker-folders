@@ -1,28 +1,28 @@
 <template>
   <BaseModal v-if="!inIframe" :is-open="isOpen" max-width="500px" @close="handleOverlayClick">
       <div class="flex justify-between items-center p-4 sm:p-6 border-b border-border">
-        <h2 class="text-2xl font-semibold">{{ isEditing ? 'Edit Folder' : 'Create Folder' }}</h2>
-        <button class="flex items-center justify-center w-8 h-8 rounded-full border-none bg-transparent cursor-pointer text-text-secondary hover:text-text hover:bg-border transition" @click="$emit('close')" aria-label="Close">
+        <h2 class="text-2xl font-semibold">{{ isEditing ? '编辑文件夹' : '创建文件夹' }}</h2>
+        <button class="flex items-center justify-center w-8 h-8 rounded-full border-none bg-transparent cursor-pointer text-text-secondary hover:text-text hover:bg-border transition" @click="$emit('close')" aria-label="关闭">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
 
       <form @submit.prevent="handleSubmit" class="p-4 sm:p-6">
         <div class="mb-6">
-          <label for="folder-name" class="block mb-1 font-medium text-text">Folder Name *</label>
+          <label for="folder-name" class="block mb-1 font-medium text-text">文件夹名称 *</label>
           <input
             id="folder-name"
             v-model="formData.name"
             type="text"
             required
-            placeholder="Enter folder name"
+            placeholder="输入文件夹名称"
             class="w-full py-2 px-4 border border-input-border rounded bg-input-bg text-base font-[inherit] focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
             autofocus
           />
         </div>
 
         <div class="mb-6">
-          <label for="folder-color" class="block mb-1 font-medium text-text">Color</label>
+          <label for="folder-color" class="block mb-1 font-medium text-text">颜色</label>
           <div class="flex gap-2 items-center">
             <input id="folder-color" v-model="formData.color" type="color" class="w-[60px] h-10 border border-input-border rounded cursor-pointer" />
             <input
@@ -33,12 +33,12 @@
               pattern="^#[0-9A-Fa-f]{6}$"
             />
           </div>
-          <span class="block mt-1 text-sm text-text-secondary">Choose a color for the folder's left border</span>
+          <span class="block mt-1 text-sm text-text-secondary">选择文件夹左边框颜色</span>
         </div>
 
         <div v-if="availableContainers.length > 0" class="mb-6">
-          <label class="block mb-1 font-medium text-text">Containers</label>
-          <span class="block mb-2 text-sm text-text-secondary">Select which containers belong to this folder</span>
+          <label class="block mb-1 font-medium text-text">容器</label>
+          <span class="block mb-2 text-sm text-text-secondary">选择属于此文件夹的容器</span>
           <div class="max-h-[200px] overflow-auto border border-border rounded bg-bg">
             <label
               v-for="container in availableContainers"
@@ -63,8 +63,8 @@
         </div>
 
         <div class="flex justify-end gap-2 pt-6 border-t border-border">
-          <button type="button" @click="$emit('close')" class="nav-btn">Cancel</button>
-          <button type="submit" class="nav-btn active" :class="{ 'opacity-50 cursor-not-allowed': !formData.name }" :disabled="!formData.name">{{ isEditing ? 'Save Changes' : 'Create Folder' }}</button>
+          <button type="button" @click="$emit('close')" class="nav-btn">取消</button>
+          <button type="submit" class="nav-btn active" :class="{ 'opacity-50 cursor-not-allowed': !formData.name }" :disabled="!formData.name">{{ isEditing ? 'Save Changes' : '创建文件夹' }}</button>
         </div>
       </form>
   </BaseModal>
@@ -106,7 +106,7 @@ const formData = ref({
 // the folder's current members. Seeding a Set up front would go stale: the watch
 // below only fires on [isOpen, folder], so a docker list that arrives afterwards
 // would leave every existing member rendered unchecked — which now reads as
-// "remove them all".
+// "全部移除".
 const selectedContainerIds = ref<Set<string> | null>(null);
 
 const existingNames = computed(
@@ -204,32 +204,32 @@ function openParent() {
 
   parentModal.open({
     kind: 'folder-edit',
-    title: isEditing.value ? 'Edit Folder' : 'Create Folder',
+    title: isEditing.value ? '编辑文件夹' : '创建文件夹',
     size: 'md',
     fields: [
       {
         type: 'input',
         id: 'name',
-        label: 'Folder Name *',
+        label: '文件夹名称 *',
         value: initialName,
-        placeholder: 'Enter folder name',
+        placeholder: '输入文件夹名称',
         required: true,
         autofocus: true,
       },
       {
         type: 'color',
         id: 'color',
-        label: 'Color',
+        label: '颜色',
         value: initialColor,
-        caption: "Choose a color for the folder's left border",
+        caption: "选择文件夹左边框颜色",
       },
       ...(availableContainers.value.length > 0
         ? [
             {
               type: 'checkbox-list' as const,
               id: 'containers',
-              label: 'Containers',
-              caption: 'Select which containers belong to this folder',
+              label: '容器',
+              caption: '选择属于此文件夹的容器',
               items: availableContainers.value.map((c) => ({
                 id: c.id,
                 label: c.name,
@@ -242,10 +242,10 @@ function openParent() {
         : []),
     ],
     actions: [
-      { id: 'cancel', label: 'Cancel', variant: 'default' },
+      { id: 'cancel', label: '取消', variant: 'default' },
       {
         id: 'save',
-        label: isEditing.value ? 'Save Changes' : 'Create Folder',
+        label: isEditing.value ? 'Save Changes' : '创建文件夹',
         variant: 'primary',
         disabledWhenEmpty: 'name',
       },

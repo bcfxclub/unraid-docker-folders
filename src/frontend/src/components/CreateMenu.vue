@@ -12,8 +12,8 @@
   <div ref="menuRef" class="relative">
     <button
       class="nav-btn active"
-      title="Create"
-      aria-label="Create"
+      title="创建"
+      aria-label="创建"
       aria-haspopup="menu"
       :aria-expanded="menuOpen"
       @click.stop="menuOpen = !menuOpen"
@@ -58,7 +58,7 @@
         @click="menuOpen = false"
       >
         <IconContainer :size="14" />
-        Container
+        容器
       </a>
       <button
         role="menuitem"
@@ -69,7 +69,7 @@
         @click="select('stack')"
       >
         <IconStack :size="14" />
-        Stack
+        堆栈
       </button>
       <button
         role="menuitem"
@@ -77,7 +77,7 @@
         @click="select('folder')"
       >
         <IconFolder :size="14" />
-        Folder
+        文件夹
       </button>
     </div>
   </div>
@@ -121,7 +121,7 @@ function onClickOutside(e: MouseEvent) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') menuOpen.value = false;
+  if (e.key === 'Esc') menuOpen.value = false;
 }
 
 onMounted(() => {

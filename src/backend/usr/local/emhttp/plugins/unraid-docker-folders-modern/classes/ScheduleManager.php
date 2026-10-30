@@ -466,7 +466,7 @@ class ScheduleManager
       'success' => true,
       'schedule_id' => (int) $schedule['id'],
       'status' => 'started',
-      'message' => 'Started in the background',
+      'message' => '已在后台启动',
       'name' => $schedule['name'],
       'target_type' => $schedule['target_type'],
       'target_id' => $schedule['target_id'],
@@ -556,7 +556,7 @@ class ScheduleManager
   {
     $schedule = $this->db->fetchOne('SELECT * FROM schedules WHERE id = ?', [$id]);
     if (!$schedule) {
-      return ['success' => false, 'message' => 'Schedule not found'];
+      return ['success' => false, 'message' => '未找到计划'];
     }
 
     // The runner names the schedule and its target in a failure notification.
@@ -578,7 +578,7 @@ class ScheduleManager
       return [
         'success' => false,
         'schedule_id' => $id,
-        'message' => 'Cannot open the schedule lock file in /tmp',
+        'message' => '无法在 /tmp 中打开计划锁文件',
       ] + $about;
     }
     if (!flock($lock, LOCK_EX | LOCK_NB)) {
@@ -587,7 +587,7 @@ class ScheduleManager
         'success' => false,
         'schedule_id' => $id,
         'status' => 'busy',
-        'message' => 'This schedule is already running',
+        'message' => '该计划已在运行中',
       ] + $about;
     }
 
@@ -851,11 +851,11 @@ class ScheduleManager
         $result = $compose->stackStop($projectName);
         break;
       case 'pause':
-        return ['success' => false, 'message' => 'Pause is not supported for compose stacks'];
+        return ['success' => false, 'message' => 'Compose 堆栈不支持暂停'];
       case 'resume':
-        return ['success' => false, 'message' => 'Resume is not supported for compose stacks'];
+        return ['success' => false, 'message' => 'Compose 堆栈不支持恢复'];
       case 'update':
-        return ['success' => false, 'message' => 'Update is not supported for compose stacks'];
+        return ['success' => false, 'message' => 'Compose 堆栈不支持更新'];
       case 'restart':
         $result = $compose->stackRestart($projectName);
         break;
@@ -878,7 +878,7 @@ class ScheduleManager
 
     if (PostgresBackup::modeOf($config) === PostgresBackup::MODE_POSTGRES) {
       if (PostgresBackup::validateConfig($config, $schedule['target_type'], false) !== null) {
-        return ['success' => false, 'message' => 'Invalid Postgres backup configuration'];
+        return ['success' => false, 'message' => 'Postgres 备份配置无效'];
       }
       return $backup->backupPostgres(
         $schedule['target_type'],
@@ -890,7 +890,7 @@ class ScheduleManager
     }
 
     if (!$config || empty($config['paths'])) {
-      return ['success' => false, 'message' => 'Invalid backup configuration'];
+      return ['success' => false, 'message' => '备份配置无效'];
     }
 
     // Coerced to one of three known strings. It never reaches a shell, but an

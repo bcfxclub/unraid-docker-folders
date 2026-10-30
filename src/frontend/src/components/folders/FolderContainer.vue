@@ -49,8 +49,8 @@
           v-else-if="folderContainers.length === 0 && !folder.compose_project"
           class="text-center py-6 text-text-secondary border-2 border-dashed border-border rounded mb-2"
         >
-          <p>No containers in this folder</p>
-          <p class="text-sm italic">Drag containers here to organize them</p>
+          <p>此文件夹中无容器</p>
+          <p class="text-sm italic">将容器拖到此处进行整理</p>
         </div>
       </div>
     </div>

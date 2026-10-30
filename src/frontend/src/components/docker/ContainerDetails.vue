@@ -2,7 +2,7 @@
   <div class="space-y-3 text-xs">
     <!-- Row 1: resource usage, full width -->
     <div class="space-y-1.5 min-w-0">
-      <p class="text-text-secondary text-xs">Resource Usage</p>
+      <p class="text-text-secondary text-xs">资源占用</p>
       <template v-if="isRunning && containerStats">
         <StatsBar label="CPU" :percent="containerStats.cpuPercent" size="wide" />
         <StatsBar label="Memory" :percent="containerStats.memoryPercent" size="wide" :formatted-value="`${formatBytes(containerStats.memoryUsage)} / ${formatBytes(containerStats.memoryLimit)} (${formatPercent(containerStats.memoryPercent)})`" />
@@ -26,17 +26,17 @@
         :class="{ 'md:col-span-2': !hasStatsColumn }"
       >
         <template v-if="container.image">
-          <span class="text-text-secondary shrink-0">Image</span>
+          <span class="text-text-secondary shrink-0">镜像</span>
           <span class="text-text font-mono truncate">
             <ImageLink :image="container.image" :href="imageLink" />
           </span>
         </template>
         <template v-if="networkInfo">
-          <span class="text-text-secondary shrink-0">Network</span>
+          <span class="text-text-secondary shrink-0">网络</span>
           <span class="text-text font-mono truncate">{{ networkInfo.name }} {{ networkInfo.ip }}</span>
         </template>
         <template v-if="displayPorts.length">
-          <span class="text-text-secondary shrink-0">Ports</span>
+          <span class="text-text-secondary shrink-0">端口</span>
           <div class="font-mono space-y-0.5 min-w-0">
             <p v-for="(port, i) in displayPorts" :key="i" class="truncate" :class="port.conflictWith ? 'text-error' : 'text-text'">
               {{ port.text }}<span v-if="port.conflictWith"> — conflicts with {{ port.conflictWith.join(', ') }}</span>
@@ -60,7 +60,7 @@
           <span class="text-text font-mono truncate" :title="container.command">{{ container.command }}</span>
         </template>
         <template v-if="displayLabels.length">
-          <span class="text-text-secondary shrink-0">Labels</span>
+          <span class="text-text-secondary shrink-0">标签</span>
           <div class="text-text font-mono space-y-0.5 min-w-0 overflow-x-auto">
             <p v-for="label in displayLabels" :key="label.key" class="text-[11px] whitespace-nowrap" :title="`${label.key}=${label.value}`">
               <span class="text-text">{{ label.key }}</span>=<span class="text-text-secondary">{{ label.value }}</span>
@@ -100,12 +100,12 @@
          stays in the ScheduleList modal behind the kebab. -->
     <div v-if="containerSchedules.length" class="pt-2 border-t border-border">
       <div class="flex items-center justify-between gap-2 mb-1">
-        <p class="text-text-secondary text-xs">Schedules</p>
+        <p class="text-text-secondary text-xs">计划</p>
         <!-- Manage gates every mutation behind an explicit mode, so a stray
              click on a card can never change what runs on a container. -->
         <div class="flex items-center gap-2 shrink-0">
           <template v-if="manageMode">
-            <button class="nav-btn" :disabled="applying" :class="{ 'opacity-50 cursor-not-allowed': applying }" @click.stop="cancelManage">Cancel</button>
+            <button class="nav-btn" :disabled="applying" :class="{ 'opacity-50 cursor-not-allowed': applying }" @click.stop="cancelManage">取消</button>
             <button class="nav-btn active" :disabled="applying" :class="{ 'opacity-50 cursor-not-allowed': applying }" @click.stop="onDone">
               {{ applying ? 'Saving' : 'Done' }}
             </button>
@@ -157,7 +157,7 @@
                 :disabled="stagedDeletes.has(schedule.id)"
                 :class="{ 'opacity-50 cursor-not-allowed': stagedDeletes.has(schedule.id) }"
                 :aria-label="`Edit ${schedule.name}`"
-                title="Edit"
+                title="编辑"
                 @click.stop="editingId = schedule.id"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
@@ -184,7 +184,7 @@
     <!-- Row 4: inline logs -->
     <div v-if="showLogs" class="pt-2 border-t border-border">
       <div class="flex items-center justify-between mb-1">
-        <p class="text-text-secondary text-xs">Logs</p>
+        <p class="text-text-secondary text-xs">日志</p>
         <button
           class="icon-btn text-text-secondary hover:text-text"
           aria-label="Refresh logs"
@@ -242,7 +242,7 @@
       :is-open="confirmingDelete"
       title="Delete Schedules"
       :message="deleteConfirmMessage"
-      confirm-label="Delete"
+      confirm-label="删除"
       variant="danger"
       @confirm="applyManage"
       @cancel="confirmingDelete = false"
@@ -393,7 +393,7 @@ async function applyManage() {
     if (updates.length > 0) {
       const result = await scheduleStore.bulkSetEnabled(updates);
       if (!result.success) {
-        manageError.value = result.error ?? 'Failed to update schedules';
+        manageError.value = result.error ?? '更新计划失败';
         return;
       }
     }
@@ -402,7 +402,7 @@ async function applyManage() {
     if (ids.length > 0) {
       const result = await scheduleStore.bulkDelete(ids);
       if (!result.success) {
-        manageError.value = result.error ?? 'Failed to delete schedules';
+        manageError.value = result.error ?? '删除计划失败';
         return;
       }
     }

@@ -122,7 +122,7 @@ async function gql<T>(
   } catch {
     // An abort lands here too, which is the behavior we want: a timed-out
     // probe is a failed probe.
-    return { ok: false, status: 0, data: {} as T, error: 'The Unraid API did not respond.' };
+    return { ok: false, status: 0, data: {} as T, error: 'Unraid API 未响应。' };
   } finally {
     if (timer !== null) clearTimeout(timer);
   }
@@ -137,7 +137,7 @@ async function gql<T>(
       ok: false,
       status: response.status,
       data: {} as T,
-      error: `The Unraid API answered HTTP ${response.status}.`,
+      error: `Unraid API 返回 HTTP ${response.status} 状态。`,
     };
   }
 
@@ -146,7 +146,7 @@ async function gql<T>(
       ok: false,
       status: response.status,
       data: {} as T,
-      error: body.errors?.[0]?.message ?? 'GraphQL request failed',
+      error: body.errors?.[0]?.message ?? 'GraphQL 请求失败',
     };
   }
 
@@ -325,10 +325,10 @@ export async function probeGraphqlBackend(): Promise<{ ok: boolean; reason: stri
   }>(PROBE_QUERY, undefined, PROBE_TIMEOUT_MS);
 
   if (!ok) {
-    return { ok: false, reason: error || 'The GraphQL probe failed.' };
+    return { ok: false, reason: error || 'GraphQL 探测失败。' };
   }
   if (!data.dockerFoldersInfo.databaseReadable) {
-    return { ok: false, reason: 'The plugin cannot read its database.' };
+    return { ok: false, reason: '插件无法读取其数据库。' };
   }
   return { ok: true, reason: `plugin ${data.dockerFoldersInfo.version}` };
 }
@@ -1417,7 +1417,7 @@ export const graphqlBackend: Backend = {
         // `api/compose.php` 500s when `installComposeBinary()` reports
         // failure; the mutation answers the same failure without throwing, so
         // convert it here to keep the store's `!ok` branch working.
-        const message = install.error ?? 'Failed to install Docker Compose';
+        const message = install.error ?? '安装 Docker Compose 失败';
         return { ok: false, status: result.status, data: { error: true, message }, error: message };
       }
       return {
@@ -1573,7 +1573,7 @@ export const graphqlBackend: Backend = {
       if (!stack.success) {
         // `api/compose.php` 400s when `createStack()` reports failure; the
         // mutation answers the same failure without throwing, so convert it.
-        const message = stack.error ?? 'Failed to create stack';
+        const message = stack.error ?? '创建堆栈失败';
         return { ok: false, status: result.status, data: { error: true, message }, error: message };
       }
       return { ok: true, status: result.status, data: { success: true, project_name: stack.projectName } };

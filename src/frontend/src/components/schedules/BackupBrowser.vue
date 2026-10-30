@@ -4,7 +4,7 @@
       <h2 class="text-xl font-semibold text-text m-0 truncate">Backups: {{ targetId }}</h2>
       <button
         class="icon-btn icon-btn-round shrink-0 text-text-secondary hover:text-text"
-        aria-label="Close"
+        aria-label="关闭"
         @click="$emit('close')"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -15,7 +15,7 @@
       <div v-if="loading" class="text-sm text-text-secondary py-4 text-center">Loading...</div>
 
       <div v-else-if="!backups.length" class="text-sm text-text-secondary py-4 text-center">
-        No backups found
+        未找到备份
       </div>
 
       <div v-else class="flex flex-col gap-1 max-h-[400px] overflow-auto">
@@ -32,8 +32,8 @@
           </div>
           <button
             class="icon-btn shrink-0 text-text-secondary hover:text-error"
-            aria-label="Delete backup"
-            title="Delete backup"
+            aria-label="删除备份"
+            title="删除备份"
             @click="confirmDeletePath = backup.path"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
@@ -44,14 +44,14 @@
     </div>
 
     <div class="flex justify-end p-4 sm:p-6 pt-4 border-t border-border">
-      <button class="nav-btn" @click="$emit('close')">Close</button>
+      <button class="nav-btn" @click="$emit('close')">关闭</button>
     </div>
 
     <ConfirmModal
       :is-open="!!confirmDeletePath"
-      title="Delete Backup"
+      title="删除备份"
       message="Are you sure you want to delete this backup file?"
-      confirm-label="Delete"
+      confirm-label="删除"
       variant="danger"
       @confirm="doDelete"
       @cancel="confirmDeletePath = ''"

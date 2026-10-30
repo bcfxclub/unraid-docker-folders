@@ -55,7 +55,7 @@ export const useScheduleStore = defineStore('schedules', () => {
       schedules.value = data.schedules || [];
       runner.value = data.runner || null;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to fetch schedules';
+      error.value = e instanceof Error ? e.message : '获取计划失败';
       console.error('Error fetching schedules:', e);
     } finally {
       loading.value = false;
@@ -66,12 +66,12 @@ export const useScheduleStore = defineStore('schedules', () => {
     try {
       const { ok, data: result } = await useBackend().schedules.create(data);
       if (!ok) {
-        return { success: false, error: result.message || 'Failed to create schedule' };
+        return { success: false, error: result.message || '创建计划失败' };
       }
       await fetchSchedules(true);
       return { success: true, id: result.id };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to create schedule';
+      const msg = e instanceof Error ? e.message : '创建计划失败';
       return { success: false, error: msg };
     }
   }
@@ -144,7 +144,7 @@ export const useScheduleStore = defineStore('schedules', () => {
       await fetchSchedules(true);
       return { success: true };
     } catch (e) {
-      return { success: false, error: e instanceof Error ? e.message : 'Failed to update schedules' };
+      return { success: false, error: e instanceof Error ? e.message : '更新计划失败' };
     }
   }
 
@@ -160,7 +160,7 @@ export const useScheduleStore = defineStore('schedules', () => {
       await fetchSchedules(true);
       return { success: true };
     } catch (e) {
-      return { success: false, error: e instanceof Error ? e.message : 'Failed to delete schedules' };
+      return { success: false, error: e instanceof Error ? e.message : '删除计划失败' };
     }
   }
 

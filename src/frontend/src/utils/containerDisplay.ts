@@ -21,7 +21,7 @@ export interface ContainerStatus {
 }
 
 /**
- * The exit code in Docker's status line, "Exited (1) 12 hours ago" or
+ * The exit code in Docker's status line, "已退出（1）12 小时前" or
  * "Restarting (1) 5 seconds ago", or null when it has none. That line is the
  * only place the container list carries the code: /containers/json has no
  * ExitCode, and the inspect facts are cached per id, so they would go stale
@@ -78,7 +78,7 @@ function crashKind(container: CrashInput): { code: number | null; oom?: true; gh
 }
 
 /**
- * Kept in view while "Hide stopped" is on: running, paused, or crashed. A
+ * Kept in view while "隐藏已停止" is on: running, paused, or crashed. A
  * crash is what the user most needs to see, so hiding it with the stopped
  * containers would defeat marking it.
  */
@@ -95,7 +95,7 @@ export function containerStatus(container: StatusInput, distinguishHealthy: bool
   const ok = (halo: string, tooltip: string): ContainerStatus => ({ halo, tooltip, crashed: false });
   const crash = crashKind(container);
   if (crash) {
-    const verb = state === 'restarting' ? 'Crashing, restarting' : state === 'dead' ? 'Dead' : 'Crashed';
+    const verb = state === 'restarting' ? 'Crashing, restarting' : state === 'dead' ? 'Dead' : '已崩溃';
     const detail = crash.ghost
       ? ', though Docker still lists it as running'
       : crash.oom
@@ -114,9 +114,9 @@ export function containerStatus(container: StatusInput, distinguishHealthy: bool
       : ok('status-halo-info', 'Running (no health check)');
   }
   if (state === 'paused') return ok('status-halo-warning', 'Paused');
-  if (state === 'exited') return ok('status-halo-error', 'Exited');
-  if (state === 'stopped') return ok('status-halo-error', 'Stopped');
-  if (state === 'created') return ok('status-halo-muted', 'Created');
+  if (state === 'exited') return ok('status-halo-error', '已退出');
+  if (state === 'stopped') return ok('status-halo-error', '已停止');
+  if (state === 'created') return ok('status-halo-muted', '已创建');
   return ok('status-halo-muted', state.charAt(0).toUpperCase() + state.slice(1));
 }
 
@@ -157,7 +157,7 @@ export function isRunningContainer(container: Pick<Container, 'state' | 'process
   return container.state === 'running' && !container.processExited;
 }
 
-/** Running or paused. "Hide stopped" keeps these, because both are alive. */
+/** Running or paused. "隐藏已停止" keeps these, because both are alive. */
 export function isAliveContainer(container?: Pick<Container, 'state'>): boolean {
   return container?.state === 'running' || container?.state === 'paused';
 }

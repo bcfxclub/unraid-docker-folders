@@ -146,7 +146,7 @@ function recreateTargets($dockerClient, $image, $onlyContainerIds)
     }
   } catch (\Throwable $e) {
     logUpdate("RECREATE ERROR {$image}: " . $e->getMessage());
-    sendSSE('recreate_error', ['container' => '', 'message' => 'Recreate failed: ' . $e->getMessage()]);
+    sendSSE('recreate_error', ['container' => '', 'message' => '重建失败：' . $e->getMessage()]);
   }
 }
 
@@ -155,14 +155,14 @@ try {
 
   if ($recreateOnly) {
     logUpdate("RECREATE ONLY {$image}");
-    sendSSE('status', ['message' => 'Recreating...']);
+    sendSSE('status', ['message' => '正在重建…']);
     recreateTargets($dockerClient, $image, $onlyContainerIds);
     try {
       WebSocketPublisher::publish('container', 'updated');
     } catch (\Throwable $e) {
       logUpdate("RECREATE WARN {$image}: WebSocket publish failed: " . $e->getMessage());
     }
-    sendSSE('complete', ['message' => 'Recreate complete', 'image' => $image]);
+    sendSSE('complete', ['message' => '重建完成', 'image' => $image]);
     sendSSE('done', ['finished' => true]);
     exit;
   }
@@ -224,11 +224,11 @@ try {
       recreateTargets($dockerClient, $image, $onlyContainerIds);
     }
 
-    sendSSE('complete', ['message' => 'Pull complete', 'image' => $image]);
+    sendSSE('complete', ['message' => '拉取完成', 'image' => $image]);
   } else {
     $reason = $dockerClient->getLastError();
     logUpdate("PULL FAIL {$image}" . ($reason !== '' ? ": {$reason}" : ''));
-    sendSSE('error', ['message' => 'Pull failed' . ($reason !== '' ? ": {$reason}" : '')]);
+    sendSSE('error', ['message' => '拉取失败' . ($reason !== '' ? ": {$reason}" : '')]);
   }
 } catch (\Throwable $e) {
   logUpdate("PULL ERROR {$image}: " . $e->getMessage());

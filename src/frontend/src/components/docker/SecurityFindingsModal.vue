@@ -20,7 +20,7 @@
            per-container list hard to scan. -->
       <section v-if="folderRows.length > 0" class="mb-5">
         <h3 class="text-[10px] font-semibold uppercase tracking-wide text-text-secondary border-b border-border pb-1 mb-2">
-          Shared folder conflicts
+          共享文件夹冲突
         </h3>
 
         <div
@@ -47,9 +47,9 @@
             <button
               type="button"
               class="nav-btn shrink-0"
-              title="Accept this folder and hide it, for every container on it"
+              title="接受此文件夹并隐藏它，以及其中的所有容器"
               @click.stop="dismissConflict(conflict)"
-            >Dismiss</button>
+            >忽略</button>
           </div>
 
           <template v-if="isOpenConflict(conflict.path)">
@@ -141,14 +141,14 @@
             <span
               class="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded"
               :class="finding.severity === 'critical' ? 'bg-error/15 text-error' : 'bg-warning/20 text-warning'"
-            >{{ finding.severity === 'critical' ? 'Critical' : 'Warning' }}</span>
+            >{{ finding.severity === 'critical' ? '严重' : 'Warning' }}</span>
             <p class="flex-1 text-sm font-semibold text-text min-w-0">{{ finding.title }}</p>
             <button
               type="button"
               class="nav-btn shrink-0"
               :title="showDismissed ? 'Show this finding again' : 'Accept this setting and hide the finding'"
               @click.stop="toggle(row.container.name, finding.type)"
-            >{{ showDismissed ? 'Restore' : 'Dismiss' }}</button>
+            >{{ showDismissed ? 'Restore' : '忽略' }}</button>
           </div>
 
           <template v-if="isOpenFinding(row.container.id, finding.type)">
@@ -227,7 +227,7 @@
         Show dismissed
       </label>
       <span class="flex-1"></span>
-      <button type="button" class="nav-btn" @click="$emit('close')">Close</button>
+      <button type="button" class="nav-btn" @click="$emit('close')">关闭</button>
     </div>
   </BaseModal>
 </template>

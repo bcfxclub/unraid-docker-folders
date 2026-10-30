@@ -31,7 +31,7 @@
       </div>
     </div>
     <div class="flex justify-end gap-2 p-4 sm:p-6 pt-4">
-      <button ref="cancelBtn" type="button" @click="$emit('cancel')" class="nav-btn">Cancel</button>
+      <button ref="cancelBtn" type="button" @click="$emit('cancel')" class="nav-btn">取消</button>
       <button ref="confirmBtn" type="button" @click="$emit('confirm', checked)" class="nav-btn" :class="variant === 'danger' ? 'warning' : 'active'">{{ confirmLabel }}</button>
     </div>
   </BaseModal>
@@ -97,7 +97,7 @@ function openParent() {
         : []),
     ],
     actions: [
-      { id: 'cancel', label: 'Cancel', variant: 'default' },
+      { id: 'cancel', label: '取消', variant: 'default' },
       { id: 'confirm', label: props.confirmLabel, variant: props.variant === 'danger' ? 'danger' : 'primary' },
     ],
   });

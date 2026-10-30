@@ -23,7 +23,7 @@ function stateRank(state: string | undefined): number {
 
 /**
  * The highest-ranked state in a group (running before paused before exited),
- * so a folder sorts under "Status" by its most active container.
+ * so a folder sorts under "状态" by its most active container.
  */
 export function bestState(states: Array<string | undefined>): string | undefined {
   let best: string | undefined;
@@ -77,7 +77,7 @@ export interface SortableFields {
 /**
  * The mode a folder's contents actually render in. A folder left on `manual`
  * follows the toolbar (global) sort; any other folder mode is an explicit
- * override. So picking "Status" in the toolbar also orders every folder that
+ * override. So picking "状态" in the toolbar also orders every folder that
  * the user did not set to its own mode.
  */
 export function effectiveSortMode(folderMode: SortMode, globalMode: SortMode): SortMode {

@@ -3,8 +3,8 @@ export type TargetType = 'container' | 'stack';
 export type RunStatus = 'success' | 'error' | 'skipped';
 
 export const SCHEDULE_ACTION_LABELS: Record<ScheduleAction, string> = {
-  start: 'Start', stop: 'Stop', pause: 'Pause', resume: 'Resume', restart: 'Restart', backup: 'Backup',
-  update: 'Update',
+  start: '启动', stop: '停止', pause: '暂停', resume: '恢复', restart: '重启', backup: '备份',
+  update: '更新',
 };
 
 export interface BackupServiceConfig {
@@ -166,9 +166,9 @@ export interface BackupEntry {
 export type CronPreset = 'every_hour' | 'daily_3am' | 'daily_custom' | 'weekly_custom' | 'custom';
 
 export const CRON_PRESETS: Record<CronPreset, { label: string; expression: string | null }> = {
-  every_hour: { label: 'Every hour', expression: '0 * * * *' },
-  daily_3am: { label: 'Daily at 3:00 AM', expression: '0 3 * * *' },
-  daily_custom: { label: 'Daily at...', expression: null },
+  every_hour: { label: '每小时', expression: '0 * * * *' },
+  daily_3am: { label: '每日凌晨 3:00', expression: '0 3 * * *' },
+  daily_custom: { label: '每日…', expression: null },
   weekly_custom: { label: 'Weekly on...', expression: null },
   custom: { label: 'Custom cron', expression: null },
 };
