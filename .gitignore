@@ -59,12 +59,15 @@ composer.lock
 graphify-out/
 
 # Localization build scripts and temp files
-work/*.py
-work/*.txt
-work/*.json
+work/extract*.py
+work/apply*.py
+work/scan_backtick.py
+work/strings_*.txt
+work/strings_*.json
 work/*.b64
 work/*.bak
 work/*.md5
+work/*.log
 
 # Generated plugin package (will be rebuilt by CI)
 unraid-docker-folders-modern.plg
